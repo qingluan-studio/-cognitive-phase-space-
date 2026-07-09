@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 
 from ..core.types import GovernanceConfig, OptimizationPath
 from ..core.controller import ClosedLoopController
-from ..engine.t6_invariant import InvariantEngine
+from ..engine.t6_invariant import InvariantEngine, InvariantTheoretical
 from ..engine.t1_mirror import CognitiveIsomorphismEngine
 from ..engine.t2_prism import HyperGraphCollapseEngine
 from ..engine.t3_geodesic import GeodesicNavigationEngine
@@ -32,6 +32,7 @@ from ..engine.t5_genesis import GenesisEngine
 # ═══════════════════════════════════════════════════════════════════
 
 invariant_engine = InvariantEngine()
+invariant_theoretical = InvariantTheoretical()
 t1_engine = CognitiveIsomorphismEngine()
 t2_engine = HyperGraphCollapseEngine()
 t3_engine = GeodesicNavigationEngine()
@@ -40,10 +41,21 @@ t5_engine = GenesisEngine()
 
 governance_config = GovernanceConfig()
 
+
+def _make_t1_optimizer():
+    engine = CognitiveIsomorphismEngine()
+    def optimize(text: str) -> str:
+        return engine.mirror_generate(text, style_hint="academic")
+    return optimize
+
+
 controller = ClosedLoopController(
     evaluator=invariant_engine,
-    optimizers={},
+    optimizers={
+        OptimizationPath.T1_COGNITIVE_ISOMORPHISM: _make_t1_optimizer(),
+    },
     config=governance_config,
+    t1_engine=t1_engine,
 )
 
 # ═══════════════════════════════════════════════════════════════════
@@ -165,18 +177,7 @@ async def evaluate(req: EvaluateRequest):
 
 @app.post("/api/v1/optimize", response_model=OptimizeResponse)
 async def optimize(req: OptimizeRequest):
-    config = GovernanceConfig(
-        auto_optimize_threshold=req.threshold or 0.7,
-        optimization_paths_enabled=[OptimizationPath.T1_COGNITIVE_ISOMORPHISM],
-    )
-    ctrl = ClosedLoopController(
-        evaluator=invariant_engine,
-        optimizers={
-            OptimizationPath.T1_COGNITIVE_ISOMORPHISM: lambda t: t,
-        },
-        config=config,
-    )
-    result = ctrl.optimize(req.text, target_threshold=req.threshold)
+    result = controller.optimize(req.text, target_threshold=req.threshold)
 
     return OptimizeResponse(
         original_score=result.original.scores.composite if result.original.scores else 0.0,

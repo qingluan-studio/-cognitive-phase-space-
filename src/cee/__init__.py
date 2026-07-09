@@ -31,7 +31,7 @@ from cee.core.types import (
     EngineStatus,
 )
 
-from cee.engine.t6_invariant import InvariantEngine
+from cee.engine.t6_invariant import InvariantEngine, InvariantTheoretical
 from cee.engine.t1_mirror import CognitiveIsomorphismEngine
 from cee.engine.t2_prism import HyperGraphCollapseEngine
 from cee.engine.t3_geodesic import GeodesicNavigationEngine
@@ -43,6 +43,7 @@ from cee.sdk.client import CEEClient, CEEConfig
 __version__ = "1.0.0"
 __all__ = [
     "InvariantEngine",
+    "InvariantTheoretical",
     "CognitiveIsomorphismEngine",
     "HyperGraphCollapseEngine",
     "GeodesicNavigationEngine",
