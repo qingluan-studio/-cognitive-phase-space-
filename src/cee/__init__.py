@@ -159,7 +159,7 @@ from cee.learning.shadow_ops import (
     OptimizationAdvice, OptimizationDimension,
 )
 
-__version__ = "2.2.0"
+__version__ = "4.0.0"
 __all__ = [
     # T1-T6 Engines
     "InvariantEngine", "InvariantTheoretical",
