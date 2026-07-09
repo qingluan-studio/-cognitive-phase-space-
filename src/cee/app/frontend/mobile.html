@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>CEE — 认知涌现引擎 AI</title>
+<title>空间 — 认知涌现 AI</title>
 <style>
 :root {
   --bg-primary: #111111;
@@ -321,8 +321,8 @@ main{flex:1;overflow:hidden;position:relative}
 <!-- Header -->
 <div class="header">
   <div class="header-left">
-    <div class="header-logo">C</div>
-    <div class="header-title">CEE</div>
+    <div class="header-logo">空</div>
+    <div class="header-title">空间</div>
   </div>
   <div class="header-right">
     <button class="btn-deep" id="deepToggle" onclick="toggleDeepThink()">深度思考</button>
@@ -333,12 +333,12 @@ main{flex:1;overflow:hidden;position:relative}
   <!-- Chat Page -->
   <div class="page active" id="chat-page">
     <div class="welcome" id="welcome">
-      <div class="welcome-icon">C</div>
-      <div class="welcome-hi">Hi，CEE</div>
-      <div class="welcome-sub">我是CEE，基于认知涌现引擎的AI助手<br>聊天、分析、创作都在行，灵感无限</div>
+      <div class="welcome-icon">空</div>
+      <div class="welcome-hi">Hi，空间</div>
+      <div class="welcome-sub">我是空间，基于认知涌现引擎的AI助手<br>聊天、分析、创作、免费替代都在行，灵感无限</div>
       <div class="welcome-chips">
         <div class="chip" onclick="quickChat('用一句话解释认知涌现')">用一句话解释认知涌现</div>
-        <div class="chip" onclick="quickChat('T1-T6分别是什么')">T1-T6分别是什么</div>
+        <div class="chip" onclick="quickChat('Photoshop有什么免费替代')">Photoshop有什么免费替代</div>
         <div class="chip" onclick="quickChat('帮我写一首认知几何的诗')">帮我写一首认知几何的诗</div>
       </div>
     </div>
@@ -347,8 +347,10 @@ main{flex:1;overflow:hidden;position:relative}
 
   <!-- Engine Page -->
   <div class="page" id="engine-page">
+    <div style="font-size:17px;font-weight:700;margin:0 0 4px;color:var(--accent)">我的引擎</div>
+    <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:12px">T1-T6 全部在线 · 可点击展开测试</div>
     <div class="spider-section">
-      <div class="spider-title">活蛛网 — 认知拓扑</div>
+      <div class="spider-title">我的活蛛网 — 认知拓扑</div>
       <canvas id="spider-canvas" width="360" height="280"></canvas>
       <div class="cee-metrics" style="justify-content:center;margin-top:8px">
         <span class="cee-metric high">ITC:0.87</span>
@@ -359,7 +361,7 @@ main{flex:1;overflow:hidden;position:relative}
     </div>
 
     <div class="temp-section" id="tempSection">
-      <div class="temp-title">认知体温</div>
+      <div class="temp-title">我的认知体温</div>
       <div class="temp-bar"><div class="temp-fill" id="tempFill" style="width:65%;background:var(--tier-b)"></div></div>
       <div class="temp-label"><span id="tempStatus">临界态</span><span id="tempValue">IEC 0.65</span></div>
     </div>
@@ -390,7 +392,7 @@ main{flex:1;overflow:hidden;position:relative}
     </div>
 
     <div class="settings-section">
-      <div class="settings-item" style="font-weight:600;font-size:15px;cursor:default">项目宪章 v4.0</div>
+      <div class="settings-item" style="font-weight:600;font-size:15px;cursor:default">空间项目宪章 v4.0</div>
       <div class="settings-item"><span class="settings-label">1. 数学严谨</span><span class="settings-value">实证支撑</span></div>
       <div class="settings-item"><span class="settings-label">2. 客观优先</span><span class="settings-value">几何自治</span></div>
       <div class="settings-item"><span class="settings-label">3. 可验证</span><span class="settings-value">独立复现</span></div>
@@ -399,12 +401,15 @@ main{flex:1;overflow:hidden;position:relative}
     </div>
 
     <div class="settings-section" style="margin-top:12px">
-      <div class="settings-item" style="font-weight:600;font-size:15px;cursor:default">系统状态</div>
+      <div class="settings-item" style="font-weight:600;font-size:15px;cursor:default">空间系统状态</div>
       <div class="settings-item">
-        <span class="settings-label">版本</span><span class="settings-value">v4.0.0</span>
+        <span class="settings-label">版本</span><span class="settings-value">空间 v4.0.0</span>
       </div>
       <div class="settings-item">
-        <span class="settings-label">引擎</span><span class="settings-value" style="color:var(--accent)">T1-T6 全部在线</span>
+        <span class="settings-label">我的引擎</span><span class="settings-value" style="color:var(--accent)">T1-T6 全部在线</span>
+      </div>
+      <div class="settings-item">
+        <span class="settings-label">能力</span><span class="settings-value" style="color:var(--accent)">免费替代执行</span>
       </div>
       <div class="settings-item">
         <span class="settings-label">测试通过</span><span class="settings-value" style="color:var(--accent)">493/493</span>
@@ -493,7 +498,7 @@ function toggleDeepThink() {
   const btn = document.getElementById('deepToggle');
   btn.classList.toggle('active', deepThink);
   btn.textContent = deepThink ? '深度思考' : '深度思考';
-  showToast(deepThink ? '深度思考已开启：每次回复将展示认知评估全过程' : '深度思考已关闭');
+  showToast(deepThink ? '深度思考已开启：每次回复将展示空间引擎全管线' : '深度思考已关闭');
 }
 
 // ═══════════════════ CHAT ═══════════════════
@@ -632,7 +637,7 @@ function addMessage(role, content, opts={}) {
   const div = document.createElement('div');
   div.className = 'msg ' + role;
   div.innerHTML = `
-    <div class="msg-avatar">${role === 'user' ? 'U' : 'C'}</div>
+    <div class="msg-avatar">${role === 'user' ? 'U' : '空'}</div>
     <div class="msg-content">
       ${role === 'ai' && opts.thinking ? `<div class="think-badge">${opts.thinking}</div>` : ''}
       <div class="msg-bubble">${escapeHtml(content)}</div>
@@ -672,7 +677,7 @@ function finalizeAiMessage(el, scores, tier, content) {
 
   const badge = document.createElement('div');
   badge.className = 'cee-badge tier-' + tier;
-  badge.textContent = '认知评级 ' + tier;
+  badge.textContent = '空间评级 ' + tier;
 
   const metrics = document.createElement('div');
   metrics.className = 'cee-metrics';
@@ -692,7 +697,7 @@ function addTyping() {
   const msgs = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = 'msg ai';
-  div.innerHTML = '<div class="msg-avatar">C</div><div class="msg-content"><div class="typing"><span></span><span></span><span></span></div></div>';
+  div.innerHTML = '<div class="msg-avatar">空</div><div class="msg-content"><div class="typing"><span></span><span></span><span></span></div></div>';
   msgs.appendChild(div);
   return div;
 }
@@ -739,12 +744,12 @@ function toggleTheme() {
 // ═══════════════════ ENGINE CARDS ═══════════════════
 function buildEngineCards() {
   const engines = [
-    {id: 't1', name: 'T1 认知同构镜', desc: '建立认知对象的自反同构映射，保证形式等价转换', endpoint: '/api/t1/mirror'},
-    {id: 't2', name: 'T2 超图坍缩棱镜', desc: '多维度坍缩高维语义超图，生成多视角折射结果', endpoint: '/api/t2/prism'},
-    {id: 't3', name: 'T3 测地线导航', desc: '在语义空间中计算最短测地线路径，发现原子突破', endpoint: '/api/t3/geodesic'},
-    {id: 't4', name: 'T4 知识结晶', desc: '从文本中析出晶体化知识单元，发现涌现性关联', endpoint: '/api/t4/crystallize'},
-    {id: 't5', name: 'T5 反事实生长', desc: '分支演化+杂交育种，生成高适应度的反事实方案', endpoint: '/api/t5/genesis'},
-    {id: 't6', name: 'T6 认知几何评估', desc: 'ITC/SCS/IEC/PFFT四不变量评测，输出综合等级', endpoint: '/api/t6/evaluate'},
+    {id: 't1', name: '我的 T1 认知同构镜', desc: '建立认知对象的自反同构映射，保证形式等价转换', endpoint: '/api/t1/mirror'},
+    {id: 't2', name: '我的 T2 超图坍缩棱镜', desc: '多维度坍缩高维语义超图，生成多视角折射结果', endpoint: '/api/t2/prism'},
+    {id: 't3', name: '我的 T3 测地线导航', desc: '在语义空间中计算最短测地线路径，发现原子突破', endpoint: '/api/t3/geodesic'},
+    {id: 't4', name: '我的 T4 知识结晶', desc: '从文本中析出晶体化知识单元，发现涌现性关联', endpoint: '/api/t4/crystallize'},
+    {id: 't5', name: '我的 T5 反事实生长', desc: '分支演化+杂交育种，生成高适应度的反事实方案', endpoint: '/api/t5/genesis'},
+    {id: 't6', name: '我的 T6 认知几何评估', desc: 'ITC/SCS/IEC/PFFT四不变量评测，输出综合等级', endpoint: '/api/t6/evaluate'},
   ];
 
   const container = document.getElementById('engine-page');

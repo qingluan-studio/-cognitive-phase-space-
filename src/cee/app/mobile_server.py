@@ -1,8 +1,9 @@
 """
-CEE Mobile Server — 认知涌现引擎 AI 对话服务
+空间 Mobile Server — 认知涌现 AI 对话服务
 
-提供 T1-T6 全部引擎接口 + 双模式聊天(引擎合成/LLM增强) + 流式SSE
 端口: 8897
+双模式: 引擎合成(免费) / LLM增强(可选)
+核心能力: 免费替代执行 + 知识库检索 + T1-T6全引擎闭环
 """
 
 from __future__ import annotations
@@ -39,6 +40,76 @@ from ..engine.t6_invariant import InvariantEngine, InvariantTheoretical
 from ..core.controller import ClosedLoopController
 
 STATIC_DIR = Path(__file__).parent / "frontend"
+
+
+# ── 知识库 ──────────────────────────────────────────────────────────
+
+KNOWLEDGE_BASE = {
+    "认知涌现": "认知涌现(Cognitive Emergence)指复杂认知系统中，宏观有序的智能行为从微观简单规则的相互作用中自发产生的现象。关键特征：不可预测性、自组织性、整体大于部分之和。",
+    "认知几何": "认知几何(Cognitive Geometry)用微分几何刻画思维空间。四个不变量：ITC(拓扑连接度)衡量概念网络紧密度，SCS(截面曲率光滑性)衡量推理路径顺畅度，IEC(信息熵临界度)衡量信息量是否位于混沌边缘，PFFT(保真度投影)衡量忠实与独创的平衡。",
+    "T1 认知同构": 'T1认知同构镜(Cognitive Isomorphism Engine)在原始认知对象与其形式化表征间建立双射映射，保证语义等价的同时产生「被理解的再表达」。核心操作：地标提取→语义保持→风格迁移。',
+    "T2 超图坍缩": "T2超图坍缩棱镜(HyperGraph Collapse)将高维语义超图通过多视角投影坍缩为低维可解释表征。每个视角保留一条迹(trace)，确保信息不丢失。应用：多角度论证、盲点检测。",
+    "T3 测地线导航": "T3测地线导航(Geodesic Navigation)在语义流形上计算最短路径，发现概念间的原子突破(atomic breakthrough)——前人未见的直接连接。核心算法：语义嵌入→黎曼度量→测地线积分。",
+    "T4 知识结晶": "T4知识结晶(Crystallization)模拟晶体生长过程，从非结构化文本中析出有序知识单元。晶体间通过涌现关联形成概念网络。应用：知识图谱自动构建、隐性知识显性化。",
+    "T5 反事实生长": "T5反事实生长(Genesis)通过分支演化+杂交育种生成高适应度的反事实假设。每个分支在适应性景观上爬坡，杂交操作产生超加性优势。应用：创新方案生成、假设推演。",
+    "T6 认知不变量": "T6认知几何不变量(Invariant Engine)通过ITC/SCS/IEC/PFFT四个数学不变量严格评估任意文本的认知质量。等级：S级(涌现态,≥0.9)、A级(优秀,≥0.8)、B级(良好,≥0.7)、C级(可接受)、D级(需优化)。",
+    "涌现": "涌现(Emergence)指系统整体展现出其组成部分不具备的新属性。在认知系统中，当IEC位于混沌边缘(~0.5-0.7)且ITC和SCS均高时，最可能发生认知涌现——突然产生全新的洞察。",
+    "混沌边缘": "混沌边缘(Edge of Chaos)是复杂系统的最优运行区间，位于完全有序和完全随机之间的临界带。在认知系统中，IEC≈0.4-0.7时系统处于混沌边缘，信息量恰到好处，最有利于创新和涌现。",
+    "项目宪章": "空间项目宪章五原则：1)数学严谨——所有结论必须有数学定义或实证支撑；2)客观优先——不依赖人工标注，AI在几何规则内自主判断质量；3)可验证——每个主张均可通过独立实验复现；4)结构优先——好的结构优先于好的内容；5)长期存续——体系可在创始团队离场后稳定运转。",
+    "闭源vs开源": "开源软件的优势：可审计、可定制、无供应商锁定、社区驱动。常见免费开源替代方案：用GIMP替代Photoshop，用Blender替代Maya，用LibreOffice替代Microsoft Office，用Linux替代Windows/macOS，用PostgreSQL替代Oracle，用VS Code替代JetBrains全家桶(Community版免费)。",
+    "免费API": "免费AI/云服务推荐：Hugging Face(免费模型托管+推理)、Google Colab(免费GPU)、Cloudflare Workers(免费边缘计算)、Vercel/Netlify(免费前端部署)、Supabase(免费PostgreSQL)、Railway(免费后端)、ngrok(免费隧道)。语言模型：Ollama(本地运行)、Groq(免费API额度)、Together AI(免费额度)。",
+    "深度学习": "深度学习基础：多层神经网络通过反向传播自动学习层级化特征表示。核心组件：卷积层(空间特征)、注意力机制(上下文关系)、残差连接(梯度流动)。训练技巧：学习率预热、梯度裁剪、混合精度训练。评估指标：困惑度(语言模型)、BLEU/ROUGE(生成质量)、F1(分类)。",
+    "Python": "Python是一种解释型、面向对象的高级编程语言，以简洁语法和丰富的生态著称。核心特性：动态类型、垃圾回收、列表推导式、装饰器、上下文管理器、async/await异步编程。主要应用：数据科学(NumPy/Pandas)、机器学习(PyTorch/TensorFlow)、Web开发(Django/FastAPI)、自动化运维。",
+    "敏捷开发": "敏捷开发(Agile)是一种迭代式软件开发方法论，强调快速交付价值、响应变化、持续改进。四个价值观：个体与互动高于流程与工具、可工作的软件高于详尽的文档、客户合作高于合同谈判、响应变化高于遵循计划。常用实践：Scrum、看板、持续集成/部署(CI/CD)、测试驱动开发(TDD)。",
+}
+
+PAID_ALTERNATIVES = {
+    "chatgpt": ("Ollama + 开源模型如 Llama3/Qwen", True),
+    "gpt-4": ("Ollama 本地运行 Llama3-70B 或 Mixtral", True),
+    "claude": ("Ollama + Qwen2.5 或 DeepSeek 开源模型", True),
+    "midjourney": ("Stable Diffusion (免费开源)", True),
+    "dall-e": ("Stable Diffusion 或 Flux (免费开源)", True),
+    "photoshop": ("GIMP (免费开源)", True),
+    "office": ("LibreOffice (免费开源)", True),
+    "微软": ("LibreOffice / ONLYOFFICE", True),
+    "adobe": ("开源替代: GIMP, Inkscape, Kdenlive", True),
+    "付费": ("我默认使用免费方案，以下推荐", False),
+    "收费": ("优先考虑免费开源替代", False),
+    "买": ("建议先查看是否有免费开源替代", False),
+    "订阅": ("多数服务有免费层或开源替代", False),
+    "oracle": ("PostgreSQL 或 MySQL (免费开源)", True),
+    "sql server": ("PostgreSQL (免费开源，性能相当)", True),
+    "windows": ("Linux (Ubuntu/Debian 免费开源)", True),
+    "macos": ("Linux 桌面版如 Ubuntu (免费开源)", True),
+    "jetbrains": ("VS Code + 插件 (免费)", True),
+    "figma": ("Penpot (免费开源设计工具)", True),
+    "notion": ("AppFlowy 或 Outline (免费开源)", True),
+    "slack": ("Element/Matrix 或 Mattermost (免费开源)", True),
+    "zoom": ("Jitsi Meet (免费开源视频会议)", True),
+    "aws": ("免费层: Cloudflare Workers, Vercel, Railway, Supabase", True),
+    "google cloud": ("免费替代: Vercel, Netlify, Supabase, Cloudflare", True),
+    "azure": ("免费替代: 开源云方案(Hetzner+自托管)", True),
+}
+
+
+def _detect_free_alternatives(text: str) -> list[str]:
+    """检测用户提问中涉及的付费服务，返回免费替代建议"""
+    found = []
+    text_lower = text.lower()
+    for keyword, (alternative, is_direct) in PAID_ALTERNATIVES.items():
+        if keyword in text_lower:
+            found.append(f"{keyword} → {alternative}")
+    return list(dict.fromkeys(found))[:3]
+
+
+def _knowledge_lookup(text: str) -> list[str]:
+    """在知识库中检索相关条目"""
+    results = []
+    text_lower = text.lower()
+    for topic, content in KNOWLEDGE_BASE.items():
+        if topic.lower() in text_lower or any(w in text_lower for w in topic[:3]):
+            results.append(f"【{topic}】{content}")
+    return results[:3]
 
 # ── 引擎实例 ────────────────────────────────────────────────────────
 
@@ -83,13 +154,22 @@ def _get_or_create_session(session_id: str) -> dict:
 # ── 引擎合成回复管线 (无 API Key 模式) ──────────────────────────────
 
 def engine_chat(user_text: str, history: list[dict], deep_think: bool = False) -> dict:
-    """使用 T1-T6 引擎合成智能回复"""
+    """空间引擎合成回复 — 知识库检索 + 免费替代检测 + T1-T6全管线"""
+
+    # 1. 知识库检索
+    knowledge_hits = _knowledge_lookup(user_text)
+
+    # 2. 免费替代检测
+    free_alts = _detect_free_alternatives(user_text)
+
+    # 3. T2 多视角分析
     try:
         perspectives, trace = t2_engine.collapse(user_text, 5)
     except Exception:
         perspectives = ["语义分析", "逻辑推理", "情感理解", "结构审视", "知识映射"]
         trace = 0.92
 
+    # 4. T4 知识结晶提取
     try:
         crystals, emergences = t4_engine.crystallize(user_text)
         key_concepts = [c for c in crystals[:5]] if crystals else user_text.split()[:5]
@@ -97,50 +177,63 @@ def engine_chat(user_text: str, history: list[dict], deep_think: bool = False) -
         key_concepts = user_text.split()[:5]
         emergences = []
 
+    # 5. T5 反事实生长
     try:
         branches = t5_engine.grow(user_text, 3)
         response_candidates = list(branches[:3]) if branches else [user_text]
     except Exception:
         response_candidates = [user_text]
 
-    # 合成回复
+    # 6. 合成回复
     parts = []
 
     if deep_think:
-        parts.append("【深度思考模式】")
+        parts.append("【深度思考 · 空间引擎管线】")
         for i, p in enumerate(perspectives[:3]):
             angle = ["认知维度", "逻辑维度", "语义维度"][i % 3]
             view_text = p if isinstance(p, str) else str(p)[:120]
             parts.append(f"  {angle}: {view_text}")
 
-    if key_concepts:
-        concept_str = "、".join(k[:40] if isinstance(k, str) else str(k)[:40] for k in key_concepts)
+    # 知识库命中
+    if knowledge_hits:
+        for k in knowledge_hits:
+            parts.append(k)
+
+    # 免费替代建议
+    if free_alts:
+        parts.append("【免费替代方案】")
+        for alt in free_alts:
+            parts.append(f"  {alt}")
+        parts.append("  空间始终优先推荐免费开源方案，不依赖付费服务也能完成任务。")
+
+    # 关键概念
+    if key_concepts and not knowledge_hits:
+        concept_str = "、".join(str(k)[:40] if isinstance(k, str) else str(k)[:40] for k in key_concepts)
         parts.append(f"关键概念: {concept_str}")
 
     if emergences:
         parts.append(f"涌现关联: {emergences[0][:80]}")
 
-    # 尝试 T1 镜像生成回复主体
+    # T1 镜像生成核心回复
     try:
         mirrored = t1_engine.mirror_generate(user_text, style_hint="analytical")
     except Exception:
         mirrored = ""
 
     if mirrored and mirrored != user_text:
-        parts.append(f"分析: {mirrored[:300]}")
+        parts.append(mirrored[:500])
     else:
-        # fallback: 用 T5 杂交回复
+        # T5 杂交回复
         try:
             hybrid = t5_engine.hybridize(response_candidates[:2]) if len(response_candidates) >= 2 else None
         except Exception:
             hybrid = None
         if hybrid and isinstance(hybrid, str):
-            parts.append(f"综合: {hybrid[:300]}")
+            parts.append(str(hybrid)[:500])
         else:
-            build_response = "您提到的问题涉及多个层面。建议进一步细化追问方向以获得更精准的分析。"
-            parts.append(build_response)
+            parts.append("这个问题涉及多个维度。你可以进一步细化，我会用T1-T6全引擎为你深入分析。")
 
-    body = "\n\n".join(parts)
+    body = "\n\n".join(parts) if parts else user_text
 
     # T6 评估
     try:
@@ -155,7 +248,6 @@ def engine_chat(user_text: str, history: list[dict], deep_think: bool = False) -
     avg = (itc + scs + iec + pfft) / 4
     tier = "S" if avg >= 0.9 else "A" if avg >= 0.8 else "B" if avg >= 0.7 else "C" if avg >= 0.5 else "D"
 
-    # 如果评分低，尝试 T1 优化
     if avg < 0.7:
         try:
             optimized = controller.optimize(body, threshold=0.7)
@@ -170,8 +262,9 @@ def engine_chat(user_text: str, history: list[dict], deep_think: bool = False) -
         "content": body,
         "cee_scores": {"itc": round(itc, 3), "scs": round(scs, 3), "iec": round(iec, 3), "pfft": round(pfft, 3)},
         "cee_tier": tier,
-        "model": "cee-engine",
-        "engine_steps": len(parts) - (3 if deep_think else 0),
+        "model": "空间引擎",
+        "knowledge_hits": len(knowledge_hits),
+        "free_alts": len(free_alts),
     }
 
 
@@ -184,7 +277,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="CEE Mobile AI", version="4.0.0", lifespan=lifespan)
+app = FastAPI(title="空间 Mobile AI", version="4.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
