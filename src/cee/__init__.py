@@ -5,17 +5,22 @@ Cognitive Emergence Engine (CEE)
 认知涌现引擎 — 自我宪法、可追溯决策、可传承思想、可更替治理、可永续迭代
 
 Module Index:
-  engine/     T1-T6 六大认知引擎
-  governance/ 六层治理 + 对抗性协作制衡
-  agent/      子代理编排框架 (Multi-Agent Orchestration)
-  plugin/     插件/工具动态扩展系统
-  processing/ 长文处理 + 数据管道 + 文档读写
-  learning/   自动学习 + 超参优化 + 反馈分析
-  cloud/      云端自配 + 环境感知 + 部署管理
-  api/        REST API 服务
-  sdk/        Python SDK 客户端
-  app/        AI 对话应用
-  core/       核心类型 + 控制器 + CLI
+  engine/       T1-T6 六大认知引擎
+  governance/   六层治理 + 对抗性协作制衡
+  agent/        子代理编排框架 (Multi-Agent Orchestration)
+  plugin/       插件/工具动态扩展系统
+  processing/   长文处理 + 数据管道 + 文档读写
+  learning/     自动学习 + 超参优化 + 反馈分析
+  cloud/        云端自配 + 环境感知 + 部署管理
+  performance/  极速响应 + 缓存加速 + 性能分析
+  multimodal/   多模态处理 (图像/音频/视频/表格)
+  models/       模型注册 + Kimi 大模型集成
+  knowledge/    知识图谱 + 自创新知 + 超强大脑
+  output/       灵活输出 + 文件保存 + 可复制格式化
+  api/          REST API 服务
+  sdk/          Python SDK 客户端
+  app/          AI 对话应用
+  core/         核心类型 + 控制器 + CLI
 
 Usage:
   from cee import InvariantEngine
@@ -79,7 +84,34 @@ from cee.cloud import (
     HealthMonitor, ServiceInstance, ServiceStatus,
 )
 
-__version__ = "2.0.0"
+from cee.performance import (
+    ResponseCache, LRUCacheStore, QuickComprehension,
+    SpeedOutput, PerformanceProfiler, FastResponse,
+)
+
+from cee.multimodal import (
+    ModalityType, ModalityContent, MultimodalInput, MultimodalOutput,
+    ImageProcessor, AudioProcessor, VideoProcessor, TableProcessor,
+    MultimodalRouter, MultiModal,
+)
+
+from cee.models import (
+    ModelProvider, LLMConfig, KimiProvider,
+    ModelEntry, ModelRegistry,
+)
+
+from cee.knowledge import (
+    RelationType, KnowledgeNode, KnowledgeEdge,
+    KnowledgeGraph, KnowledgeSynthesizer,
+    SynthesisResult, MassiveBrain,
+)
+
+from cee.output import (
+    ResponseStyle, OutputConfig, FlexibleFormatter,
+    FileSaver, CopyableFormatter, AdaptiveResponder,
+)
+
+__version__ = "2.1.0"
 __all__ = [
     # T1-T6 Engines
     "InvariantEngine", "InvariantTheoretical",
@@ -120,4 +152,21 @@ __all__ = [
     "CloudAutoConfig", "DeploymentConfig", "DeploymentTarget",
     "EnvironmentDetector", "EnvironmentInfo",
     "HealthMonitor", "ServiceInstance", "ServiceStatus",
+    # Performance
+    "ResponseCache", "LRUCacheStore", "QuickComprehension",
+    "SpeedOutput", "PerformanceProfiler", "FastResponse",
+    # Multimodal
+    "ModalityType", "ModalityContent", "MultimodalInput", "MultimodalOutput",
+    "ImageProcessor", "AudioProcessor", "VideoProcessor", "TableProcessor",
+    "MultimodalRouter", "MultiModal",
+    # Models
+    "ModelProvider", "LLMConfig", "KimiProvider",
+    "ModelEntry", "ModelRegistry",
+    # Knowledge
+    "RelationType", "KnowledgeNode", "KnowledgeEdge",
+    "KnowledgeGraph", "KnowledgeSynthesizer",
+    "SynthesisResult", "MassiveBrain",
+    # Output
+    "ResponseStyle", "OutputConfig", "FlexibleFormatter",
+    "FileSaver", "CopyableFormatter", "AdaptiveResponder",
 ]

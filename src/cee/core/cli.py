@@ -21,6 +21,16 @@ Usage:
   cee-cloud generate docker
   cee-cloud generate k8s
   cee-cloud health
+  cee-perf stats
+  cee-perf respond "query text"
+  cee-multimodal info
+  cee-models list
+  cee-models kimi
+  cee-knowledge learn "fact text"
+  cee-knowledge query "keyword"
+  cee-knowledge synthesize --topic "..."
+  cee-output format --text "..." --style concise
+  cee-output save --text "..." --file output.txt
 """
 
 import json
@@ -720,3 +730,141 @@ def cloud():
     elif subcmd == "health":
         config = cfg.auto_configure()
         print(json.dumps(cfg.get_status(), ensure_ascii=False, indent=2))
+
+
+def perf():
+    """Performance accelerator CLI."""
+    if len(sys.argv) < 2:
+        print("Usage: cee-perf [stats|respond]")
+        return
+
+    subcmd = sys.argv[1]
+    fr = __import__("cee.performance", fromlist=["FastResponse"]).FastResponse()
+
+    if subcmd == "stats":
+        print(json.dumps(fr.stats(), ensure_ascii=False, indent=2))
+
+    elif subcmd == "respond":
+        query = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Hello"
+        result = fr.respond(query, lambda: f"Fast response to: {query}")
+        print(result)
+
+
+def multimodal():
+    """Multimodal processing CLI."""
+    mm = __import__("cee.multimodal", fromlist=["MultiModal"]).MultiModal()
+    print(json.dumps(mm.router.stats(), ensure_ascii=False, indent=2))
+
+
+def models():
+    """Model registry CLI."""
+    if len(sys.argv) < 2:
+        print("Usage: cee-models [list|kimi|stats]")
+        return
+
+    subcmd = sys.argv[1]
+    registry = __import__("cee.models", fromlist=["ModelRegistry"]).ModelRegistry()
+
+    if subcmd == "list":
+        for entry in registry.list_all():
+            print(f"  {entry.provider.value:12s} {entry.model_name:20s}  {entry.description}")
+
+    elif subcmd == "kimi":
+        for entry in registry.kimi_models:
+            print(f"  Kimi: {entry.model_name:20s}  {entry.description}")
+
+    elif subcmd == "stats":
+        print(json.dumps(registry.stats(), ensure_ascii=False, indent=2))
+
+    else:
+        for entry in registry.list_all():
+            print(f"  {entry.provider.value:12s} {entry.model_name:20s}  {entry.description}")
+
+
+def knowledge():
+    """Knowledge engine CLI."""
+    if len(sys.argv) < 2:
+        print("Usage: cee-knowledge [learn|query|synthesize|stats]")
+        return
+
+    subcmd = sys.argv[1]
+    brain = __import__("cee.knowledge", fromlist=["MassiveBrain"]).MassiveBrain()
+
+    if subcmd == "learn":
+        text = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "fact"
+        node = brain.learn(text)
+        print(f"Learned: {node.node_id} type={node.node_type}")
+
+    elif subcmd == "query":
+        keyword = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else ""
+        results = brain.query_all(keyword)
+        for node in results:
+            print(f"  [{node.node_type}] {node.content[:100]} (置信度: {node.confidence:.2f})")
+
+    elif subcmd == "synthesize":
+        topic = ""
+        texts: list[str] = []
+        for arg in sys.argv[2:]:
+            if arg.startswith("--topic="):
+                topic = arg.split("=", 1)[1]
+            else:
+                texts.append(arg)
+        if not texts:
+            texts = ["示例知识片段"]
+        result = brain.create_new_knowledge(topic or "默认主题", texts)
+        print(f"新知: {result.insight}\n置信度: {result.confidence:.2f}  创新性: {result.novel}")
+
+    elif subcmd == "stats":
+        print(json.dumps(brain.stats(), ensure_ascii=False, indent=2))
+
+    else:
+        print(json.dumps(brain.stats(), ensure_ascii=False, indent=2))
+
+
+def output():
+    """Output engine CLI."""
+    if len(sys.argv) < 2:
+        print("Usage: cee-output [format|save|copy|stats]")
+        return
+
+    subcmd = sys.argv[1]
+    responder = __import__("cee.output", fromlist=["AdaptiveResponder"]).AdaptiveResponder()
+
+    if subcmd == "format":
+        text = ""
+        style = None
+        for arg in sys.argv[2:]:
+            if arg.startswith("--text="):
+                text = arg.split("=", 1)[1]
+            elif arg.startswith("--style="):
+                from cee.output import ResponseStyle
+                try:
+                    style = ResponseStyle(arg.split("=", 1)[1])
+                except ValueError:
+                    pass
+        result = responder.respond(text or "Hello, CEE!", style=style)
+        print(result["formatted"])
+        print(f"\n[可复制纯文本长度: {len(result['plain_text'])}]")
+
+    elif subcmd == "save":
+        text = ""
+        filename = ""
+        for arg in sys.argv[2:]:
+            if arg.startswith("--text="):
+                text = arg.split("=", 1)[1]
+            elif arg.startswith("--file="):
+                filename = arg.split("=", 1)[1]
+        result = responder.respond(text or "Saved content", save_to=filename or "output.txt")
+        print(f"已保存: {result.get('saved_to', 'N/A')}")
+        print(f"风格: {result['style']}")
+
+    elif subcmd == "copy":
+        text = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "Copy me!"
+        plain = responder.copier.as_plain_text(text)
+        print(plain)
+
+    elif subcmd == "stats":
+        print(json.dumps(responder.stats(), ensure_ascii=False, indent=2))
+
+    else:
+        print(json.dumps(responder.stats(), ensure_ascii=False, indent=2))
