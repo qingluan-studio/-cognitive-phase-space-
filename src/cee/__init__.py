@@ -40,7 +40,26 @@ from cee.engine.t5_genesis import GenesisEngine
 from cee.core.controller import ClosedLoopController
 from cee.sdk.client import CEEClient, CEEConfig
 
-__version__ = "1.0.0"
+from cee.governance.adversarial import (
+    AdversarialGovernance,
+    DeviationDetector,
+    AdversarialGameEngine,
+    RoleRotationManager,
+    ArbitrationSystem,
+    AdversarialSafeMode,
+    PrecedentStore,
+    AgentRole,
+    DeviationType,
+    ArbitrationLevel,
+    GameState,
+    ExplorationVerdict,
+    DeviationReport,
+    InnovationReport,
+    ArbitrationResult,
+    GameRound,
+)
+
+__version__ = "1.1.0"
 __all__ = [
     "InvariantEngine",
     "InvariantTheoretical",
@@ -61,4 +80,20 @@ __all__ = [
     "DecisionRecord",
     "GovernanceConfig",
     "EngineStatus",
+    "AdversarialGovernance",
+    "DeviationDetector",
+    "AdversarialGameEngine",
+    "RoleRotationManager",
+    "ArbitrationSystem",
+    "AdversarialSafeMode",
+    "PrecedentStore",
+    "AgentRole",
+    "DeviationType",
+    "ArbitrationLevel",
+    "GameState",
+    "ExplorationVerdict",
+    "DeviationReport",
+    "InnovationReport",
+    "ArbitrationResult",
+    "GameRound",
 ]
