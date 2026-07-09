@@ -111,7 +111,55 @@ from cee.output import (
     FileSaver, CopyableFormatter, AdaptiveResponder,
 )
 
-__version__ = "2.1.0"
+from cee.agent.memory_bank import (
+    MemoryBank, ShortTermMemory, LongTermMemory,
+    MemoryEntry, MemoryScope, MemoryType,
+)
+
+from cee.sandbox import (
+    ExecutionSandbox, ResourceLimits, SandboxPolicy,
+    SandboxResult, SandboxViolation, TimeBudget, TokenBudget, ViolationType,
+)
+
+from cee.trace import (
+    TraceLog, DecisionPoint, DecisionType, DecisionMethod,
+    DecisionContext, DecisionAlternatives, DecisionEvidence,
+)
+
+from cee.core.human_approval import (
+    HumanApprovalGate, ApprovalRequest, ApprovalResponse,
+    ApprovalStatus, RiskLevel,
+)
+
+from cee.learning.explore_exploit import (
+    EpsilonGreedyController, NoveltyTracker,
+    StrategyRecord, StrategyStatus, GreedyStrategy,
+)
+
+from cee.core.meta_router import (
+    MetaRouter, WorkflowTemplate, WorkflowCategory, RouteResult,
+)
+
+from cee.plugin.skill_market import (
+    SkillRegistry, SkillManifest, SkillCategory, ToolDefinition,
+)
+
+from cee.agent.post_mortem import (
+    PostMortemAgent, PostMortemReport, ExecutionTrace,
+    Lesson, LessonType, StrategyQuality,
+)
+
+from cee.agent.parliament import (
+    DebateOrchestrator, DebateSessionManager,
+    DebateSession, DebateRound, DebateRole, Argument,
+)
+
+from cee.learning.shadow_ops import (
+    ShadowRunner, ShadowConfig, ShadowTrial,
+    OptimizationAdvice, OptimizationDimension,
+)
+
+__version__ = "2.2.0"
 __all__ = [
     # T1-T6 Engines
     "InvariantEngine", "InvariantTheoretical",
@@ -169,4 +217,34 @@ __all__ = [
     # Output
     "ResponseStyle", "OutputConfig", "FlexibleFormatter",
     "FileSaver", "CopyableFormatter", "AdaptiveResponder",
+    # v2.2.0: 深层缺陷修复 + 创新功能
+    # MemoryBank
+    "MemoryBank", "ShortTermMemory", "LongTermMemory",
+    "MemoryEntry", "MemoryScope", "MemoryType",
+    # Sandbox
+    "ExecutionSandbox", "ResourceLimits", "SandboxPolicy",
+    "SandboxResult", "SandboxViolation", "TimeBudget", "TokenBudget",
+    "ViolationType",
+    # TraceLog
+    "TraceLog", "DecisionPoint", "DecisionType", "DecisionMethod",
+    "DecisionContext", "DecisionAlternatives", "DecisionEvidence",
+    # HumanApproval
+    "HumanApprovalGate", "ApprovalRequest", "ApprovalResponse",
+    "ApprovalStatus", "RiskLevel",
+    # ExploreExploit
+    "EpsilonGreedyController", "NoveltyTracker",
+    "StrategyRecord", "StrategyStatus", "GreedyStrategy",
+    # MetaRouter
+    "MetaRouter", "WorkflowTemplate", "WorkflowCategory", "RouteResult",
+    # SkillMarket
+    "SkillRegistry", "SkillManifest", "SkillCategory", "ToolDefinition",
+    # PostMortem
+    "PostMortemAgent", "PostMortemReport", "ExecutionTrace",
+    "Lesson", "LessonType", "StrategyQuality",
+    # AgentParliament
+    "DebateOrchestrator", "DebateSessionManager",
+    "DebateSession", "DebateRound", "DebateRole", "Argument",
+    # ShadowOps
+    "ShadowRunner", "ShadowConfig", "ShadowTrial",
+    "OptimizationAdvice", "OptimizationDimension",
 ]

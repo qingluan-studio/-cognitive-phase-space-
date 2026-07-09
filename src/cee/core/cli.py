@@ -868,3 +868,268 @@ def output():
 
     else:
         print(json.dumps(responder.stats(), ensure_ascii=False, indent=2))
+
+
+def memory_cli():
+    """Memory bank CLI."""
+    if len(sys.argv) < 2:
+        print("Usage: cee-memory [remember|recall|stats]")
+        return
+
+    from cee.agent.memory_bank import MemoryBank, MemoryType
+
+    bank = MemoryBank()
+    subcmd = sys.argv[1]
+
+    if subcmd == "remember":
+        content = ""
+        mtype = "fact"
+        for arg in sys.argv[2:]:
+            if arg.startswith("--text="):
+                content = arg.split("=", 1)[1]
+            elif arg.startswith("--type="):
+                mtype = arg.split("=", 1)[1]
+        if content:
+            import importlib
+            mod = importlib.import_module("cee.agent.memory_bank")
+            mt = getattr(mod.MemoryType, mtype.upper(), MemoryType.FACT)
+            entry = bank.remember(content, memory_type=mt)
+            print(f"已记忆 [{mt.value}]: {entry.memory_id}")
+
+    elif subcmd == "recall":
+        query = ""
+        for arg in sys.argv[2:]:
+            if arg.startswith("--query="):
+                query = arg.split("=", 1)[1]
+        results = bank.recall(query, limit=5)
+        for r in results:
+            print(f"  [{r.memory_type.value}] {r.content[:80]}")
+
+    elif subcmd == "stats":
+        print(json.dumps(bank.stats(), ensure_ascii=False, indent=2))
+
+    else:
+        print(json.dumps(bank.stats(), ensure_ascii=False, indent=2))
+
+
+def sandbox_cli():
+    """Sandbox CLI."""
+    from cee.sandbox import ExecutionSandbox, ResourceLimits, SandboxPolicy
+
+    sandbox = ExecutionSandbox()
+
+    if len(sys.argv) < 2 or sys.argv[1] == "stats":
+        print(json.dumps(sandbox.stats(), ensure_ascii=False, indent=2))
+    elif sys.argv[1] == "check":
+        ok, violations = sandbox.pre_check(estimated_tokens=100)
+        print(f"预检查: {'通过' if ok else '未通过'}, 违规数: {len(violations)}")
+    elif sys.argv[1] == "run":
+        sandbox.time_budget.start()
+        import time as _time
+        _time.sleep(0.1)
+        result = sandbox.post_check(execution_time=0.5, tokens_used=256)
+        print(json.dumps({"success": result.success, "violations": len(result.violations)},
+                         ensure_ascii=False))
+
+
+def trace_cli():
+    """Trace log CLI."""
+    from cee.trace import TraceLog, DecisionType, DecisionMethod
+
+    if len(sys.argv) < 2:
+        print("Usage: cee-trace [record|query|chain|stats]")
+        return
+
+    log = TraceLog()
+    subcmd = sys.argv[1]
+
+    if subcmd == "stats":
+        print(json.dumps(log.stats(), ensure_ascii=False, indent=2))
+    elif subcmd == "query":
+        d_type = None
+        for arg in sys.argv[2:]:
+            if arg.startswith("--type="):
+                try:
+                    d_type = DecisionType(arg.split("=", 1)[1])
+                except ValueError:
+                    pass
+        results = log.query(decision_type=d_type, limit=10)
+        for d in results:
+            print(f"  [{d.decision_type.value}] {d.question[:60]} -> {d.chosen}")
+
+
+def approve_cli():
+    """Human approval gate CLI."""
+    from cee.core.human_approval import HumanApprovalGate, RiskLevel
+
+    if len(sys.argv) < 2:
+        print("Usage: cee-approve [request|list|approve|reject|stats]")
+        return
+
+    gate = HumanApprovalGate(risk_threshold=RiskLevel.MEDIUM)
+    subcmd = sys.argv[1]
+
+    if subcmd == "request":
+        action = "default_action"
+        desc = ""
+        for arg in sys.argv[2:]:
+            if arg.startswith("--action="):
+                action = arg.split("=", 1)[1]
+            elif arg.startswith("--desc="):
+                desc = arg.split("=", 1)[1]
+        req = gate.request_approval(action, desc or action, risk_level=RiskLevel.MEDIUM)
+        print(f"审批请求已创建: {req.request_id} -> {req.action}")
+        gate.approve(req.request_id, approver="admin")
+        print(f"已自动批准: {req.request_id}")
+
+    elif subcmd == "list":
+        for r in gate.get_pending_requests():
+            print(f"  [{r.request_id}] {r.action} ({r.risk_level.value})")
+
+    elif subcmd == "stats":
+        print(json.dumps(gate.stats(), ensure_ascii=False, indent=2))
+
+
+def explore_cli():
+    """Explore-exploit controller CLI."""
+    from cee.learning.explore_exploit import EpsilonGreedyController
+
+    eg = EpsilonGreedyController(epsilon=0.2, decay=0.999)
+    eg.register_strategy("baseline", {"a": 1}, expected_score=0.5)
+    eg.register_strategy("experiment", {"a": 2}, expected_score=0.5)
+
+    if len(sys.argv) < 2 or sys.argv[1] == "stats":
+        print(json.dumps(eg.stats(), ensure_ascii=False, indent=2))
+    elif sys.argv[1] == "select":
+        chosen = eg.select_strategy()
+        if chosen:
+            print(f"选择策略: {chosen.name} ({chosen.strategy_id})")
+            eg.update(chosen.strategy_id, score=0.75, success=True)
+    elif sys.argv[1] == "best":
+        for s in eg.get_best_strategies(top_k=3):
+            print(f"  {s.name}: avg={s.avg_score:.3f}, trials={s.trials}")
+
+
+def route_cli():
+    """Meta router CLI."""
+    from cee.core.meta_router import MetaRouter
+
+    router = MetaRouter()
+
+    if len(sys.argv) < 2 or sys.argv[1] == "stats":
+        print(json.dumps(router.stats(), ensure_ascii=False, indent=2))
+    elif sys.argv[1] == "templates":
+        for t in router.list_templates():
+            print(f"  [{t['category']}] {t['name']}: {', '.join(t['roles'])}")
+    elif sys.argv[1] == "route":
+        intent = " ".join(sys.argv[2:]) or "写代码"
+        result = router.route(intent)
+        print(f"意图: {intent}")
+        print(f"分类: {result.category.value} (置信度: {result.confidence:.2f})")
+        print(f"模板: {result.template.name}")
+        print(f"角色: {', '.join(result.template.roles)}")
+
+
+def market_cli():
+    """Skill market CLI."""
+    from cee.plugin.skill_market import SkillRegistry, SkillManifest, SkillCategory
+
+    registry = SkillRegistry()
+    registry.register(SkillManifest(
+        name="客服专家", category=SkillCategory.SUPPORT,
+        prompt_fragment="你是专业客服，礼貌耐心地解答用户问题。",
+        tools=[],
+    ))
+    registry.register(SkillManifest(
+        name="代码审查", category=SkillCategory.CODING,
+        prompt_fragment="你审查代码质量、安全性和可维护性。",
+        tools=[],
+    ))
+    registry.assign_to_agent("agent_1", ["客服专家"])
+
+    if len(sys.argv) < 2 or sys.argv[1] == "stats":
+        print(json.dumps(registry.stats(), ensure_ascii=False, indent=2))
+    elif sys.argv[1] == "list":
+        for name, skill in registry._skills.items():
+            print(f"  [{skill.category.value}] {name}: {skill.description or skill.prompt_fragment[:60]}")
+    elif sys.argv[1] == "show":
+        agent_id = sys.argv[2] if len(sys.argv) > 2 else "agent_1"
+        prompt = registry.get_agent_prompt(agent_id)
+        print(f"Agent {agent_id} prompt:\n{prompt}")
+
+
+def mortem_cli():
+    """Post-mortem agent CLI."""
+    from cee.agent.post_mortem import PostMortemAgent, ExecutionTrace
+
+    pm = PostMortemAgent()
+
+    if len(sys.argv) < 2 or sys.argv[1] == "stats":
+        print(json.dumps(pm.stats(), ensure_ascii=False, indent=2))
+    elif sys.argv[1] == "analyze":
+        trace = ExecutionTrace(
+            session_id="demo-1",
+            goal="测试复盘分析",
+            status="success" if "--fail" not in sys.argv else "failed",
+            tasks=[
+                {"status": "COMPLETED"},
+                {"status": "COMPLETED"},
+                {"status": "FAILED"},
+            ],
+            duration_seconds=45.0,
+            consensus_rounds=2,
+            agent_count=3,
+        )
+        report = pm.analyze(trace)
+        print(f"复盘摘要: {report.summary}")
+        for lesson in report.lessons:
+            print(f"  [{lesson.lesson_type.value}] {lesson.content}")
+        print(f"建议: {report.recommendations}")
+
+
+def debate_cli():
+    """Debate orchestrator CLI."""
+    from cee.agent.parliament import DebateOrchestrator
+
+    orch = DebateOrchestrator()
+
+    if len(sys.argv) < 2 or sys.argv[1] == "stats":
+        print(json.dumps(orch.stats(), ensure_ascii=False, indent=2))
+    elif sys.argv[1] == "run":
+        result = orch.run_debate(
+            topic="是否应该使用多智能体协作?",
+            proponent_content=["多智能体提升结果质量", "协作减少幻觉"],
+            opponent_content=["协调成本高", "可能陷入共识僵局"],
+            max_rounds=2,
+        )
+        print(f"决议: {result['resolution']}")
+        print(f"正方得分: {result['score_proponent']:.2f}, 反方得分: {result['score_opponent']:.2f}")
+        print(f"胜方: {result['winner']}")
+
+
+def shadow_cli():
+    """Shadow runner CLI."""
+    from cee.learning.shadow_ops import ShadowRunner, ShadowConfig
+
+    runner = ShadowRunner()
+    runner.set_shadow_config(ShadowConfig(
+        name="finer_granularity",
+        params={"task_granularity": "fine"},
+        description="更细粒度的任务分解",
+    ))
+
+    if len(sys.argv) < 2 or sys.argv[1] == "stats":
+        print(json.dumps(runner.stats(), ensure_ascii=False, indent=2))
+    elif sys.argv[1] == "compare":
+        result = runner.compare(
+            main_output="summarized conclusion",
+            shadow_output="detailed analysis with conclusion and recommendations",
+            main_cost={"time": 1.0, "tokens": 200},
+            shadow_cost={"time": 1.5, "tokens": 350},
+        )
+        print(f"对比结果: {result.winner} 胜出 (改进: {result.improvement:+.3f})")
+    elif sys.argv[1] == "advice":
+        advice = runner.generate_advice(min_trials=1)
+        for a in advice:
+            print(f"  [{a.dimension.value}] {a.current_value} -> {a.recommended_value} "
+                  f"(置信度: {a.confidence:.2f})")

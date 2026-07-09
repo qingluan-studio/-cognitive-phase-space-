@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cognitive-emergence-engine"
-version = "2.1.0"
-description = "Cognitive Emergence Engine (CEE) — 认知涌现引擎：自我宪法、可追溯决策、可传承思想、可更替治理、可永续迭代的长期自治认知科研工程体系。含子代理编排、插件扩展、长文处理、自动学习、云端自配、极速响应、多模态处理、知识引擎、灵活输出。"
+version = "2.2.0"
+description = "Cognitive Emergence Engine (CEE) — 认知涌现引擎：中央记忆、执行沙箱、可解释决策、人类审批、探索利用、元认知路由、技能市场、事后复盘、智能体议会、影子运维。含子代理编排、插件扩展、长文处理、自动学习、云端自配、极速响应、多模态处理、知识引擎、灵活输出。"
 authors = [
     {name = "Qingluan Studio & AI Collaborators"}
 ]
@@ -64,6 +64,16 @@ cee-multimodal = "cee.core.cli:multimodal"
 cee-models = "cee.core.cli:models"
 cee-knowledge = "cee.core.cli:knowledge"
 cee-output = "cee.core.cli:output"
+cee-memory = "cee.core.cli:memory_cli"
+cee-sandbox = "cee.core.cli:sandbox_cli"
+cee-trace = "cee.core.cli:trace_cli"
+cee-approve = "cee.core.cli:approve_cli"
+cee-explore = "cee.core.cli:explore_cli"
+cee-route = "cee.core.cli:route_cli"
+cee-market = "cee.core.cli:market_cli"
+cee-mortem = "cee.core.cli:mortem_cli"
+cee-debate = "cee.core.cli:debate_cli"
+cee-shadow = "cee.core.cli:shadow_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
