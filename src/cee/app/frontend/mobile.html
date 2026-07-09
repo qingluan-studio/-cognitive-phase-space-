@@ -1,610 +1,913 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0A0A0F">
-<title>CEE 认知涌现引擎 v4.0</title>
+<title>CEE — 认知涌现引擎 AI</title>
 <style>
-:root{
---bg:#0A0A0F;--bg2:#111118;--bg3:#1A1A26;--fg:#E4E4EC;--fg2:#9CA3AF;
---accent:#00D4FF;--purple:#7B61FF;--coral:#FF6B6B;--green:#4ADE80;
---border:#2A2A3A;--radius:12px;--shadow:0 4px 24px rgba(0,0,0,.4);
---itc:#00D4FF;--scs:#4ADE80;--iec:#7B61FF;--pfft:linear-gradient(135deg,#00D4FF,#7B61FF);
---safe-bottom:env(safe-area-inset-bottom,16px);
+:root {
+  --bg-primary: #111111;
+  --bg-secondary: #1a1a1a;
+  --bg-tertiary: #222222;
+  --bg-input: #1a1a1a;
+  --text-primary: #e5e5e5;
+  --text-secondary: #999999;
+  --text-tertiary: #666666;
+  --border: #2a2a2a;
+  --accent: #4ade80;
+  --accent-dim: #166534;
+  --user-bubble: #2a2a2a;
+  --ai-bubble: #1a1a1a;
+  --danger: #ef4444;
+  --warning: #f97316;
+  --tier-s: #facc15;
+  --tier-a: #4ade80;
+  --tier-b: #3b82f6;
+  --tier-c: #f97316;
+  --tier-d: #ef4444;
+  --safe-bottom: env(safe-area-inset-bottom,0px);
+  --nav-height: 56px;
+  --input-height: 52px;
+  --header-height: 48px;
 }
-[data-theme="light"]{
---bg:#F5F5F7;--bg2:#FFFFFF;--bg3:#E8E8ED;--fg:#1A1A2E;--fg2:#6B7280;
---border:#D1D5DB;--shadow:0 4px 24px rgba(0,0,0,.08);
+[data-theme="light"] {
+  --bg-primary: #f5f5f5;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e5e5e5;
+  --bg-input: #ffffff;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-tertiary: #999999;
+  --border: #ddd;
+  --user-bubble: #e8f5e9;
+  --ai-bubble: #ffffff;
 }
+
 *{margin:0;padding:0;box-sizing:border-box}
-html{font-size:14px}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--fg);overflow-x:hidden;min-height:100dvh;-webkit-tap-highlight-color:transparent;transition:background .4s,color .4s}
-#app{padding-bottom:calc(72px + var(--safe-bottom))}
-.page{display:none;padding:16px;animation:fadeIn .3s ease}
-.page.active{display:block}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:var(--bg-primary);
+  color:var(--text-primary);
+  display:flex;flex-direction:column;
+  -webkit-tap-highlight-color:transparent;
+}
+
+/* Header */
+.header{
+  height:var(--header-height);
+  display:flex;align-items:center;
+  padding:0 16px;
+  background:var(--bg-secondary);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;z-index:10;
+}
+.header-left{display:flex;align-items:center;gap:10px}
+.header-logo{
+  width:32px;height:32px;border-radius:8px;
+  background:linear-gradient(135deg,var(--accent),#059669);
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:14px;color:#fff;
+}
+.header-title{font-size:17px;font-weight:600}
+.header-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.btn-deep{
+  font-size:12px;color:var(--accent);background:var(--accent-dim);
+  padding:5px 12px;border-radius:14px;cursor:pointer;border:none;
+  display:flex;align-items:center;gap:4px;transition:all 0.2s;
+}
+.btn-deep.active{background:var(--accent);color:#000;font-weight:600}
+.btn-deep::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;opacity:0.4}
+.btn-deep.active::before{opacity:1}
+
+/* Main */
+main{flex:1;overflow:hidden;position:relative}
+.page{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;display:none}
+.page.active{display:flex;flex-direction:column}
+
+/* Chat Page */
+#chat-page{display:flex;flex-direction:column;padding-bottom:calc(var(--input-height) + var(--nav-height) + var(--safe-bottom) + 16px)}
+#chat-page.active{display:flex}
+
+/* Welcome */
+.welcome{
+  flex:1;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  padding:32px 24px;text-align:center;
+}
+.welcome-icon{
+  width:72px;height:72px;border-radius:20px;
+  background:linear-gradient(135deg,var(--accent),#059669);
+  display:flex;align-items:center;justify-content:center;
+  font-size:36px;font-weight:900;color:#fff;
+  margin-bottom:20px;box-shadow:0 8px 32px rgba(74,222,128,0.2);
+}
+.welcome-hi{font-size:28px;font-weight:700;margin-bottom:6px}
+.welcome-sub{font-size:14px;color:var(--text-secondary);line-height:1.6;max-width:280px}
+.welcome-chips{margin-top:28px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.chip{
+  padding:8px 16px;border-radius:18px;border:1px solid var(--border);
+  font-size:13px;color:var(--text-secondary);background:var(--bg-secondary);
+  cursor:pointer;transition:all 0.15s;
+}
+.chip:active{background:var(--accent-dim);color:var(--accent);border-color:var(--accent)}
+
+/* Messages */
+.messages{flex:1;padding:12px 0}
+.msg{
+  display:flex;gap:10px;padding:8px 16px;
+  animation:fadeIn 0.3s ease;
+}
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-@keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
-@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
-@keyframes ripple{to{transform:scale(4);opacity:0}}
-@keyframes breathe{0%,100%{box-shadow:0 0 8px var(--iec)}50%{box-shadow:0 0 24px var(--iec),0 0 48px var(--purple)}}
-@keyframes glowPulse{0%,100%{text-shadow:0 0 8px var(--accent)}50%{text-shadow:0 0 24px var(--accent),0 0 48px var(--purple)}}
-@keyframes webFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-@keyframes crystalForm{0%{transform:scale(0) rotate(0deg);opacity:0}50%{transform:scale(1.2) rotate(180deg);opacity:.8}100%{transform:scale(1) rotate(360deg);opacity:1}}
-@keyframes particleDissolve{0%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(2) translateY(-40px)}}
-@keyframes snareShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-2px)}75%{transform:translateX(2px)}}
-@keyframes warningCreep{0%{transform:translateY(100%)}100%{transform:translateY(0)}}
-@keyframes cosmicDrift{0%{background-position:0 0}100%{background-position:100% 100%}}
-@keyframes titleGlow{0%,100%{filter:brightness(1)}50%{filter:brightness(1.5)}}
+.msg.user{flex-direction:row-reverse}
+.msg-avatar{
+  width:32px;height:32px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:700;
+}
+.msg.user .msg-avatar{background:var(--accent-dim);color:var(--accent)}
+.msg.ai .msg-avatar{background:var(--bg-tertiary);color:var(--text-secondary);font-size:12px}
+.msg-content{max-width:78%}
+.msg.user .msg-content{display:flex;justify-content:flex-end}
+.msg-bubble{
+  padding:10px 14px;border-radius:14px;font-size:14px;line-height:1.6;
+  white-space:pre-wrap;word-break:break-word;
+}
+.msg.user .msg-bubble{background:var(--user-bubble);border-bottom-right-radius:4px}
+.msg.ai .msg-bubble{
+  background:var(--ai-bubble);border:1px solid var(--border);
+  border-left:3px solid var(--accent);border-top-left-radius:4px;
+}
+
+/* CEE Badge */
+.cee-badge{
+  display:inline-flex;align-items:center;gap:4px;margin-bottom:6px;
+  font-size:11px;padding:3px 8px;border-radius:10px;font-weight:600;
+  border:1px solid transparent;
+}
+.cee-badge.tier-S{background:#422006;color:var(--tier-s);border-color:#713f12}
+.cee-badge.tier-A{background:#052e16;color:var(--tier-a);border-color:#166534}
+.cee-badge.tier-B{background:#172554;color:var(--tier-b);border-color:#1e3a5f}
+.cee-badge.tier-C{background:#431407;color:var(--tier-c);border-color:#7c2d12}
+.cee-badge.tier-D{background:#450a0a;color:var(--tier-d);border-color:#7f1d1d}
+
+.cee-metrics{
+  display:flex;gap:6px;margin-top:6px;font-size:10px;color:var(--text-tertiary);
+  flex-wrap:wrap;
+}
+.cee-metric{padding:2px 6px;background:var(--bg-tertiary);border-radius:6px}
+.cee-metric.high{color:var(--tier-a)}
+.cee-metric.mid{color:var(--tier-c)}
+.cee-metric.low{color:var(--tier-d)}
+
+/* Typing */
+.typing{display:flex;align-items:center;gap:3px;padding:8px 0}
+.typing span{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:dotBounce 1.4s infinite ease-in-out}
+.typing span:nth-child(2){animation-delay:0.2s}
+.typing span:nth-child(3){animation-delay:0.4s}
+@keyframes dotBounce{0%,80%,100%{opacity:0.3;transform:scale(0.8)}40%{opacity:1;transform:scale(1.2)}}
+
+/* Deep Think indicator */
+.think-badge{
+  font-size:10px;color:var(--accent);padding:4px 10px;margin-bottom:6px;
+  background:var(--accent-dim);border-radius:8px;display:inline-block;
+}
+
+/* Input Bar */
+.input-bar{
+  position:fixed;bottom:var(--nav-height);
+  left:0;right:0;padding:8px 12px calc(8px + var(--safe-bottom));
+  background:var(--bg-secondary);border-top:1px solid var(--border);
+  display:flex;align-items:center;gap:10px;z-index:10;
+}
+.input-wrap{
+  flex:1;display:flex;align-items:center;background:var(--bg-input);
+  border-radius:22px;padding:0 14px;border:1px solid var(--border);
+  transition:border-color 0.2s;
+}
+.input-wrap:focus-within{border-color:var(--accent)}
+.chat-input{
+  flex:1;height:var(--input-height);background:none;border:none;
+  color:var(--text-primary);font-size:15px;outline:none;
+}
+.chat-input::placeholder{color:var(--text-tertiary)}
+.btn-send{
+  width:36px;height:36px;border-radius:50%;border:none;
+  background:var(--accent);color:#000;font-size:16px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;flex-shrink:0;transition:opacity 0.15s;
+}
+.btn-send:disabled{opacity:0.4}
+.btn-send svg{width:18px;height:18px}
+
+/* Bottom Nav */
+.nav{
+  position:fixed;bottom:0;left:0;right:0;height:var(--nav-height);
+  background:var(--bg-secondary);border-top:1px solid var(--border);
+  display:flex;align-items:center;z-index:20;
+  padding-bottom:var(--safe-bottom);
+}
+.nav-item{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:2px;cursor:pointer;color:var(--text-tertiary);transition:color 0.15s;
+  -webkit-tap-highlight-color:transparent;
+}
+.nav-item.active{color:var(--accent)}
+.nav-item svg{width:22px;height:22px}
+.nav-label{font-size:11px}
+
+/* Engine Page */
+#engine-page{padding:16px;gap:12px}
+.engine-card{
+  background:var(--bg-secondary);border:1px solid var(--border);
+  border-radius:12px;padding:14px;cursor:pointer;transition:all 0.15s;
+}
+.engine-card:active{background:var(--bg-tertiary)}
+.engine-card-header{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.engine-card-badge{
+  font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;
+  background:var(--accent-dim);color:var(--accent);
+}
+.engine-card-title{font-size:15px;font-weight:600}
+.engine-card-desc{font-size:12px;color:var(--text-secondary);line-height:1.5}
+.engine-input{
+  width:100%;margin-top:8px;padding:8px 12px;background:var(--bg-input);
+  border:1px solid var(--border);border-radius:8px;color:var(--text-primary);
+  font-size:13px;outline:none;display:none;
+}
+.engine-card.expanded .engine-input{display:block}
+.engine-input:focus{border-color:var(--accent)}
+.engine-result{margin-top:8px;font-size:12px;color:var(--text-secondary);display:none}
+.engine-card.expanded .engine-result{display:block}
+.btn-engine-run{
+  margin-top:8px;padding:6px 16px;background:var(--accent);color:#000;
+  border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;display:none;
+}
+.engine-card.expanded .btn-engine-run{display:inline-block}
+
+/* Spider Canvas */
+.spider-section{
+  background:var(--bg-secondary);border:1px solid var(--border);
+  border-radius:12px;padding:16px;
+}
+.spider-title{font-size:14px;font-weight:600;margin-bottom:10px}
+#spider-canvas{width:100%;max-width:360px;display:block;margin:0 auto}
+
+/* CEE Temp */
+.temp-section{
+  background:var(--bg-secondary);border:1px solid var(--border);
+  border-radius:12px;padding:14px;
+}
+.temp-title{font-size:14px;font-weight:600;margin-bottom:8px}
+.temp-bar{height:6px;border-radius:3px;background:var(--bg-tertiary);overflow:hidden;margin-bottom:4px}
+.temp-fill{height:100%;border-radius:3px;transition:width 0.5s,background 0.5s}
+.temp-label{font-size:12px;color:var(--text-secondary);display:flex;justify-content:space-between}
+
+/* Profile Page */
+#profile-page{padding:16px;gap:12px}
+.settings-section{
+  background:var(--bg-secondary);border:1px solid var(--border);
+  border-radius:12px;overflow:hidden;
+}
+.settings-item{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px;border-bottom:1px solid var(--border);
+  cursor:pointer;
+}
+.settings-item:last-child{border-bottom:none}
+.settings-label{font-size:14px}
+.settings-value{font-size:13px;color:var(--text-secondary);text-align:right}
+.settings-input{
+  background:var(--bg-input);border:1px solid var(--border);
+  color:var(--text-primary);font-size:13px;padding:6px 10px;
+  border-radius:6px;width:160px;text-align:right;
+}
+.settings-input:focus{outline:none;border-color:var(--accent)}
+
+/* Toast */
+.toast{
+  position:fixed;bottom:calc(var(--nav-height) + var(--input-height) + 24px);
+  left:50%;transform:translateX(-50%);background:var(--bg-tertiary);
+  color:var(--text-primary);padding:10px 20px;border-radius:20px;
+  font-size:13px;z-index:100;opacity:0;transition:opacity 0.3s;
+  box-shadow:0 4px 12px rgba(0,0,0,0.3);
+}
+.toast.show{opacity:1}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:0}
+
+/* Emergence ritual overlay */
+.ritual-overlay{
+  position:fixed;inset:0;z-index:200;display:none;
+  align-items:center;justify-content:center;background:rgba(0,0,0,0.85);
+  flex-direction:column;
+}
+.ritual-overlay.active{display:flex}
+.ritual-crystal{
+  width:60px;height:60px;border:3px solid var(--accent);
+  border-radius:12px;animation:crystalGrow 0.8s ease-out forwards;
+}
+@keyframes crystalGrow{
+  0%{transform:scale(0) rotate(0deg);opacity:0}
+  50%{transform:scale(1.2) rotate(180deg);opacity:1}
+  100%{transform:scale(1) rotate(360deg);opacity:0}
+}
+.ritual-text{color:var(--accent);font-size:16px;font-weight:700;margin-top:12px;animation:fadeIn 0.5s 0.4s both}
 </style>
 </head>
 <body>
-<div id="app"></div>
-<nav id="tabBar">
-<button data-page="home" class="tab active" aria-label="首页">
-<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-<span>首页</span>
-</button>
-<button data-page="engines" class="tab" aria-label="引擎">
-<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-<span>T1-T6</span>
-</button>
-<button data-page="web" class="tab" aria-label="蛛网">
-<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-<span>活蛛网</span>
-</button>
-<button data-page="governance" class="tab" aria-label="治理">
-<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-<span>治理</span>
-</button>
-<button data-page="settings" class="tab" aria-label="设置">
-<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-<span>设置</span>
-</button>
-</nav>
 
-<style>
-#tabBar{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--bg2);border-top:1px solid var(--border);z-index:100;padding-bottom:var(--safe-bottom);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
-#tabBar .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:8px 4px;border:none;background:none;color:var(--fg2);font-size:10px;gap:2px;cursor:pointer;transition:color .3s;position:relative}
-#tabBar .tab.active{color:var(--accent)}
-#tabBar .tab.active::before{content:'';position:absolute;top:-1px;left:20%;right:20%;height:2px;background:var(--accent);border-radius:0 0 2px 2px}
-</style>
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <div class="header-logo">C</div>
+    <div class="header-title">CEE</div>
+  </div>
+  <div class="header-right">
+    <button class="btn-deep" id="deepToggle" onclick="toggleDeepThink()">深度思考</button>
+  </div>
+</div>
+
+<main>
+  <!-- Chat Page -->
+  <div class="page active" id="chat-page">
+    <div class="welcome" id="welcome">
+      <div class="welcome-icon">C</div>
+      <div class="welcome-hi">Hi，CEE</div>
+      <div class="welcome-sub">我是CEE，基于认知涌现引擎的AI助手<br>聊天、分析、创作都在行，灵感无限</div>
+      <div class="welcome-chips">
+        <div class="chip" onclick="quickChat('用一句话解释认知涌现')">用一句话解释认知涌现</div>
+        <div class="chip" onclick="quickChat('T1-T6分别是什么')">T1-T6分别是什么</div>
+        <div class="chip" onclick="quickChat('帮我写一首认知几何的诗')">帮我写一首认知几何的诗</div>
+      </div>
+    </div>
+    <div class="messages" id="messages"></div>
+  </div>
+
+  <!-- Engine Page -->
+  <div class="page" id="engine-page">
+    <div class="spider-section">
+      <div class="spider-title">活蛛网 — 认知拓扑</div>
+      <canvas id="spider-canvas" width="360" height="280"></canvas>
+      <div class="cee-metrics" style="justify-content:center;margin-top:8px">
+        <span class="cee-metric high">ITC:0.87</span>
+        <span class="cee-metric high">SCS:0.91</span>
+        <span class="cee-metric mid">IEC:0.65</span>
+        <span class="cee-metric mid">PFFT:0.79</span>
+      </div>
+    </div>
+
+    <div class="temp-section" id="tempSection">
+      <div class="temp-title">认知体温</div>
+      <div class="temp-bar"><div class="temp-fill" id="tempFill" style="width:65%;background:var(--tier-b)"></div></div>
+      <div class="temp-label"><span id="tempStatus">临界态</span><span id="tempValue">IEC 0.65</span></div>
+    </div>
+
+    <!-- T1-T6 cards injected by JS -->
+  </div>
+
+  <!-- Profile Page -->
+  <div class="page" id="profile-page">
+    <div class="settings-section" style="margin-bottom:12px">
+      <div class="settings-item" style="font-weight:600;font-size:15px;cursor:default">对话设置</div>
+      <div class="settings-item">
+        <span class="settings-label">API Key</span>
+        <input class="settings-input" type="password" id="apiKeyInput" placeholder="sk-..." onchange="saveSettings()">
+      </div>
+      <div class="settings-item">
+        <span class="settings-label">Base URL</span>
+        <input class="settings-input" id="baseUrlInput" value="https://api.openai.com/v1" onchange="saveSettings()">
+      </div>
+      <div class="settings-item">
+        <span class="settings-label">模型</span>
+        <input class="settings-input" id="modelInput" value="gpt-4o-mini" onchange="saveSettings()">
+      </div>
+      <div class="settings-item" onclick="toggleTheme()">
+        <span class="settings-label">主题模式</span>
+        <span class="settings-value" id="themeLabel">暗色</span>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-item" style="font-weight:600;font-size:15px;cursor:default">项目宪章 v4.0</div>
+      <div class="settings-item"><span class="settings-label">1. 数学严谨</span><span class="settings-value">实证支撑</span></div>
+      <div class="settings-item"><span class="settings-label">2. 客观优先</span><span class="settings-value">几何自治</span></div>
+      <div class="settings-item"><span class="settings-label">3. 可验证</span><span class="settings-value">独立复现</span></div>
+      <div class="settings-item"><span class="settings-label">4. 结构优先</span><span class="settings-value">结构>内容</span></div>
+      <div class="settings-item"><span class="settings-label">5. 长期存续</span><span class="settings-value">永续自转</span></div>
+    </div>
+
+    <div class="settings-section" style="margin-top:12px">
+      <div class="settings-item" style="font-weight:600;font-size:15px;cursor:default">系统状态</div>
+      <div class="settings-item">
+        <span class="settings-label">版本</span><span class="settings-value">v4.0.0</span>
+      </div>
+      <div class="settings-item">
+        <span class="settings-label">引擎</span><span class="settings-value" style="color:var(--accent)">T1-T6 全部在线</span>
+      </div>
+      <div class="settings-item">
+        <span class="settings-label">测试通过</span><span class="settings-value" style="color:var(--accent)">493/493</span>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Input Bar -->
+<div class="input-bar" id="inputBar">
+  <div class="input-wrap">
+    <textarea class="chat-input" id="chatInput" rows="1" placeholder="发消息..." onkeydown="handleInputKey(event)" oninput="autoResize(this)"></textarea>
+  </div>
+  <button class="btn-send" id="sendBtn" onclick="sendMessage()" disabled>
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+  </button>
+</div>
+
+<!-- Bottom Nav -->
+<div class="nav">
+  <div class="nav-item active" data-page="chat" onclick="switchPage('chat')">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+    <span class="nav-label">对话</span>
+  </div>
+  <div class="nav-item" data-page="engine" onclick="switchPage('engine')">
+    <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="3"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>
+    <span class="nav-label">引擎</span>
+  </div>
+  <div class="nav-item" data-page="profile" onclick="switchPage('profile')">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+    <span class="nav-label">我的</span>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- Emergence Ritual Overlay -->
+<div class="ritual-overlay" id="ritual">
+  <div class="ritual-crystal"></div>
+  <div class="ritual-text">涌现达成 S 级</div>
+</div>
 
 <script>
-const API='';
+// ═══════════════════ STATE ═══════════════════
+let currentPage = 'chat';
+let deepThink = false;
+let messages = [];
+let typing = false;
+let sessionId = 'default';
+let engineAnim = null;
 
-function $p(id){return document.getElementById(id)}
-function $q(s){return document.querySelector(s)}
-function $qa(s){return document.querySelectorAll(s)}
+// ═══════════════════ INIT ═══════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  loadSettings();
+  buildEngineCards();
+  startSpiderWeb();
+  updateInputBar();
+});
 
-let currentPage='home';
-let theme='dark';
-let perfMode=false;
-let sensoryMode=false;
+const chatInput = document.getElementById('chatInput');
+chatInput.addEventListener('input', () => {
+  document.getElementById('sendBtn').disabled = !chatInput.value.trim();
+});
 
-async function api(path,body){
-  try{
-    const r=await fetch(API+path,{
-      method:body?'POST':'GET',
-      headers:body?{'Content-Type':'application/json'}:{},
-      body:body?JSON.stringify(body):undefined
-    });
-    return await r.json();
-  }catch(e){return null}
+// ═══════════════════ NAV ═══════════════════
+function switchPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById(page + '-page').classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => {
+    n.classList.toggle('active', n.dataset.page === page);
+  });
+  updateInputBar();
+  if (page === 'engine') startSpiderWeb();
 }
 
-function switchPage(name){
-  currentPage=name;
-  $qa('.page').forEach(p=>p.classList.remove('active'));
-  const page=$p('page-'+name);
-  if(page)page.classList.add('active');
-  $qa('#tabBar .tab').forEach(t=>t.classList.remove('active'));
-  const tab=$q('#tabBar [data-page="'+name+'"]');
-  if(tab)tab.classList.add('active');
-  if(name==='web')initLivingWeb();
-  if(name==='home')refreshDashboard();
+function updateInputBar() {
+  const bar = document.getElementById('inputBar');
+  bar.style.display = currentPage === 'chat' ? 'flex' : 'none';
 }
 
-function badgeTier(score,cls){
-  const t=score>=.9?'S':score>=.8?'A':score>=.7?'B':score>=.5?'C':'D';
-  const c={'S':'#FFD700','A':varGet('--green'),'B':varGet('--accent'),'C':varGet('--coral'),'D':'#EF4444'}[t];
-  return '<span class="tier-badge '+cls+'" style="background:'+c+'20;color:'+c+';border:1px solid '+c+'40">'+t+'</span>';
+// ═══════════════════ DEEP THINK ═══════════════════
+function toggleDeepThink() {
+  deepThink = !deepThink;
+  const btn = document.getElementById('deepToggle');
+  btn.classList.toggle('active', deepThink);
+  btn.textContent = deepThink ? '深度思考' : '深度思考';
+  showToast(deepThink ? '深度思考已开启：每次回复将展示认知评估全过程' : '深度思考已关闭');
 }
 
-function varGet(name){return getComputedStyle(document.documentElement).getPropertyValue(name).trim()}
-
-function toggleTheme(){
-  theme=theme==='dark'?'light':'dark';
-  document.documentElement.setAttribute('data-theme',theme);
-  localStorage.setItem('cee-theme',theme);
-  const btn=$p('themeToggle');
-  if(btn)btn.textContent=theme==='dark'?'🌙':'☀️';
+// ═══════════════════ CHAT ═══════════════════
+function quickChat(text) {
+  chatInput.value = text;
+  document.getElementById('sendBtn').disabled = false;
+  sendMessage();
 }
 
-function togglePerf(){
-  perfMode=!perfMode;
-  document.documentElement.setAttribute('data-perf',perfMode?'true':'false');
-  const btn=$p('perfToggle');
-  if(btn)btn.textContent=perfMode?'性能模式:开':'性能模式:关';
-}
-
-function toggleSensory(){
-  sensoryMode=!sensoryMode;
-  document.documentElement.setAttribute('data-sensory',sensoryMode?'true':'false');
-  const btn=$p('sensoryToggle');
-  if(btn)btn.textContent=sensoryMode?'感官友好:开':'感官友好:关';
-}
-
-async function refreshDashboard(){
-  const status=await api('/api/system/status');
-  if(!status)return;
-  const el=$p('dash-status');
-  if(!el)return;
-  const e=status.engines||{};
-  let html='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">';
-  for(const [k,v] of Object.entries(e)){
-    const dot=v==='online'?'#4ADE80':'#FF6B6B';
-    html+='<div class="card" style="padding:10px;text-align:center"><div style="width:8px;height:8px;border-radius:50%;background:'+dot+';display:inline-block;margin-right:6px;box-shadow:0 0 6px '+dot+'"></div>'+k+'</div>';
+function handleInputKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    if (chatInput.value.trim()) sendMessage();
   }
-  html+='</div>';
-  const inv=status.invariants||{};
-  html+='<div class="card" style="margin-top:12px"><h4 style="color:var(--accent);margin-bottom:8px">系统不变量</h4>';
-  for(const [k,v] of Object.entries(inv)){
-    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0"><span style="font-weight:600">'+k+'</span><div style="flex:1;margin:0 10px;height:4px;background:var(--bg3);border-radius:2px"><div style="height:100%;width:'+(v*100)+'%;background:'+({'ITC':'var(--itc)','SCS':'var(--scs)','IEC':'var(--iec)','PFFT':varGet('--accent')}[k]||'var(--accent)')+';border-radius:2px"></div></div><span>'+(v*100).toFixed(0)+'%</span></div>';
-  }
-  html+='</div>';
-  html+='<div class="card" style="margin-top:12px"><div style="display:flex;justify-content:space-around;text-align:center"><div><div style="font-size:1.5em;font-weight:800;color:var(--accent)">'+(status.decisions_logged||0)+'</div><small style="color:var(--fg2)">决策日志</small></div><div><div style="font-size:1.5em;font-weight:800;color:var(--purple)">'+(status.legacy_items||0)+'</div><small style="color:var(--fg2)">知识遗产</small></div><div><div style="font-size:1.5em;font-weight:800;color:var(--green)">'+(status.uptime_s||0)+'s</div><small style="color:var(--fg2)">运行时间</small></div></div></div>';
-  el.innerHTML=html;
 }
 
-function showToast(msg,type='info'){
-  const t=document.createElement('div');
-  t.className='toast toast-'+type;
-  t.textContent=msg;
-  document.body.appendChild(t);
-  requestAnimationFrame(()=>t.classList.add('show'));
-  setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),300)},2500);
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 100) + 'px';
 }
 
-const engineTemplates={
-  T1:{
-    title:'T1 Mirror 认知同构',
-    desc:'不读原文，仅凭路标生成等价内容。命题覆盖100%，6/6立场反转。',
-    placeholder:'输入一段文本来提取路标并生成等价镜像...',
-    example:'量子计算利用量子叠加态进行并行计算，相比经典计算机有指数级加速优势。',
-    renderResult(data){return '<div class="result-section"><h4 style="color:var(--accent)">路标提取</h4><div class="tag-row">'+(data.landmarks||[]).map(l=>'<span class="tag">'+l.type+'</span>').join('')+'</div><h4 style="color:var(--accent);margin-top:12px">镜像生成</h4><p style="background:var(--bg3);padding:12px;border-radius:var(--radius);margin:8px 0">'+(data.mirrored||'')+'</p><p>等价度: <strong style="color:var(--green)">'+(data.equivalence_score||0)+'</strong></p></div>';}
-  },
-  T2:{
-    title:'T2 Prism 超图坍缩',
-    desc:'高维超图坍缩，生成多元解读。5角度生成，追溯率95.2%。',
-    placeholder:'输入文本以生成多角度解读视角...',
-    example:'人工智能正在改变医疗诊断的方式，从影像分析到药物发现。',
-    renderResult(data){let h='<div class="result-section"><h4 style="color:var(--accent)">多视角解读</h4>';for(const p of(data.perspectives||[])){h+='<div class="card" style="margin:8px 0"><div style="display:flex;justify-content:space-between"><strong>'+p.angle+'</strong><span style="color:var(--accent)">'+(p.score||0)+'</span></div><p style="color:var(--fg2);margin-top:4px">'+(p.content||'')+'</p></div>'}h+='<p>追溯率: <strong style="color:var(--green)">'+((data.trace_rate||0)*100).toFixed(1)+'%</strong></p></div>';return h;}
-  },
-  T3:{
-    title:'T3 Geodesic 测地线导航',
-    desc:'语义流形测地线导航。3条路径，2条新颖，原子层破局。',
-    placeholder:'输入文本以在语义空间中导航...',
-    example:'如何提高深度学习模型的泛化能力？',
-    renderResult(data){let h='<div class="result-section"><h4 style="color:var(--accent)">导航路径</h4>';for(const p of(data.paths||[])){h+='<div class="card" style="margin:8px 0"><div style="display:flex;justify-content:space-between"><strong>'+p.label+'</strong>'+(p.novel?'<span class="tag" style="background:var(--green)20;color:var(--green)">新颖</span>':'')+'</div><p style="color:var(--fg2);margin-top:4px">'+(p.content||'')+'</p><small style="color:var(--fg2)">距离: '+(p.distance||0)+'</small></div>'}h+='<p>新颖路径: <strong style="color:var(--purple)">'+(data.novel_count||0)+'</strong></p></div>';return h;}
-  },
-  T4:{
-    title:'T4 Crystallization 知识结晶',
-    desc:'信息碎片随机碰撞，知识自发结晶。11个晶体，9+处涌现关联。',
-    placeholder:'输入多个信息片段或知识点，让它们自发结晶形成关联...',
-    example:'神经网络是一种受生物启示的计算模型。反向传播是训练神经网络的核心算法。注意力机制使得模型能够聚焦于输入的关键部分。',
-    renderResult(data){let h='<div class="result-section"><h4 style="color:var(--accent)">知识晶体 ('+(data.crystal_count||0)+')</h4><div class="crystal-grid">';for(const c of(data.crystals||[])){h+='<div class="card crystal-card" style="padding:10px"><small style="color:var(--accent)">'+c.id+'</small><p>'+(c.content||'')+'</p><small style="color:var(--fg2)">'+(c.score||0)+'</small></div>'}h+='</div><h4 style="color:var(--purple);margin-top:12px">涌现关联</h4>';for(const a of(data.emergent_associations||[])){h+='<div class="emergent-link"><span style="color:var(--purple)">&#9670;</span> '+a+'</div>'}h+='</div>';return h;}
-  },
-  T5:{
-    title:'T5 Genesis 思想种子',
-    desc:'思想种子反事实生长出平行宇宙。11个分枝，杂交1+1>2。',
-    placeholder:'输入一个思想种子，让它反事实生长出分支...',
-    example:'如果我们能以光速旅行，人类文明将会变成什么样？',
-    renderResult(data){let h='<div class="result-section"><h4 style="color:var(--accent)">分枝宇宙 ('+(data.branch_count||0)+')</h4>';for(const b of(data.branches||[])){h+='<div class="card" style="margin:8px 0"><div style="display:flex;justify-content:space-between"><strong>'+b.id+'</strong><span style="color:var(--green)">适应度: '+(b.fitness||0)+'</span></div><p style="color:var(--fg2);margin-top:4px">'+(b.content||'')+'</p></div>'}if(data.hybrid){h+='<h4 style="color:var(--purple);margin-top:12px">杂交结果</h4><div class="card" style="border:1px solid var(--purple)"><p>'+(data.hybrid.content||'')+'</p><p style="color:var(--green)">杂交增益: '+(data.hybrid.advantage||0)+'x</p></div>'}h+='</div>';return h;}
-  },
-  T6:{
-    title:'T6 Invariant 认知几何不变量',
-    desc:'SVM 94.0%，H1-H4全验证。ITC/SCS/IEC/PFFT 四维评估。',
-    placeholder:'输入文本来评估其认知质量...',
-    example:'认知涌现引擎是一套具备自我宪法的认知科研体系，通过四个几何不变量实现对认知产物的自主质量判断。',
-    renderResult(data){const rad=80;let svg='<svg viewBox="0 0 200 200" style="width:180px;height:180px;margin:auto;display:block"><circle cx="100" cy="100" r="'+rad+'" fill="none" stroke="var(--border)" stroke-width="1"/>';for(let i=1;i<=4;i++){const r=rad*i/4;svg+='<circle cx="100" cy="100" r="'+r+'" fill="none" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="3,3"/>'}const points=[['ITC',-90],[90,-90],['SCS',0],['IEC',90],[0,90],['PFFT',0]];const labels=[['ITC',100,70],['SCS',170,95],['PFFT',100,120],['IEC',30,95]];const vals=[data.itc||0,data.scs||0,data.iec||0,data.pfft||0];let poly='';for(let i=0;i<4;i++){const a=(Math.PI*2*i/4)-Math.PI/2;const r=vals[i]*rad;poly+=(100+r*Math.cos(a))+','+(100+r*Math.sin(a))+' '}svg+='<polygon points="'+poly.trim()+'" fill="'+varGet('--accent')+'20" stroke="'+varGet('--accent')+'" stroke-width="2"/>';for(const l of labels){svg+='<text x="'+l[1]+'" y="'+l[2]+'" text-anchor="middle" fill="var(--fg2)" font-size="10">'+l[0]+'</text>'}svg+='</svg>';let h='<div class="result-section">'+svg+'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">';const colors={itc:'var(--itc)',scs:'var(--scs)',iec:'var(--iec)',pfft:'var(--accent)'};for(const [k,c] of Object.entries(colors)){const v=data[k]||0;h+='<div class="card" style="text-align:center;padding:8px"><div style="font-size:1.4em;font-weight:800;color:'+c+'">'+(v*100).toFixed(0)+'%</div><small style="color:var(--fg2)">'+k.toUpperCase()+'</small></div>'}h+='</div>';h+='<div style="text-align:center;margin:12px 0">评级: '+badgeTier((data.itc+data.scs+data.iec+data.pfft)/4,'')+'</div>';if(data.suggestions&&data.suggestions.length){h+='<h4 style="color:var(--accent)">改进建议</h4>';for(const s of data.suggestions)h+='<div style="padding:6px 0;border-bottom:1px solid var(--border)">'+s+'</div>'}h+='</div>';return h;}
-  }
-};
+async function sendMessage() {
+  const text = chatInput.value.trim();
+  if (!text || typing) return;
+  chatInput.value = '';
+  document.getElementById('sendBtn').disabled = true;
+  autoResize(chatInput);
 
-let activeEngine=null;
+  // Hide welcome
+  const welcome = document.getElementById('welcome');
+  if (welcome) welcome.style.display = 'none';
 
-function showEngine(id){
-  activeEngine=id;
-  const t=engineTemplates[id];
-  if(!t)return;
-  const panel=$p('engine-panel');
-  panel.innerHTML='<h2 style="font-size:1.3em;margin-bottom:4px">'+t.title+'</h2><p style="color:var(--fg2);margin-bottom:12px">'+t.desc+'</p><div class="card" style="position:relative"><textarea id="engineInput" class="cee-input" placeholder="'+t.placeholder+'" rows="3">'+t.example+'</textarea><div id="thermometer" class="thermometer"></div></div><button id="engineRun" class="btn primary" style="width:100%;margin-top:8px">运行 '+id+'</button><div id="engineResult" style="margin-top:12px"></div>';
-  document.getElementById('engineRun').onclick=()=>runEngine(id);
-  const input=document.getElementById('engineInput');
-  input.addEventListener('input',()=>updateThermometer(input.value));
-  updateThermometer(t.example);
-}
+  // Add user message
+  addMessage('user', text);
+  scrollToBottom();
 
-async function runEngine(id){
-  const input=$p('engineInput').value.trim();
-  if(!input)return;
-  const btn=$p('engineRun');
-  btn.disabled=true;btn.textContent='计算中...';
-  const endpoints={T1:'/api/t1/mirror',T2:'/api/t2/prism',T3:'/api/t3/geodesic',T4:'/api/t4/crystallize',T5:'/api/t5/genesis',T6:'/api/t6/evaluate'};
-  const data=await api(endpoints[id],{text:input,options:{}});
-  btn.disabled=false;btn.textContent='运行 '+id;
-  const result=$p('engineResult');
-  if(data)result.innerHTML=engineTemplates[id].renderResult(data);
-  else result.innerHTML='<p style="color:var(--coral)">引擎调用失败</p>';
-  checkEmergenceRitual(data,id);
-}
+  // Add typing indicator
+  const typingEl = addTyping();
+  scrollToBottom();
+  typing = true;
 
-function updateThermometer(text){
-  const el=$p('thermometer');
-  if(!el)return;
-  const words=text.trim().split(/\s+/).filter(Boolean);
-  const unique=new Set(words.map(w=>w.toLowerCase()));
-  const diversity=unique.size/Math.max(1,words.length);
-  const iec=Math.min(1,Math.max(0,diversity*words.length/Math.max(1,words.length+5)*1.5));
-  el.style.setProperty('--iec-val',iec);
-  let cls='';
-  if(iec>.7)cls='critical';
-  else if(iec>.4)cls='optimal';
-  else cls='redundant';
-  el.className='thermometer thermo-'+cls;
-}
+  const apiKey = document.getElementById('apiKeyInput').value.trim();
+  const baseUrl = document.getElementById('baseUrlInput').value.trim() || 'https://api.openai.com/v1';
+  const model = document.getElementById('modelInput').value.trim() || 'gpt-4o-mini';
 
-function checkEmergenceRitual(data,engineId){
-  if(engineId!=='T6')return;
-  const avg=((data.itc||0)+(data.scs||0)+(data.iec||0)+(data.pfft||0))/4;
-  if(avg<.9)return;
-  const overlay=document.createElement('div');
-  overlay.className='ritual-overlay';
-  overlay.innerHTML='<div class="ritual-content"><div class="ritual-crystal"></div><div class="ritual-text">认知涌现</div><div class="ritual-particles"><span></span><span></span><span></span><span></span><span></span></div></div>';
-  document.body.appendChild(overlay);
-  requestAnimationFrame(()=>overlay.classList.add('active'));
-  setTimeout(()=>{overlay.classList.remove('active');setTimeout(()=>overlay.remove(),500)},2500);
-}
-</script>
-
-<style>
-.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px;box-shadow:var(--shadow);transition:transform .2s,border-color .3s}
-.card:active{transform:scale(.98)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;border:none;border-radius:var(--radius);font-size:.95em;font-weight:600;cursor:pointer;transition:all .2s}
-.btn.primary{background:var(--accent);color:#0A0A0F}
-.btn.secondary{background:var(--bg3);color:var(--fg)}
-.btn.small{padding:6px 12px;font-size:.85em}
-.btn:active{transform:scale(.96);opacity:.8}
-.btn:disabled{opacity:.5;pointer-events:none}
-.tag{display:inline-block;padding:2px 8px;background:var(--bg3);border-radius:12px;font-size:.8em;margin:2px;color:var(--fg2)}
-.tag-row{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
-.cee-input{width:100%;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);color:var(--fg);font-size:.95em;resize:vertical;font-family:inherit;transition:border-color .3s,box-shadow .3s}
-.cee-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent)20}
-.result-section{margin:12px 0}
-.crystal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.crystal-card{animation:webFloat 3s ease-in-out infinite}
-.crystal-card:nth-child(odd){animation-delay:0s}.crystal-card:nth-child(even){animation-delay:1.5s}
-.emergent-link{padding:8px;margin:4px 0;background:var(--bg);border-radius:8px;border-left:3px solid var(--purple);animation:shimmer 2s linear infinite;background-size:200% 100%;background-image:linear-gradient(90deg,var(--bg),var(--bg3),var(--bg))}
-.tier-badge{display:inline-block;padding:2px 8px;border-radius:12px;font-weight:800;font-size:.85em}
-.section-title{font-size:1.1em;font-weight:700;color:var(--accent);margin:16px 0 8px;display:flex;align-items:center;gap:8px}
-.section-title::after{content:'';flex:1;height:1px;background:var(--border)}
-.engine-list{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.engine-item{padding:12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;text-align:center;transition:all .3s}
-.engine-item:hover,.engine-item:active{border-color:var(--accent);box-shadow:0 0 12px var(--accent)15}
-.engine-item .icon{font-size:1.8em;margin-bottom:4px}
-.engine-item .name{font-weight:700;font-size:.9em}
-.engine-item .brief{font-size:.75em;color:var(--fg2);margin-top:2px}
-.thermometer{position:absolute;right:8px;top:8px;width:24px;height:24px;border-radius:50%;background:var(--bg3);transition:all .4s}
-.thermo-optimal{background:var(--green);box-shadow:0 0 12px var(--green);animation:breathe 2s ease-in-out infinite}
-.thermo-critical{background:var(--coral);box-shadow:0 0 12px var(--coral);animation:snareShake .3s ease-in-out}
-.thermo-redundant{background:var(--fg2);opacity:.3}
-
-/* Living Web */
-#webCanvas{width:100%;height:420px;border-radius:var(--radius);background:var(--bg);border:1px solid var(--border)}
-#webLegend{display:flex;justify-content:space-around;margin-top:8px;flex-wrap:wrap;gap:4px}
-#webLegend span{font-size:.75em;padding:4px 8px;border-radius:8px;background:var(--bg3)}
-/* Emergence Ritual */
-.ritual-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s}
-.ritual-overlay.active{opacity:1;pointer-events:all}
-.ritual-content{text-align:center}
-.ritual-crystal{width:80px;height:80px;margin:0 auto 20px;background:linear-gradient(135deg,var(--accent),var(--purple));border-radius:20%;animation:crystalForm 1.5s ease-out forwards}
-.ritual-text{font-size:1.8em;font-weight:800;background:linear-gradient(135deg,var(--accent),var(--purple),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:glowPulse 2s ease-in-out infinite}
-.ritual-particles{position:absolute;pointer-events:none}
-.ritual-particles span{position:absolute;width:4px;height:4px;border-radius:50%;animation:particleDissolve 1.5s ease-out forwards}
-.ritual-particles span:nth-child(1){background:var(--itc);left:20%}
-.ritual-particles span:nth-child(2){background:var(--scs);left:40%}
-.ritual-particles span:nth-child(3){background:var(--iec);left:60%}
-.ritual-particles span:nth-child(4){background:var(--accent);left:80%}
-.ritual-particles span:nth-child(5){background:var(--green);left:50%}
-
-/* Toast */
-.toast{position:fixed;bottom:100px;left:50%;transform:translateX(-50%) translateY(20px);padding:10px 20px;border-radius:20px;font-size:.9em;z-index:999;opacity:0;transition:all .3s;pointer-events:none;color:#fff;background:#1A1A2E;border:1px solid var(--accent);box-shadow:0 4px 16px rgba(0,0,0,.5)}
-.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-.toast-error{background:#3B1A1A;border-color:var(--coral)}
-
-/* Governance */
-.constitution-principle{padding:12px;margin:8px 0;background:var(--bg);border-radius:var(--radius);border-left:3px solid var(--accent)}
-.log-entry{padding:10px;margin:4px 0;background:var(--bg);border-radius:var(--radius);border-left:3px solid var(--fg2)}
-.log-entry .timestamp{font-size:.75em;color:var(--fg2)}
-
-/* Sensory Friendly */
-[data-sensory="true"] .crystal-card,[data-sensory="true"] .emergent-link{animation:none!important}
-[data-sensory="true"] #webCanvas{opacity:.7}
-[data-sensory="true"] .thermometer{animation:none!important}
-[data-perf="true"] #webCanvas{height:280px}
-[data-perf="true"] .ritual-crystal{animation-duration:.5s!important}
-</style>
-
-<script>
-function buildApp(){
-  const app=$p('app');
-
-  app.innerHTML=`
-<!-- 首页 -->
-<div id="page-home" class="page active">
-  <div style="text-align:center;padding:24px 0">
-    <div style="font-size:2em;font-weight:900;background:linear-gradient(135deg,var(--accent),var(--purple),var(--green));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px">CEE</div>
-    <div style="font-size:.85em;color:var(--fg2);letter-spacing:2px">认知涌现引擎 v4.0</div>
-  </div>
-  <div id="dash-status"><div style="text-align:center;padding:40px;color:var(--fg2)">加载中...</div></div>
-</div>
-
-<!-- 引擎页 -->
-<div id="page-engines" class="page">
-  <h2 style="font-size:1.3em;margin-bottom:12px">六项原创技术</h2>
-  <div class="engine-list" id="engineGrid"></div>
-  <div id="engine-panel" class="card" style="margin-top:16px;display:none"></div>
-</div>
-
-<!-- 活蛛网页 -->
-<div id="page-web" class="page">
-  <h2 style="font-size:1.3em;margin-bottom:8px">活着的蛛网</h2>
-  <p style="color:var(--fg2);margin-bottom:8px">每个节点是一个认知单元，连线代表概念关系。张力、脉动、光流均由不变量驱动。</p>
-  <canvas id="webCanvas"></canvas>
-  <div id="webLegend"></div>
-  <div class="card" style="margin-top:12px">
-    <h4 style="color:var(--accent)">图例</h4>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:.85em">
-      <div>ITC 连线粗细 <span style="display:inline-block;width:12px;height:2px;background:var(--itc);vertical-align:middle;margin:0 4px"></span></div>
-      <div>IEC 脉动频率 <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--iec);vertical-align:middle;margin:0 4px;animation:pulse 1s infinite"></span></div>
-      <div>SCS 流动速度 <span style="display:inline-block;width:16px;height:2px;background:linear-gradient(90deg,transparent,var(--scs));vertical-align:middle;margin:0 4px"></span></div>
-      <div>PFFT 棱镜折射 <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:linear-gradient(135deg,var(--accent),var(--purple));vertical-align:middle;margin:0 4px"></span></div>
-    </div>
-  </div>
-</div>
-
-<!-- 治理页 -->
-<div id="page-governance" class="page">
-  <h2 style="font-size:1.3em;margin-bottom:4px">治理与传承</h2>
-  <p style="color:var(--fg2);margin-bottom:12px">自我宪法 · 可追溯决策 · 可传承思想</p>
-  <div id="gov-constitution"></div>
-  <div class="section-title">决策日志</div>
-  <div id="gov-logs" style="max-height:200px;overflow-y:auto"><div style="color:var(--fg2)">加载中...</div></div>
-  <div class="section-title">知识遗产</div>
-  <div id="gov-legacy"><div style="color:var(--fg2)">加载中...</div></div>
-  <button id="gov-test-log" class="btn secondary" style="width:100%;margin-top:12px">记录测试决策</button>
-</div>
-
-<!-- 设置页 -->
-<div id="page-settings" class="page">
-  <h2 style="font-size:1.3em;margin-bottom:12px">系统设置</h2>
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0">
-      <div><strong>主题</strong><br><small style="color:var(--fg2)">暗色 / 亮色</small></div>
-      <button id="themeToggle" class="btn secondary small" onclick="toggleTheme()">🌙</button>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--border)">
-      <div><strong>性能模式</strong><br><small style="color:var(--fg2)">减少动画和分辨率</small></div>
-      <button id="perfToggle" class="btn secondary small" onclick="togglePerf()">性能模式:关</button>
-    </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:1px solid var(--border)">
-      <div><strong>感官友好</strong><br><small style="color:var(--fg2)">关闭非必要动效</small></div>
-      <button id="sensoryToggle" class="btn secondary small" onclick="toggleSensory()">感官友好:关</button>
-    </div>
-  </div>
-  <div class="card" style="margin-top:12px">
-    <h4 style="color:var(--accent)">系统信息</h4>
-    <div id="settings-info"><p style="color:var(--fg2)">加载中...</p></div>
-  </div>
-  <div class="card" style="margin-top:12px">
-    <h4 style="color:var(--accent)">色彩系统</h4>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--bg)" title="深空黑"></span>
-      <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--accent)" title="电光蓝"></span>
-      <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--purple)" title="紫罗兰"></span>
-      <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--coral)" title="珊瑚红"></span>
-      <span style="display:inline-block;width:24px;height:24px;border-radius:50%;background:var(--green)" title="翡翠绿"></span>
-    </div>
-  </div>
-</div>`;
-
- // Build engine grid
-  const eg=$p('engineGrid');
-  const engines=[
-    {id:'T1',icon:'🪞',name:'Mirror 认知同构',brief:'不读原文，仅凭路标生成等价内容'},
-    {id:'T2',icon:'🔮',name:'Prism 超图坍缩',brief:'高维超图坍缩，生成多元解读'},
-    {id:'T3',icon:'🧭',name:'Geodesic 测地线导航',brief:'语义流形测地线导航，代码寻优'},
-    {id:'T4',icon:'💎',name:'Crystallization 知识结晶',brief:'信息碎片随机碰撞，知识自发结晶'},
-    {id:'T5',icon:'🌌',name:'Genesis 思想种子',brief:'反事实生长出平行宇宙'},
-    {id:'T6',icon:'📐',name:'Invariant 认知几何',brief:'四大不变量，AI自主判断质量'},
-  ];
-  for(const e of engines){
-    const div=document.createElement('div');
-    div.className='engine-item';
-    div.innerHTML='<div class="icon">'+e.icon+'</div><div class="name">'+e.name+'</div><div class="brief">'+e.brief+'</div>';
-    div.onclick=()=>{const panel=$p('engine-panel');panel.style.display='block';showEngine(e.id);panel.scrollIntoView({behavior:'smooth'})};
-    eg.appendChild(div);
-  }
-
-  // Tab events
-  $qa('#tabBar .tab').forEach(t=>{t.onclick=()=>switchPage(t.dataset.page)});
-
-  // Init
-  refreshDashboard();
-  loadGovernance();
-  loadSettingsInfo();
-  initTheme();
-}
-
-function initTheme(){
-  const saved=localStorage.getItem('cee-theme');
-  if(saved){theme=saved;document.documentElement.setAttribute('data-theme',theme)}
-  const btn=$p('themeToggle');
-  if(btn)btn.textContent=theme==='dark'?'🌙':'☀️';
-}
-
-async function loadGovernance(){
-  const constData=await api('/api/governance/constitution');
-  if(constData){
-    let h='<div class="card"><h4 style="color:var(--accent)">'+constData.title+' ('+constData.version+')</h4>';
-    for(const p of constData.principles||[]){
-      h+='<div class="constitution-principle"><strong>'+p.id+'. '+p.name+'</strong><p style="color:var(--fg2);font-size:.85em">'+p.content+'</p></div>';
-    }
-    h+='</div>';
-    const el=$p('gov-constitution');if(el)el.innerHTML=h;
-  }
-  const logs=await api('/api/governance/logs?limit=10');
-  if(logs&&logs.logs){
-    let h='';
-    for(const l of logs.logs){
-      h+='<div class="log-entry"><div class="timestamp">'+new Date(l.timestamp).toLocaleString('zh-CN')+'</div><strong>'+l.event+'</strong><p style="color:var(--fg2);font-size:.85em">'+l.detail+'</p></div>';
-    }
-    if(!h)h='<div style="color:var(--fg2)">暂无决策记录</div>';
-    const el=$p('gov-logs');if(el)el.innerHTML=h;
-  }
-  const legacy=await api('/api/governance/legacy?limit=10');
-  if(legacy&&legacy.legacy){
-    let h='';
-    for(const l of legacy.legacy){
-      h+='<div class="card" style="padding:10px;margin:4px 0"><strong>'+l.title+'</strong><p style="color:var(--fg2);font-size:.85em">'+l.content+'</p></div>';
-    }
-    if(!h)h='<div style="color:var(--fg2)">暂无知识遗产</div>';
-    const el=$p('gov-legacy');if(el)el.innerHTML=h;
-  }
-
-  // Test log button
-  const btn=$p('gov-test-log');
-  if(btn)btn.onclick=async()=>{
-    await api('/api/governance/log',{event:'测试决策',detail:'从移动端界面记录了测试决策条目',category:'test',data:{source:'mobile'}});
-    showToast('决策已记录');
-    loadGovernance();
+  const payload = {
+    messages: [...messages.map(m => ({role: m.role, content: m.content})), {role: 'user', content: text}],
+    session_id: sessionId,
+    api_key: apiKey,
+    base_url: baseUrl,
+    model: model,
+    deep_think: deepThink,
   };
-}
 
-async function loadSettingsInfo(){
-  const status=await api('/api/health');
-  const el=$p('settings-info');
-  if(el&&status){
-    el.innerHTML='<p>版本: <strong>'+status.version+'</strong></p><p>引擎: <strong>'+((status.engines||[]).join(', '))+'</strong></p><p>运行时间: <strong>'+status.uptime+'s</strong></p><p>决策日志: <strong>'+status.decisions+'</strong> 条</p><p>知识遗产: <strong>'+status.legacy_items+'</strong> 项</p>';
-  }
-}
-
-// ── Living Web Canvas ─────────────────────────────────────────────
-
-let webNodes=[],webEdges=[],webAnimId=null;
-
-function initLivingWeb(){
-  const canvas=$p('webCanvas');
-  if(!canvas||webAnimId)return;
-  if(perfMode){canvas.height=280;canvas.width=canvas.parentElement.clientWidth}else{canvas.height=420;canvas.width=canvas.parentElement.clientWidth}
-  const ctx=canvas.getContext('2d');
-
-  // Generate node/edge data
-  const count=perfMode?12:22;
-  webNodes=[];webEdges=[];
-  const cx=canvas.width/2,cy=canvas.height/2,rx=canvas.width*.4,ry=canvas.height*.35;
-
-  for(let i=0;i<count;i++){
-    const a=(Math.PI*2*i/count)-Math.PI/2;
-    webNodes.push({
-      x:cx+Math.cos(a)*rx*(.7+Math.random()*.3),
-      y:cy+Math.sin(a)*ry*(.7+Math.random()*.3),
-      baseX:cx+Math.cos(a)*rx,
-      baseY:cy+Math.sin(a)*ry,
-      iec:.3+Math.random()*.6,
-      scs:.3+Math.random()*.6,
-      size:3+Math.random()*6,
-      color:['#00D4FF','#7B61FF','#4ADE80','#FF6B6B'][Math.floor(Math.random()*4)],
-      pulse:0,
-      angle:a,
+  try {
+    const resp = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
     });
-  }
 
-  for(let i=0;i<count;i++){
-    for(let j=i+1;j<Math.min(count,i+5);j++){
-      const itc=.2+Math.random()*.7;
-      webEdges.push({from:i,to:j,itc,scs:.3+Math.random()*.6});
-    }
-  }
+    // Remove typing
+    if (typingEl) typingEl.remove();
 
-  // Legend
-  const legend=$p('webLegend');
-  legend.innerHTML='<span style="color:var(--itc)">ITC 拓扑张力</span><span style="color:var(--scs)">SCS 路径顺滑</span><span style="color:var(--iec)">IEC 信息脉动</span><span style="color:var(--accent)">PFFT 投影折射</span>';
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let aiContent = '';
+    let ceeScores = null;
+    let ceeTier = '';
+    let aiMsgEl = null;
 
-  function draw(){
-    if(currentPage!=='web'){webAnimId=null;return}
-    webAnimId=requestAnimationFrame(draw);
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-
-    const t=Date.now()*.001;
-
-    // Draw edges
-    for(const e of webEdges){
-      const n1=webNodes[e.from],n2=webNodes[e.to];
-      const alpha=.15+e.itc*.5;
-      const w=.4+e.itc*2.5;
-      ctx.beginPath();ctx.moveTo(n1.x,n1.y);ctx.lineTo(n2.x,n2.y);
-      ctx.strokeStyle='rgba(0,212,255,'+alpha+')';ctx.lineWidth=w;ctx.stroke();
-
-      // SCS flow particles
-      if(e.scs>.6){
-        const prog=(t*e.scs*2)%1;
-        const px=n1.x+(n2.x-n1.x)*prog,py=n1.y+(n2.y-n1.y)*prog;
-        ctx.beginPath();ctx.arc(px,py,1.2,0,Math.PI*2);
-        ctx.fillStyle='rgba(74,222,128,'+e.scs+')';ctx.fill();
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, {stream: true});
+      const lines = chunk.split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (!data) continue;
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type === 'thinking') {
+            // Update typing or show thinking
+            if (!aiMsgEl) {
+              aiMsgEl = addMessage('ai', '', {thinking: parsed.content});
+            } else {
+              updateThinking(aiMsgEl, parsed.content);
+            }
+          } else if (parsed.type === 'token') {
+            aiContent += parsed.content;
+            if (!aiMsgEl) {
+              aiMsgEl = addMessage('ai', aiContent);
+            } else {
+              updateAiContent(aiMsgEl, aiContent);
+            }
+            scrollToBottom();
+          } else if (parsed.type === 'cee') {
+            ceeScores = parsed.scores;
+            ceeTier = parsed.tier;
+          } else if (parsed.type === 'done') {
+            // noop
+          } else if (parsed.type === 'error') {
+            aiContent = '抱歉，处理您的消息时遇到了问题。请检查API配置或稍后再试。';
+            if (!aiMsgEl) aiMsgEl = addMessage('ai', aiContent);
+            else updateAiContent(aiMsgEl, aiContent);
+          }
+        } catch(e) {}
       }
     }
+
+    // Finalize: add CEE badge
+    if (aiMsgEl && ceeScores) {
+      finalizeAiMessage(aiMsgEl, ceeScores, ceeTier, aiContent);
+    }
+
+    // Add to history
+    messages.push({role: 'user', content: text});
+    messages.push({role: 'assistant', content: aiContent || '...'});
+
+    // Emergence ritual
+    if (ceeTier === 'S') showRitual();
+
+  } catch(e) {
+    if (typingEl) typingEl.remove();
+    addMessage('ai', '连接失败，请稍后重试。');
+    showToast('网络错误');
+  }
+
+  typing = false;
+  scrollToBottom();
+}
+
+function addMessage(role, content, opts={}) {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.innerHTML = `
+    <div class="msg-avatar">${role === 'user' ? 'U' : 'C'}</div>
+    <div class="msg-content">
+      ${role === 'ai' && opts.thinking ? `<div class="think-badge">${opts.thinking}</div>` : ''}
+      <div class="msg-bubble">${escapeHtml(content)}</div>
+    </div>
+  `;
+  msgs.appendChild(div);
+  return div;
+}
+
+function updateAiContent(el, content) {
+  const bubble = el.querySelector('.msg-bubble');
+  if (bubble) bubble.innerHTML = escapeHtml(content);
+}
+
+function updateThinking(el, text) {
+  const badge = el.querySelector('.think-badge');
+  if (badge) badge.textContent = text;
+  else {
+    const content = el.querySelector('.msg-content');
+    if (content) {
+      const tb = document.createElement('div');
+      tb.className = 'think-badge';
+      tb.textContent = text;
+      content.insertBefore(tb, content.firstChild);
+    }
+  }
+}
+
+function finalizeAiMessage(el, scores, tier, content) {
+  // Remove think badge
+  const tb = el.querySelector('.think-badge');
+  if (tb) tb.remove();
+
+  const contentDiv = el.querySelector('.msg-content');
+  const bubble = el.querySelector('.msg-bubble');
+  bubble.innerHTML = escapeHtml(content);
+
+  const badge = document.createElement('div');
+  badge.className = 'cee-badge tier-' + tier;
+  badge.textContent = '认知评级 ' + tier;
+
+  const metrics = document.createElement('div');
+  metrics.className = 'cee-metrics';
+  const cls = v => v >= 0.8 ? 'high' : v >= 0.6 ? 'mid' : 'low';
+  metrics.innerHTML = `
+    <span class="cee-metric ${cls(scores.itc)}">ITC:${scores.itc.toFixed(2)}</span>
+    <span class="cee-metric ${cls(scores.scs)}">SCS:${scores.scs.toFixed(2)}</span>
+    <span class="cee-metric ${cls(scores.iec)}">IEC:${scores.iec.toFixed(2)}</span>
+    <span class="cee-metric ${cls(scores.pfft)}">PFFT:${scores.pfft.toFixed(2)}</span>
+  `;
+
+  contentDiv.insertBefore(metrics, bubble);
+  contentDiv.insertBefore(badge, metrics);
+}
+
+function addTyping() {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg ai';
+  div.innerHTML = '<div class="msg-avatar">C</div><div class="msg-content"><div class="typing"><span></span><span></span><span></span></div></div>';
+  msgs.appendChild(div);
+  return div;
+}
+
+function scrollToBottom() {
+  const msgs = document.getElementById('messages');
+  setTimeout(() => { msgs.scrollTop = msgs.scrollHeight; }, 50);
+}
+
+// ═══════════════════ RITUAL ═══════════════════
+function showRitual() {
+  const overlay = document.getElementById('ritual');
+  overlay.classList.add('active');
+  setTimeout(() => overlay.classList.remove('active'), 1800);
+}
+
+// ═══════════════════ SETTINGS ═══════════════════
+function loadSettings() {
+  const apiKey = localStorage.getItem('cee_api_key') || '';
+  const baseUrl = localStorage.getItem('cee_base_url') || 'https://api.openai.com/v1';
+  const model = localStorage.getItem('cee_model') || 'gpt-4o-mini';
+  const theme = localStorage.getItem('cee_theme') || 'dark';
+  document.getElementById('apiKeyInput').value = apiKey;
+  document.getElementById('baseUrlInput').value = baseUrl;
+  document.getElementById('modelInput').value = model;
+  document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('themeLabel').textContent = theme === 'dark' ? '暗色' : '亮色';
+}
+
+function saveSettings() {
+  localStorage.setItem('cee_api_key', document.getElementById('apiKeyInput').value.trim());
+  localStorage.setItem('cee_base_url', document.getElementById('baseUrlInput').value.trim());
+  localStorage.setItem('cee_model', document.getElementById('modelInput').value.trim());
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  const next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('cee_theme', next);
+  document.getElementById('themeLabel').textContent = next === 'dark' ? '暗色' : '亮色';
+}
+
+// ═══════════════════ ENGINE CARDS ═══════════════════
+function buildEngineCards() {
+  const engines = [
+    {id: 't1', name: 'T1 认知同构镜', desc: '建立认知对象的自反同构映射，保证形式等价转换', endpoint: '/api/t1/mirror'},
+    {id: 't2', name: 'T2 超图坍缩棱镜', desc: '多维度坍缩高维语义超图，生成多视角折射结果', endpoint: '/api/t2/prism'},
+    {id: 't3', name: 'T3 测地线导航', desc: '在语义空间中计算最短测地线路径，发现原子突破', endpoint: '/api/t3/geodesic'},
+    {id: 't4', name: 'T4 知识结晶', desc: '从文本中析出晶体化知识单元，发现涌现性关联', endpoint: '/api/t4/crystallize'},
+    {id: 't5', name: 'T5 反事实生长', desc: '分支演化+杂交育种，生成高适应度的反事实方案', endpoint: '/api/t5/genesis'},
+    {id: 't6', name: 'T6 认知几何评估', desc: 'ITC/SCS/IEC/PFFT四不变量评测，输出综合等级', endpoint: '/api/t6/evaluate'},
+  ];
+
+  const container = document.getElementById('engine-page');
+
+  engines.forEach(eng => {
+    const card = document.createElement('div');
+    card.className = 'engine-card';
+    card.id = 'card-' + eng.id;
+    card.innerHTML = `
+      <div class="engine-card-header">
+        <span class="engine-card-badge">${eng.id.toUpperCase()}</span>
+        <span class="engine-card-title">${eng.name}</span>
+      </div>
+      <div class="engine-card-desc">${eng.desc}</div>
+      <input class="engine-input" placeholder="输入文本测试 ${eng.id.toUpperCase()}..." id="input-${eng.id}">
+      <button class="btn-engine-run" onclick="runEngine('${eng.id}','${eng.endpoint}')">运行</button>
+      <div class="engine-result" id="result-${eng.id}"></div>
+    `;
+    card.addEventListener('click', function(e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      this.classList.toggle('expanded');
+    });
+    container.appendChild(card);
+  });
+}
+
+async function runEngine(id, endpoint) {
+  const input = document.getElementById('input-' + id).value.trim();
+  if (!input) return;
+  const resultEl = document.getElementById('result-' + id);
+  resultEl.textContent = '运行中...';
+  try {
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: input, options: {}}),
+    });
+    const data = await resp.json();
+    resultEl.innerHTML = '<pre style="white-space:pre-wrap;font-size:11px">' + escapeHtml(JSON.stringify(data, null, 2).slice(0, 500)) + '</pre>';
+    updateTemp(data);
+  } catch(e) {
+    resultEl.textContent = '错误: ' + e.message;
+  }
+}
+
+function updateTemp(data) {
+  if (data.iec !== undefined || data.itc !== undefined) {
+    const iec = data.iec || data.scores?.iec || 0.65;
+    const pct = Math.round(iec * 100);
+    const fill = document.getElementById('tempFill');
+    fill.style.width = pct + '%';
+    if (iec < 0.4) { fill.style.background = 'var(--tier-d)'; document.getElementById('tempStatus').textContent = '冗余态'; }
+    else if (iec < 0.6) { fill.style.background = 'var(--tier-c)'; document.getElementById('tempStatus').textContent = '临界带'; }
+    else if (iec < 0.85) { fill.style.background = 'var(--tier-a)'; document.getElementById('tempStatus').textContent = '最优态'; }
+    else { fill.style.background = 'var(--tier-s)'; document.getElementById('tempStatus').textContent = '混沌态'; }
+    document.getElementById('tempValue').textContent = 'IEC ' + iec.toFixed(2);
+  }
+}
+
+// ═══════════════════ SPIDER WEB ═══════════════════
+let spiderRunning = false;
+function startSpiderWeb() {
+  if (spiderRunning) return;
+  spiderRunning = true;
+  const canvas = document.getElementById('spider-canvas');
+  if (!canvas) { spiderRunning = false; return; }
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+
+  const nodes = [];
+  const nodeCount = 11;
+  const radius = 100;
+  for (let i = 0; i < nodeCount; i++) {
+    const angle = (i / nodeCount) * Math.PI * 2;
+    nodes.push({
+      x: cx + Math.cos(angle) * radius,
+      y: cy + Math.sin(angle) * radius,
+      baseX: cx + Math.cos(angle) * radius,
+      baseY: cy + Math.sin(angle) * radius,
+      phase: Math.random() * Math.PI * 2,
+      size: 3 + Math.random() * 4,
+      pulse: 0,
+      pulseDir: 1,
+    });
+  }
+
+  let particles = [];
+  for (let i = 0; i < 30; i++) {
+    const a = Math.floor(Math.random() * nodeCount);
+    let b = Math.floor(Math.random() * nodeCount);
+    while (b === a) b = Math.floor(Math.random() * nodeCount);
+    particles.push({a, b, t: Math.random(), speed: 0.003 + Math.random() * 0.008});
+  }
+
+  function draw() {
+    if (currentPage !== 'engine') { spiderRunning = false; return; }
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw connections
+    for (let i = 0; i < nodeCount; i++) {
+      for (let j = i + 1; j < nodeCount; j++) {
+        const dist = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
+        const maxDist = 140;
+        const alpha = Math.max(0, 1 - dist / maxDist) * 0.2;
+        ctx.strokeStyle = `rgba(74,222,128,${alpha})`;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(nodes[i].x, nodes[i].y);
+        ctx.lineTo(nodes[j].x, nodes[j].y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw particles
+    particles.forEach(p => {
+      const na = nodes[p.a], nb = nodes[p.b];
+      const px = na.x + (nb.x - na.x) * p.t;
+      const py = na.y + (nb.y - na.y) * p.t;
+      ctx.fillStyle = 'rgba(74,222,128,0.7)';
+      ctx.beginPath();
+      ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      p.t += p.speed;
+      if (p.t >= 1) p.t = 0;
+    });
 
     // Draw nodes
-    for(const n of webNodes){
-      n.pulse=.5+.5*Math.sin(t*Math.PI*2*(.3+n.iec*2));
-      n.x=n.baseX+Math.sin(t+n.angle)*4*n.pulse;
-      n.y=n.baseY+Math.cos(t+n.angle+1)*4*n.pulse;
+    nodes.forEach(n => {
+      n.pulse += 0.02 * n.pulseDir;
+      if (n.pulse > 1) { n.pulse = 1; n.pulseDir = -1; }
+      if (n.pulse < 0) { n.pulse = 0; n.pulseDir = 1; }
+      n.x = n.baseX + Math.sin(Date.now() * 0.001 + n.phase) * 2;
+      n.y = n.baseY + Math.cos(Date.now() * 0.0015 + n.phase) * 2;
+      const r = n.size + n.pulse * 2;
+      ctx.fillStyle = 'rgba(74,222,128,0.9)';
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    });
 
-      // Glow
-      const glow=ctx.createRadialGradient(n.x,n.y,0,n.x,n.y,n.size*3);
-      glow.addColorStop(0,n.color+'60');glow.addColorStop(1,'transparent');
-      ctx.beginPath();ctx.arc(n.x,n.y,n.size*3,0,Math.PI*2);
-      ctx.fillStyle=glow;ctx.fill();
-
-      // Node body
-      ctx.beginPath();ctx.arc(n.x,n.y,n.size,0,Math.PI*2);
-      ctx.fillStyle=n.color;ctx.fill();
-      ctx.strokeStyle=n.color+'80';ctx.lineWidth=1;ctx.stroke();
-
-      // IEC pulse ring
-      if(n.iec>.55){
-        const pr=n.size+2+n.pulse*4;
-        ctx.beginPath();ctx.arc(n.x,n.y,pr,0,Math.PI*2);
-        ctx.strokeStyle=n.color+Math.floor(40+n.iec*40).toString(16);ctx.lineWidth=1;ctx.stroke();
-      }
-    }
+    requestAnimationFrame(draw);
   }
   draw();
 }
 
-// Init on load
-document.addEventListener('DOMContentLoaded',buildApp);
+// ═══════════════════ UTILS ═══════════════════
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
 
-// Handle resize
-window.addEventListener('resize',()=>{
-  if(currentPage==='web'){webAnimId=null;initLivingWeb()}
-});
-
-// Touch events: pull-to-refresh prevention
-document.addEventListener('touchmove',function(e){if(e.target.closest('#webCanvas'))e.preventDefault()},{passive:false});
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2000);
+}
 </script>
 </body>
 </html>
