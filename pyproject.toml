@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cognitive-emergence-engine"
+version = "1.0.0"
+description = "Cognitive Emergence Engine (CEE) — 认知涌现引擎：自我宪法、可追溯决策、可传承思想、可更替治理、可永续迭代的长期自治认知科研工程体系"
+authors = [
+    {name = "Qingluan Studio & AI Collaborators"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "numpy>=1.24.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.2.0",
+    "networkx>=3.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+    "httpx>=0.24.0",
+    "nltk>=3.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.0",
+    "ruff>=0.0.280",
+    "mypy>=1.4.0",
+]
+all = [
+    "cognitive-emergence-engine[dev]",
+    "matplotlib>=3.7.0",
+    "tqdm>=4.65.0",
+]
+
+[project.scripts]
+cee-serve = "cee.api.server:main"
+cee-chat = "cee.app.chat_backend:main"
+cee-evaluate = "cee.core.cli:evaluate"
+cee-benchmark = "cee.core.cli:benchmark"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

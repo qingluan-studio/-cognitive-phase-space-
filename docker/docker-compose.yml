@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  cee-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: cee-engine
+    ports:
+      - "8899:8899"
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8899/api/v1/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
