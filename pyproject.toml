@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cognitive-emergence-engine"
-version = "1.1.0"
-description = "Cognitive Emergence Engine (CEE) — 认知涌现引擎：自我宪法、可追溯决策、可传承思想、可更替治理、可永续迭代的长期自治认知科研工程体系"
+version = "2.0.0"
+description = "Cognitive Emergence Engine (CEE) — 认知涌现引擎：自我宪法、可追溯决策、可传承思想、可更替治理、可永续迭代的长期自治认知科研工程体系。含子代理编排、插件扩展、长文处理、自动学习、云端自配。"
 authors = [
     {name = "Qingluan Studio & AI Collaborators"}
 ]
@@ -54,6 +54,11 @@ cee-chat = "cee.app.chat_backend:main"
 cee-evaluate = "cee.core.cli:evaluate"
 cee-benchmark = "cee.core.cli:benchmark"
 cee-adversarial = "cee.core.cli:adversarial"
+cee-agent = "cee.core.cli:agent"
+cee-plugin = "cee.core.cli:plugin"
+cee-process = "cee.core.cli:process"
+cee-learn = "cee.core.cli:learn"
+cee-cloud = "cee.core.cli:cloud"
 
 [tool.setuptools.packages.find]
 where = ["src"]

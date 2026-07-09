@@ -9,6 +9,18 @@ Usage:
   cee-adversarial experiment --type deviation_detection
   cee-adversarial status
   cee-adversarial precedent list
+  cee-agent run --goal "..." --roles researcher,architect,coder
+  cee-plugin list
+  cee-process long-text --file input.txt
+  cee-process pipeline --pipeline analyze
+  cee-process read --file doc.md
+  cee-learn feedback add --score 0.8
+  cee-learn analyze
+  cee-learn tune --params threshold:0.5,0.7,0.9
+  cee-cloud detect
+  cee-cloud generate docker
+  cee-cloud generate k8s
+  cee-cloud health
 """
 
 import json
@@ -444,3 +456,267 @@ def _adversarial_precedent():
         store.import_jsonl(input_path)
         print(f"Imported from {input_path}")
         print(f"Total cases: {store.stats()['total_cases']}")
+
+
+def agent():
+    """Multi-agent orchestration CLI."""
+    from cee.agent import (
+        MultiAgentOrchestrator, AgentRole as _AgentRole, TaskStatus,
+    )
+
+    if len(sys.argv) < 2:
+        print("Usage: cee-agent run --goal \"...\" [--roles R1,R2,R3] [--status]")
+        return
+
+    subcmd = sys.argv[1]
+
+    if subcmd == "run":
+        goal = ""
+        roles_str = ""
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--goal" and i + 1 < len(args):
+                goal = args[i + 1]; i += 2
+            elif args[i] == "--roles" and i + 1 < len(args):
+                roles_str = args[i + 1]; i += 2
+            else:
+                i += 1
+        if not goal:
+            print("Error: --goal required", file=sys.stderr)
+            return
+        orchestrator = MultiAgentOrchestrator()
+        if roles_str:
+            roles = [getattr(_AgentRole, r.strip().upper(), _AgentRole.RESEARCHER)
+                     for r in roles_str.split(",")]
+        else:
+            roles = [_AgentRole.RESEARCHER, _AgentRole.ARCHITECT, _AgentRole.CODER,
+                     _AgentRole.REVIEWER, _AgentRole.SYNTHESIZER]
+        orchestrator.form_team(roles)
+        result = orchestrator.execute(goal)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+    elif subcmd == "status":
+        orchestrator = MultiAgentOrchestrator()
+        print(json.dumps(orchestrator.status, ensure_ascii=False, indent=2))
+
+
+def plugin():
+    """Plugin management CLI."""
+    from cee.plugin import PluginManager
+
+    if len(sys.argv) < 2:
+        print("Usage: cee-plugin [list|discover|status]")
+        return
+
+    subcmd = sys.argv[1]
+    manager = PluginManager()
+
+    if subcmd == "list":
+        plugins = manager.list_plugins()
+        if not plugins:
+            print("No plugins registered")
+        else:
+            for p in plugins:
+                meta = p.get_metadata()
+                print(f"  {meta.name} v{meta.version} [{meta.category.value}] — {meta.description}")
+        print(f"\nTotal: {len(plugins)} plugins")
+
+    elif subcmd == "discover":
+        paths = sys.argv[2:] if len(sys.argv) > 2 else ["."]
+        count = manager.discover_plugins(paths)
+        print(f"Discovered {count} plugins")
+
+    elif subcmd == "status":
+        print(json.dumps(manager.status, ensure_ascii=False, indent=2))
+
+
+def process():
+    """Document and data processing CLI."""
+    if len(sys.argv) < 2:
+        print("Usage: cee-process [long-text|pipeline|read|format] [options]")
+        return
+
+    subcmd = sys.argv[1]
+
+    if subcmd == "long-text":
+        from cee.processing import LongTextProcessor, ChunkStrategy
+        text = ""
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--file" and i + 1 < len(args):
+                text = Path(args[i + 1]).read_text(); i += 2
+            elif args[i] == "--text" and i + 1 < len(args):
+                text = args[i + 1]; i += 2
+            elif args[i] == "--stdin":
+                text = sys.stdin.read(); i += 1
+            else:
+                i += 1
+        if not text:
+            text = sys.stdin.read()
+        processor = LongTextProcessor(chunk_size=1000, overlap=100)
+        report = processor.process(text)
+        print(f"Original: {report.original_length} chars → {report.chunk_count} chunks at depth {report.depth}")
+        print(f"Key phrases: {', '.join(report.key_phrases[:10])}")
+        print(f"Summary: {report.summary[:300]}")
+
+    elif subcmd == "pipeline":
+        from cee.processing import DataPipeline, TextTransformer, OutputFormatter, OutputFormat
+        text = ""
+        pipeline_name = "default"
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--file" and i + 1 < len(args):
+                text = Path(args[i + 1]).read_text(); i += 2
+            elif args[i] == "--text" and i + 1 < len(args):
+                text = args[i + 1]; i += 2
+            elif args[i] == "--pipeline" and i + 1 < len(args):
+                pipeline_name = args[i + 1]; i += 2
+            else:
+                i += 1
+        if not text:
+            text = sys.stdin.read()
+        pipeline = DataPipeline(name=pipeline_name)
+        pipeline.add_transformer("normalize", TextTransformer.normalize_whitespace)
+        pipeline.add_transformer("anonymize", TextTransformer.anonymize_emails)
+        result = pipeline.run(text)
+        print(json.dumps({
+            "pipeline": result.pipeline_name,
+            "input_size": result.input_size,
+            "output_size": result.output_size,
+            "steps": result.steps_executed,
+            "duration": f"{result.duration:.4f}s",
+        }, ensure_ascii=False, indent=2))
+
+    elif subcmd == "read":
+        from cee.processing import DocReader, DocumentFormat, OutputFormatter, OutputFormat
+        text = ""
+        fmt = DocumentFormat.PLAIN_TEXT
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--file" and i + 1 < len(args):
+                text = Path(args[i + 1]).read_text(); i += 2
+            elif args[i] == "--text" and i + 1 < len(args):
+                text = args[i + 1]; i += 2
+            elif args[i] == "--format" and i + 1 < len(args):
+                try:
+                    fmt = DocumentFormat(args[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            else:
+                i += 1
+        if not text:
+            text = sys.stdin.read()
+        reader = DocReader()
+        doc = reader.read(text, fmt)
+        print(json.dumps({
+            "title": doc.title,
+            "format": doc.format.value,
+            "word_count": doc.word_count,
+            "char_count": doc.char_count,
+            "reading_time_minutes": doc.reading_time_minutes,
+            "sections": len(doc.sections),
+            "metadata": doc.metadata,
+        }, ensure_ascii=False, indent=2))
+
+    elif subcmd == "format":
+        from cee.processing import OutputFormatter, OutputFormat
+        text = ""
+        out_fmt = OutputFormat.MARKDOWN
+        args = sys.argv[2:]
+        i = 0
+        while i < len(args):
+            if args[i] == "--file" and i + 1 < len(args):
+                text = Path(args[i + 1]).read_text(); i += 2
+            elif args[i] == "--text" and i + 1 < len(args):
+                text = args[i + 1]; i += 2
+            elif args[i] == "--format" and i + 1 < len(args):
+                try:
+                    out_fmt = OutputFormat(args[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            elif args[i] == "--stdin":
+                text = sys.stdin.read(); i += 1
+            else:
+                i += 1
+        if not text:
+            text = sys.stdin.read()
+        formatter = OutputFormatter()
+        data = {"title": "Document", "content": text, "length": len(text)}
+        output = formatter.format(data, out_fmt)
+        print(output)
+
+
+def learn():
+    """Auto-learning CLI."""
+    if len(sys.argv) < 2:
+        print("Usage: cee-learn [feedback|analyze|tune] [options]")
+        return
+
+    subcmd = sys.argv[1]
+
+    if subcmd == "feedback":
+        from cee.learning import FeedbackStore, FeedbackType
+        store = FeedbackStore()
+        store.add(score=0.85, feedback_type=FeedbackType.EXPLICIT, message="Great output", tags=["quality"])
+        store.add(score=0.4, feedback_type=FeedbackType.EXPLICIT, message="Needs improvement", tags=["quality"])
+        store.add(score=0.75, tags=["performance"])
+        stats = store.get_stats()
+        print(json.dumps(stats, ensure_ascii=False, indent=2))
+
+    elif subcmd == "analyze":
+        from cee.learning import AutoLearner
+        learner = AutoLearner()
+        learner.feedback.add(score=0.8, message="Good", tags=["quality"])
+        learner.feedback.add(score=0.6, message="OK", tags=["quality"])
+        learner.record_performance("baseline", {"threshold": 0.8}, 0.75)
+        learner.record_performance("tuned", {"threshold": 0.85}, 0.82)
+        insights = learner.analyze()
+        for ins in insights:
+            print(f"  [{ins.category}] {ins.name}: {ins.description} (confidence={ins.confidence:.2f})")
+        recs = learner.recommend()
+        print(f"\nRecommendations: {recs['recommendations']}")
+
+    elif subcmd == "tune":
+        from cee.learning import HyperOptimizer
+        optimizer = HyperOptimizer()
+        optimizer.set_param_space(threshold=[0.5, 0.7, 0.9], chunk_size=[500, 1000, 1500])
+        def dummy_eval(params: dict) -> float:
+            threshold_penalty = abs(params["threshold"] - 0.75)
+            size_penalty = abs(params["chunk_size"] - 1000) / 1000
+            return 1.0 - (threshold_penalty + size_penalty) / 2
+        results = optimizer.grid_search(dummy_eval, top_k=3)
+        print(json.dumps([
+            {"params": p, "score": round(s, 4)} for p, s in results
+        ], ensure_ascii=False, indent=2))
+
+
+def cloud():
+    """Cloud auto-config CLI."""
+    if len(sys.argv) < 2:
+        print("Usage: cee-cloud [detect|generate|health]")
+        return
+
+    subcmd = sys.argv[1]
+    cfg = __import__("cee.cloud", fromlist=["CloudAutoConfig"]).CloudAutoConfig()
+
+    if subcmd == "detect":
+        info = cfg.detect()
+        print(json.dumps(info.to_dict(), ensure_ascii=False, indent=2))
+
+    elif subcmd == "generate":
+        if len(sys.argv) > 2 and sys.argv[2] == "k8s":
+            print(cfg.generate_k8s_manifest())
+        elif len(sys.argv) > 2 and sys.argv[2] == "compose":
+            print(cfg.generate_docker_compose())
+        else:
+            print(cfg.generate_dockerfile())
+
+    elif subcmd == "health":
+        config = cfg.auto_configure()
+        print(json.dumps(cfg.get_status(), ensure_ascii=False, indent=2))
