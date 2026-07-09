@@ -119,6 +119,7 @@ PAID_ALTERNATIVES = {
 }
 
 
+
 def _detect_free_alternatives(text: str) -> list[str]:
     """检测用户提问中涉及的付费服务，返回免费替代建议"""
     found = []
@@ -607,6 +608,8 @@ async def system_status():
 async def chat(req: ChatReq):
     user_text = req.messages[-1].content if req.messages else ""
     session = _get_or_create_session(req.session_id)
+    if not session.get("title") or session.get("title", "").startswith("新对话"):
+        session["title"] = user_text[:30] + ("..." if len(user_text) > 30 else "")
     session["history"] = [{"role": m.role, "content": m.content} for m in req.messages[-12:]]
 
     # ── 模式1: LLM 增强 (有 API Key) ──
@@ -676,6 +679,8 @@ async def chat(req: ChatReq):
 async def chat_stream(req: ChatReq):
     user_text = req.messages[-1].content if req.messages else ""
     session = _get_or_create_session(req.session_id)
+    if not session.get("title") or session.get("title", "").startswith("新对话"):
+        session["title"] = user_text[:30] + ("..." if len(user_text) > 30 else "")
     session["history"] = [{"role": m.role, "content": m.content} for m in req.messages[-12:]]
 
     async def generate():
@@ -687,6 +692,7 @@ async def chat_stream(req: ChatReq):
         if req.api_key and HAS_HTTPX:
             try:
                 messages_payload = [{"role": m.role, "content": m.content} for m in req.messages]
+                yield f"data: {json.dumps({'type': 'step', 'step': '调用 LLM', 'status': 'running'})}\n\n"
                 yield f"data: {json.dumps({'type': 'thinking', 'content': f'调用 {req.model}...'})}\n\n"
                 async with httpx.AsyncClient(timeout=45) as client:
                     resp = await client.post(
@@ -715,6 +721,9 @@ async def chat_stream(req: ChatReq):
                             except Exception:
                                 continue
 
+                yield f"data: {json.dumps({'type': 'step', 'step': '调用 LLM', 'status': 'done'})}\n\n"
+                yield f"data: {json.dumps({'type': 'step', 'step': 'T6 认知评估', 'status': 'running'})}\n\n"
+
                 # CEE 评估
                 try:
                     scores = t6_engine.evaluate(full_text)
@@ -726,6 +735,7 @@ async def chat_stream(req: ChatReq):
                     itc, scs, iec, pfft = 0.8, 0.8, 0.6, 0.75
                 avg = (itc + scs + iec + pfft) / 4
                 tier = "S" if avg >= 0.9 else "A" if avg >= 0.8 else "B" if avg >= 0.7 else "C" if avg >= 0.5 else "D"
+                yield f"data: {json.dumps({'type': 'step', 'step': 'T6 认知评估', 'status': 'done'})}\n\n"
                 yield f"data: {json.dumps({'type': 'cee', 'scores': {'itc': round(itc,3), 'scs': round(scs,3), 'iec': round(iec,3), 'pfft': round(pfft,3)}, 'tier': tier, 'mode': 'llm'})}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
@@ -734,16 +744,22 @@ async def chat_stream(req: ChatReq):
                 # fall through to engine mode
 
         # 引擎合成模式 (流式模拟)
-        yield f"data: {json.dumps({'type': 'thinking', 'content': 'T2超图坍缩: 多视角分析...'})}\n\n"
-        await asyncio.sleep(0.25)
+        steps = [
+            ('T2 超图坍缩', 0.25),
+            ('T4 知识结晶', 0.15),
+            ('T5 反事实生长', 0.15),
+            ('T1 认知同构', 0.15),
+            ('T6 认知评估', 0.10),
+        ]
+        for step_name, delay in steps:
+            yield f"data: {json.dumps({'type': 'step', 'step': step_name, 'status': 'running'})}\n\n"
+            yield f"data: {json.dumps({'type': 'thinking', 'content': f'{step_name}: 正在处理...'})}\n\n"
+            await asyncio.sleep(delay)
 
         result = engine_chat(user_text, session.get("history", []), deep_think=req.deep_think)
 
-        yield f"data: {json.dumps({'type': 'thinking', 'content': 'T4知识结晶: 提取关键概念...'})}\n\n"
-        await asyncio.sleep(0.15)
-
-        yield f"data: {json.dumps({'type': 'thinking', 'content': 'T5反事实生长: 生成回复路径...'})}\n\n"
-        await asyncio.sleep(0.15)
+        for step_name, _ in steps:
+            yield f"data: {json.dumps({'type': 'step', 'step': step_name, 'status': 'done'})}\n\n"
 
         content = result["content"]
         # 模拟流式逐行输出
@@ -770,15 +786,26 @@ async def chat_stream(req: ChatReq):
 
 @app.get("/api/sessions")
 async def list_sessions():
-    return {"sessions": [{"id": sid, "messages": len(s["history"]),
-                          "created": round(time.time() - s["created"], 1)} for sid, s in _sessions.items()]}
+    return {"sessions": [{"id": sid, "msg_count": len(s.get("history", [])),
+                          "title": s.get("title", "新对话"),
+                          "relative_time": f"{round(time.time() - s.get('created', time.time()), 0)}秒前",
+                          "history": s.get("history", [])} for sid, s in _sessions.items()]}
 
 
 @app.post("/api/sessions/new")
 async def new_session():
     sid = str(uuid.uuid4())[:12]
-    _sessions[sid] = {"history": [], "created": time.time()}
+    title = f"新对话 {sid[:4]}"
+    _sessions[sid] = {"history": [], "created": time.time(), "title": title}
     return {"session_id": sid}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    s = _sessions.get(session_id)
+    if not s:
+        return JSONResponse({"error": "not found"}, 404)
+    return {"id": session_id, "history": s.get("history", []), "title": s.get("title", "")}
 
 
 @app.delete("/api/sessions/{session_id}")
