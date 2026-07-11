@@ -1,17 +1,27 @@
 """
-认知涌现引擎 — 本地推理引擎 v7.0
+认知涌现引擎 — 本地推理引擎 v8.0
 ===============================
-十层智能管线 + 自学习血肉
+双六层智能管线 + 十八引擎协同 + 自进化循环
 
-管线: 情感感知 → 加速缓存 → 意图澄清 → 阅读理解 →
-      记忆召回 → 用户画像 → 知识图谱 → 知识库检索 →
-      规则模板 → CEE引擎合成 → 自我反思 → 自学习管道
+前六层(感知/响应):
+  情感感知 → 突显网络 → 加速缓存 → 意图澄清 → 阅读理解 → CEE合成
 
-v7.0 新增:
-- AutoLearner: 从对话中自动提取和存储知识事实
-- ConversationFlow: 多轮对话话题深度追踪
-- AutoTuner: 反思驱动的自动参数校准闭环
-- KG动态扩展: 知识图谱从对话中吸收新节点
+后六层(认知/学习):
+  记忆召回 → 用户画像 → 知识图谱 → 知识库检索 → 规则模板 → 元认知
+
+进化四环(自动闭环):
+  相变检测 → 自学习管道 → 反思调参 → 梦境巩固
+
+创造三叉戟(按需激活):
+  概念融合 → 反事实推理 → 对话流追踪
+
+v8.0 新增(6个原创引擎):
+- 相变检测: 探索↔利用/发散↔收敛/感性↔理性 三维模式切换
+- 元认知: 置信度校准+未知觉察+6维信号估计
+- 概念融合: 双域混合产生涌现洞察
+- 梦境巩固: 闲置期知识回放/随机重组/抽象爬梯/异常侦测
+- 反事实推理: 条件反转→后果投射→因果洞察
+- 突显网络: 六维显著性评分+动态注意力预算
 """
 
 from __future__ import annotations
@@ -33,26 +43,23 @@ from .reflection_engine import ReflectionEngine
 from .feedback_learner import FeedbackLearner
 from .auto_learner import AutoLearner
 from .conversation_flow import ConversationFlow
+from .phase_transition import PhaseTransitionDetector
+from .metacognition import MetaCognition
+from .conceptual_blending import ConceptualBlending
+from .dream_consolidator import DreamConsolidator
+from .counterfactual import CounterfactualReasoning
+from .salience_network import SalienceNetwork
 
 
 class LocalInferenceEngine:
-    """
-    本地推理引擎 v7.0: 零API依赖，十层管线 + 自学习
-
-    使用方法:
-        engine = LocalInferenceEngine()
-        result = engine.chat("你好")
-        engine.feedback("你好", "like")
-        summary = engine.get_conversation_summary()
-    """
-
     def __init__(self, quality_threshold: float = 0.70,
                  t1_engine=None, t2_engine=None, t5_engine=None,
                  t6_engine=None, controller=None,
                  session_id: str = "default"):
         self.store = SelfLearningKnowledgeStore(quality_threshold=quality_threshold)
         self._quality_threshold = quality_threshold
-        self._stats = {"total_queries": 0, "cache_hits": 0, "fallback_uses": 0, "engine_uses": 0}
+        self._stats = {"total_queries": 0, "cache_hits": 0, "fallback_uses": 0,
+                       "engine_uses": 0}
 
         self._t1 = t1_engine
         self._t2 = t2_engine
@@ -61,7 +68,9 @@ class LocalInferenceEngine:
         self._controller = controller
 
         self._session_id = session_id
+
         self._affect = AffectEngine()
+        self._salience = SalienceNetwork()
         self._speedup = InferenceSpeedup()
         self._clarifier = ClarificationEngine()
         self._memory = MemoryEngine(session_id=session_id)
@@ -72,6 +81,12 @@ class LocalInferenceEngine:
         self._feedback = FeedbackLearner()
         self._auto_learner = AutoLearner(self.store)
         self._conversation = ConversationFlow(session_id=session_id)
+        self._phase = PhaseTransitionDetector()
+        self._metacog = MetaCognition()
+        self._blender = ConceptualBlending(self._kgraph)
+        self._dreamer = DreamConsolidator(self.store, self._auto_learner,
+                                          self._kgraph, self._blender)
+        self._counterfactual = CounterfactualReasoning(self._kgraph, self._auto_learner)
 
         self._last_reply: dict[str, Any] = {}
 
@@ -90,19 +105,25 @@ class LocalInferenceEngine:
 
     def chat(self, user_text: str, history: list[dict] | None = None,
              deep_think: bool = False) -> dict[str, Any]:
-        """主推理入口 — 十二层管线"""
-
         start = time.perf_counter()
         self._stats["total_queries"] += 1
-
-        # ── 第0层：对话流追踪 ──
-        flow = self._conversation.push_query(user_text)
-        flow_context = self._conversation.enrich_context()
-        conversation_depth = flow["depth"]
 
         # ── 第0层：情感感知 ──
         affect = self._affect.detect(user_text)
         tone = self._affect.choose_tone(affect)
+
+        # ── 第0层：突显网络 — 计算显著性+分配预算 ──
+        self._salience.set_context(
+            profile={"interests": self._profile._interests},
+            current_topic=self._conversation._current_topic or "",
+        )
+        sscore = self._salience.score(user_text, affect)
+        budget = self._salience.allocate_budget(sscore)
+
+        # ── 第0层：相变检测 ──
+        phase_state = self._phase.push(user_text, affect)
+        phase_event = self._phase.detect_transition()
+        phase_strategy = self._phase.get_phase_strategy()
 
         # ── 第0层：加速缓存 ──
         vectorizer = self.store._vectorizer if self.store._query_vectors is not None else None
@@ -115,20 +136,18 @@ class LocalInferenceEngine:
                                 "cee_tier": cached.cee_tier, "source": cached.source,
                                 "intent": cached.intent}
             self._reflection.push_reply(self._last_reply)
+            self._metacog.calibrate(user_text, 0.8, cached.cee_tier)
             return {
                 "content": cached.content,
-                "cee_scores": cached.cee_scores,
-                "cee_tier": cached.cee_tier,
-                "model": "空间引擎 v7.0 (缓存命中)",
-                "source": cached.source,
-                "learned": False, "optimized": False, "retries": 0,
-                "knowledge_hits": 0, "intent": cached.intent,
+                "cee_scores": cached.cee_scores, "cee_tier": cached.cee_tier,
+                "model": "空间引擎 v8.0 (缓存命中)",
+                "source": cached.source, "learned": False, "optimized": False,
+                "retries": 0, "knowledge_hits": 0, "intent": cached.intent,
                 "elapsed_s": elapsed,
                 "total_learned": self.store.stats()["total_pairs"],
-                "cached": True,
-                "speedup_stats": self._speedup.stats(),
-                "affect": affect,
-                "conversation_flow": flow,
+                "cached": True, "speedup_stats": self._speedup.stats(),
+                "affect": affect, "salience": sscore,
+                "phase": phase_event, "phase_strategy": phase_strategy,
             }
 
         # ── 第0.5层：意图澄清 ──
@@ -142,19 +161,17 @@ class LocalInferenceEngine:
                     for o in clarification["options"]
                 )
                 options_html = f'<div class="clarify-options">{opts}</div>'
-
             self._profile.update_from_query(user_text)
             return {
                 "content": clarification["question"] + options_html,
                 "cee_scores": {"itc": 0, "scs": 0, "iec": 0, "pfft": 0},
-                "cee_tier": "CLARIFY",
-                "model": "空间引擎 v7.0 (需要澄清)",
+                "cee_tier": "CLARIFY", "model": "空间引擎 v8.0 (需要澄清)",
                 "source": "clarification", "learned": False, "optimized": False,
                 "retries": 0, "knowledge_hits": 0,
                 "intent": "needs_clarification", "elapsed_s": elapsed,
                 "total_learned": self.store.stats()["total_pairs"],
-                "clarification": True, "affect": affect,
-                "conversation_flow": flow,
+                "clarification": True, "affect": affect, "salience": sscore,
+                "phase_event": phase_event, "phase_strategy": phase_strategy,
             }
 
         # ── 第0.6层：阅读理解 ──
@@ -162,22 +179,44 @@ class LocalInferenceEngine:
         if reading["continuity"] and reading["entity_ref"]:
             user_text = f"{reading['entity_ref']}：{user_text}"
 
-        # ── 第0.7层：记忆召回 ──
+        # ── 第0.7层：对话流追踪 ──
+        flow = self._conversation.push_query(user_text)
+        flow_context = self._conversation.enrich_context()
+
+        # ── 第0.8层：记忆召回 ──
         episodic_facts = self._memory.recall(user_text, top_k=3)
         memory_context = self._memory.get_context_for_inference()
 
-        # ── 第0.8层：用户画像 ──
+        # ── 第0.9层：用户画像 ──
         self._profile.update_from_query(user_text)
         profile_context = self._profile.get_context()
 
-        # ── 第0.9层：知识图谱扩展 ──
+        # ── 第1层：元认知 — 置信度估计 ──
+        cee_comp = 0.5
+        metacog_confidence = self._metacog.estimate(
+            user_text, kg_stats=self._kgraph.stats(),
+            learner_stats=self._auto_learner.stats(),
+            feedback_score=self._feedback.get_query_weight(user_text),
+            cee_composite=cee_comp, memory_hits=len(episodic_facts),
+        )
+        unknowns = self._metacog.detect_unknown(user_text)
+        metacog_strategy = self._metacog.get_adaptive_strategy(metacog_confidence, unknowns)
+
+        # ── 第1层：反事实推理 ──
+        cf_result = None
+        if self._counterfactual.is_counterfactual(user_text):
+            cf_result = self._counterfactual.reason(user_text)
+
+        # ── 第1层：知识图谱扩展 ──
         kg_enrichment = self._enrich_with_kgraph(user_text)
+        if "kg_bidirectional_expand" in budget["pipeline"] and "知识图谱" not in kg_enrichment:
+            kg_enrichment += self._kgraph_bidi_enrich(user_text)
 
         # ── 自学习管道事实查询 ──
         learner_facts = self._auto_learner.query(user_text, top_k=3)
         learner_context = self._auto_learner.get_enrichment(user_text)
 
-        # ── 第1层：知识库检索 ──
+        # ── 第2层：知识库检索 ──
         intent = detect_intent(user_text)
         retrieved = self.store.retrieve(user_text, top_k=3, min_similarity=0.25)
 
@@ -186,24 +225,34 @@ class LocalInferenceEngine:
             content = self._enrich_with_history(
                 user_text, retrieved, episodic_facts, memory_context,
                 profile_context, kg_enrichment, learner_context, flow_context,
-                tone, affect,
+                tone, affect, cf_result, metacog_strategy, phase_strategy,
             )
             source = "knowledge_base"
         else:
             self._stats["fallback_uses"] += 1
             content = generate_fallback(user_text, intent=intent)
 
-            # 话题深度≥3时，追加跟进建议
-            if conversation_depth >= 3:
+            if flow["depth"] >= 3:
                 followup = self._conversation.suggest_followup()
                 content += f"\n\n{followup}"
 
+            # 反事实洞察注入fallback
+            if cf_result:
+                content += f"\n\n【反事实视角】{cf_result.insight[:300]}"
+
             source = "fallback_rules"
 
-        # ── 第X层：自学习 — 尝试学习新知识 ──
+        # ── 第X层：概念融合 ──
+        blend_result = None
+        if "conceptual_blend" in budget["pipeline"] and sscore >= 0.55:
+            blend_result = self._blender.try_blend_from_text(user_text)
+        if blend_result and blend_result.score > 0.6:
+            content += f"\n\n{blend_result.insight}"
+
+        # ── 第X层：自学习 ──
         self._auto_learner.learn_from(user_text, content,
-                                      composite=self._evaluate_composite(content),
-                                      source=source)
+                                       composite=self._evaluate_composite(content),
+                                       source=source)
 
         # ── 知识图谱吸收 ──
         self._absorb_to_kgraph(user_text, content)
@@ -211,7 +260,7 @@ class LocalInferenceEngine:
         # ── 情感语气注入 ──
         content = self._inject_tone(content, tone, affect)
 
-        # ── T6 CEE 评估 ──
+        # ── CEE 评估 ──
         cee_scores = self._evaluate(content)
         composite = (cee_scores["itc"] + cee_scores["scs"] +
                      cee_scores["iec"] + cee_scores["pfft"]) / 4
@@ -234,7 +283,7 @@ class LocalInferenceEngine:
             except Exception:
                 pass
 
-        # ── 自学习 (结合反馈判断) ──
+        # ── 自学习 (反馈判断) ──
         learned = False
         if (self._feedback.should_learn(user_text, composite)
                 and not self._is_trivial(user_text)
@@ -251,14 +300,11 @@ class LocalInferenceEngine:
 
         elapsed = round(time.perf_counter() - start, 3)
 
-        # ── 存入加速缓存 ──
         self._speedup.store(user_text, content, cee_scores, tier, source, intent,
                             vectorizer=vectorizer)
 
-        # ── 更新记忆 ──
         self._memory.add_exchange(user_text, content)
 
-        # ── 自我反思 ──
         self._last_reply = {"content": content, "cee_scores": cee_scores,
                             "cee_tier": tier, "source": source,
                             "intent": intent, "elapsed_s": elapsed}
@@ -266,9 +312,8 @@ class LocalInferenceEngine:
 
         result = {
             "content": content,
-            "cee_scores": cee_scores,
-            "cee_tier": tier,
-            "model": "空间引擎 v7.0 (本地推理)",
+            "cee_scores": cee_scores, "cee_tier": tier,
+            "model": "空间引擎 v8.0 (本地推理)",
             "source": source, "learned": learned, "optimized": optimized,
             "retries": retries, "knowledge_hits": len(retrieved) if retrieved else 0,
             "intent": intent, "elapsed_s": elapsed,
@@ -276,11 +321,17 @@ class LocalInferenceEngine:
             "cached": False, "speedup_stats": self._speedup.stats(),
             "episodic_facts": episodic_facts,
             "has_profile": bool(self._profile.get_context()),
-            "clarification": False, "affect": affect,
-            "tone": tone,
+            "clarification": False, "affect": affect, "tone": tone,
             "conversation_flow": flow,
             "learner_facts": len(learner_facts),
             "learner_total": self._auto_learner.stats()["total_facts"],
+            "salience": sscore, "salience_budget": budget,
+            "phase_state": phase_state.label(), "phase_event": phase_event,
+            "phase_strategy": phase_strategy,
+            "metacog_confidence": metacog_confidence,
+            "metacog_strategy": metacog_strategy,
+            "has_counterfactual": cf_result is not None,
+            "has_blend": blend_result is not None,
         }
 
         # ── 周期反思 + 自动调参 ──
@@ -294,10 +345,13 @@ class LocalInferenceEngine:
                     self.store = SelfLearningKnowledgeStore(
                         quality_threshold=self._quality_threshold)
 
+        # ── 周期梦境巩固 ──
+        if self._stats["total_queries"] % 40 == 0:
+            self._dreamer.dream_cycle()
+
         return result
 
     def feedback(self, query: str, rating: str):
-        """用户反馈: rating = 'like' | 'dislike'"""
         if not self._last_reply:
             return
         self._feedback.record(
@@ -307,6 +361,9 @@ class LocalInferenceEngine:
             source=self._last_reply.get("source", "?"),
             cee_tier=self._last_reply.get("cee_tier", "?"),
             cee_scores=self._last_reply.get("cee_scores", {}),
+        )
+        self._metacog.calibrate(
+            query, self._last_reply.get("metacog_confidence", 0.5), rating,
         )
 
     # ── 内部方法 ─────────────────────────────────────────────
@@ -328,16 +385,27 @@ class LocalInferenceEngine:
                         return self._kgraph.get_enrichment(keyword)
         return ""
 
+    def _kgraph_bidi_enrich(self, query: str) -> str:
+        from .fallback_rules import BUILTIN_KNOWLEDGE
+        for keyword in BUILTIN_KNOWLEDGE:
+            if keyword.replace(" ", "").lower() in query.replace(" ", "").lower():
+                expanded = self._kgraph.bidirectional_expand(keyword, max_nodes=4)
+                if expanded:
+                    lines = [f"【双向关联 — {keyword}】"]
+                    for node, rel, direction, weight in expanded:
+                        arrow = "→" if direction == "out" else "←"
+                        lines.append(f"- {keyword} {arrow} {node}: {rel} ({weight:.0%})")
+                    return "\n".join(lines)
+                return ""
+        return ""
+
     def _absorb_to_kgraph(self, query: str, response: str):
-        """从本轮对话提取关键词注入知识图谱"""
         combined = query + " " + response[:300]
-        # 从内置知识库中提取匹配的关键词
         from .fallback_rules import BUILTIN_KNOWLEDGE
         keywords = []
         for kw in BUILTIN_KNOWLEDGE:
             if kw.replace(" ", "").lower() in combined.replace(" ", "").lower():
                 keywords.append(kw)
-        # 从回答中提取英文缩写和技术词
         tech_terms = re.findall(r'\b([A-Z][a-zA-Z]{2,}|[a-z]{3,}(?:\.(?:js|py|ts|rs|go)|[A-Z][a-z]+))\b', response[:500])
         keywords.extend(tech_terms[:5])
         if keywords:
@@ -347,9 +415,19 @@ class LocalInferenceEngine:
                              episodic_facts: list[str], memory_context: str,
                              profile_context: str, kg_text: str,
                              learner_context: str, flow_context: str,
-                             tone: str, affect: dict) -> str:
+                             tone: str, affect: dict,
+                             cf_result, metacog_strategy: str,
+                             phase_strategy: str) -> str:
         best = retrieved[0]
         lines: list[str] = []
+
+        if phase_strategy and phase_strategy != "常规对话":
+            lines.append(f"[相变策略: {phase_strategy}]")
+            lines.append("")
+
+        if metacog_strategy:
+            lines.append(f"[元认知: {metacog_strategy}]")
+            lines.append("")
 
         if kg_text:
             lines.append(kg_text)
@@ -360,6 +438,9 @@ class LocalInferenceEngine:
             lines.append("")
 
         lines.append(best.ai_response)
+
+        if cf_result:
+            lines.append(f"\n【反事实推演】{cf_result.insight[:300]}")
 
         if episodic_facts:
             facts_str = "；".join(episodic_facts)
@@ -427,14 +508,26 @@ class LocalInferenceEngine:
 
     def _is_template_response(self, content: str) -> bool:
         markers = ["关于这个问题，让我从几个维度分析",
-                   "让我推荐几个方案", "学习路线建议",
-                   "用 T5 反事实生长引擎"]
+                    "让我推荐几个方案", "学习路线建议",
+                    "用 T5 反事实生长引擎"]
         return any(m in content for m in markers)
 
     # ── 公开接口 ─────────────────────────────────────────────
 
     def search(self, query: str, top_k: int = 5) -> list[ConversationPair]:
         return self.store.retrieve(query, top_k=top_k, min_similarity=0.05)
+
+    def dream(self) -> dict:
+        return self._dreamer.dream_cycle()
+
+    def get_counterfactual(self, query: str):
+        return self._counterfactual.reason(query)
+
+    def get_blend(self, concept_a: str, concept_b: str, blend_type: str = "auto"):
+        return self._blender.blend(concept_a, concept_b, blend_type)
+
+    def get_salience_score(self, query: str) -> float:
+        return self._salience.score(query)
 
     def stats(self) -> dict:
         s = self.store.stats()
@@ -449,6 +542,12 @@ class LocalInferenceEngine:
         s["feedback"] = self._feedback.stats()
         s["auto_learner"] = self._auto_learner.stats()
         s["conversation"] = self._conversation.stats()
+        s["phase_transition"] = self._phase.stats()
+        s["metacognition"] = self._metacog.stats()
+        s["blender"] = self._blender.stats()
+        s["dreamer"] = self._dreamer.stats()
+        s["counterfactual"] = self._counterfactual.stats()
+        s["salience"] = self._salience.stats()
         return s
 
     def export_training_data(self) -> list[dict]:
@@ -480,6 +579,21 @@ class LocalInferenceEngine:
 
     def get_followup_suggestion(self) -> str:
         return self._conversation.suggest_followup()
+
+    def get_metacog_confidence(self, query: str = "") -> dict:
+        if query:
+            conf = self._metacog.estimate(query, kg_stats=self._kgraph.stats(),
+                                          learner_stats=self._auto_learner.stats(),
+                                          feedback_score=self._feedback.get_query_weight(query))
+            unknowns = self._metacog.detect_unknown(query)
+            return {"confidence": conf, "unknowns": unknowns,
+                    "strategy": self._metacog.get_adaptive_strategy(conf, unknowns)}
+        return self._metacog.stats()
+
+    def get_dream_insights(self) -> list:
+        return [{"type": i.dream_type, "content": i.content[:120],
+                 "confidence": i.confidence, "verified": i.verified}
+                for i in self._dreamer.get_pending_insights(5)]
 
     def clear_speedup_cache(self):
         self._speedup.clear()
