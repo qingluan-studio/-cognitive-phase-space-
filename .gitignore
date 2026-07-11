@@ -12,3 +12,4 @@ build/
 .cee_backups/
 decisions.jsonl
 knowledge_legacy/
+.cee_storage/

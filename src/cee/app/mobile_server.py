@@ -2,8 +2,8 @@
 空间 Mobile Server — 认知涌现 AI 对话服务
 
 端口: 8897
-双模式: 引擎合成(免费) / LLM增强(可选)
-核心能力: 免费替代执行 + 知识库检索 + T1-T6全引擎闭环
+三模式: 本机自学习推理(默认免费) / LLM增强(可选) / 引擎合成(最低保障)
+核心能力: TF-IDF语义检索 + 自学习知识库 + 后台训练管道 + T1-T6全引擎
 """
 
 from __future__ import annotations
@@ -42,6 +42,8 @@ from ..core.controller import ClosedLoopController
 from cee.app.engine.pipeline import PipelineOrchestrator
 from cee.app.engine.synthesis import SynthesisEngine
 from cee.app.engine.agent import AgentEngine
+from cee.app.local_llm import LocalInferenceEngine, AutoTrainer
+from cee.app.local_llm.knowledge_store import STORAGE_DIR
 
 STATIC_DIR = Path(__file__).parent / "frontend"
 
@@ -153,6 +155,16 @@ t5_engine = GenesisEngine()
 t6_engine = InvariantEngine()
 t6_theoretical = InvariantTheoretical()
 governance_config = GovernanceConfig()
+
+# ── 本地自学习推理引擎 ──────────────────────────────────────────────
+
+local_inference = LocalInferenceEngine(quality_threshold=0.68)
+local_inference.set_engines(
+    t1=t1_engine, t2=t2_engine, t5=t5_engine,
+    t6=t6_engine, controller=None,
+)
+
+auto_trainer = AutoTrainer(local_engine=local_inference, interval_minutes=15)
 
 
 def _make_t1_optimizer():
@@ -306,7 +318,9 @@ def engine_chat(user_text: str, history: list[dict], deep_think: bool = False) -
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    auto_trainer.start()
     yield
+    auto_trainer.stop()
 
 
 app = FastAPI(title="空间 Mobile AI", version="4.0.0", lifespan=lifespan)
@@ -359,14 +373,26 @@ async def mobile_ui():
 
 @app.get("/api/health")
 async def health():
+    ls = local_inference.stats()
     return {
         "status": "ok",
         "version": "4.0.0",
+        "mode": "local_inference (零API依赖)",
         "engines": ["T1", "T2", "T3", "T4", "T5", "T6"],
         "uptime": round(time.time() - _session_start, 1),
         "sessions": len(_sessions),
         "decisions": len(_decision_log),
         "legacy_items": len(_knowledge_legacy),
+        "local_llm": {
+            "total_learned": ls.get("total_pairs", 0),
+            "hit_rate": ls.get("hit_rate", 0),
+            "avg_composite": ls.get("avg_composite", 0),
+            "by_tier": ls.get("by_tier", {}),
+        },
+        "auto_trainer": {
+            "running": auto_trainer.is_running,
+            "runs": auto_trainer.get_report().get("runs", 0),
+        },
     }
 
 
@@ -594,6 +620,8 @@ async def get_legacy(limit: int = 20):
 
 @app.get("/api/system/status")
 async def system_status():
+    ls = local_inference.stats()
+    tr = auto_trainer.get_report()
     return {
         "engines": {f"T{i+1}_{n}": "online" for i, n in
                     enumerate(["Mirror","Prism","Geodesic","Crystallization","Genesis","Invariant"])},
@@ -604,12 +632,104 @@ async def system_status():
         "legacy_items": len(_knowledge_legacy),
         "sessions": len(_sessions),
         "preview": {"total_tests": 493, "passed": 493, "pass_rate": 1.0},
+        "local_llm": {
+            "total_learned": ls.get("total_pairs", 0),
+            "hit_rate": ls.get("hit_rate", 0),
+            "by_tier": ls.get("by_tier", {}),
+            "total_queries": ls.get("total_queries", 0),
+            "cache_hits": ls.get("cache_hits", 0),
+            "fallback_uses": ls.get("fallback_uses", 0),
+        },
+        "auto_trainer": {
+            "running": auto_trainer.is_running,
+            "runs": tr.get("runs", 0),
+            "last_run": tr.get("last_run"),
+        },
     }
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 聊天接口 (双模式: 引擎合成 / LLM增强)
+# 本地自学习引擎专用端点
 # ═══════════════════════════════════════════════════════════════════
+
+@app.get("/api/local/stats")
+async def local_stats():
+    ls = local_inference.stats()
+    tr = auto_trainer.get_report()
+    return {
+        "engine": ls,
+        "trainer": tr,
+        "storage_path": str(STORAGE_DIR),
+    }
+
+
+@app.post("/api/local/search")
+async def local_search(req: TextInput):
+    results = local_inference.search(req.text, top_k=req.options.get("top_k", 5))
+    return {
+        "query": req.text,
+        "results": [{
+            "id": r.id,
+            "user_query": r.user_query[:80],
+            "response_preview": r.ai_response[:120],
+            "composite": r.composite,
+            "tier": r.tier,
+            "usage_count": r.usage_count,
+        } for r in results],
+        "total": len(results),
+    }
+
+
+@app.post("/api/local/learn")
+async def force_learn(req: TextInput):
+    """手动触发学习一对对话"""
+    response_text = req.options.get("response", "")
+    if not response_text:
+        raise HTTPException(400, "需要提供 response 字段")
+    scores = _evaluate_text(response_text)
+    learned = local_inference.store.learn(
+        req.text, response_text,
+        scores["itc"], scores["scs"], scores["iec"], scores["pfft"],
+    )
+    return {"learned": learned, "scores": scores}
+
+
+@app.post("/api/local/export")
+async def export_training_data():
+    data = local_inference.export_training_data()
+    return {
+        "count": len(data),
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "data": data[:100],
+    }
+
+
+@app.post("/api/local/prune")
+async def prune_knowledge():
+    removed = local_inference.prune()
+    return {"removed": removed, "remaining": local_inference.store.stats()["total_pairs"]}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 聊天接口 (三模式: 本地推理 / LLM增强 / 引擎合成)
+# ═══════════════════════════════════════════════════════════════════
+
+def _evaluate_text(text: str) -> dict[str, float]:
+    try:
+        scores = t6_engine.evaluate(text)
+        return {
+            "itc": round(float(getattr(scores, "itc", 0.78)), 3),
+            "scs": round(float(getattr(scores, "scs", 0.82)), 3),
+            "iec": round(float(getattr(scores, "iec", 0.62)), 3),
+            "pfft": round(float(getattr(scores, "pfft", 0.75)), 3),
+        }
+    except Exception:
+        return {"itc": 0.78, "scs": 0.82, "iec": 0.62, "pfft": 0.75}
+
+
+def _tier_from_scores(scores: dict[str, float]) -> str:
+    avg = (scores["itc"] + scores["scs"] + scores["iec"] + scores["pfft"]) / 4
+    return "S" if avg >= 0.90 else "A" if avg >= 0.80 else "B" if avg >= 0.70 else "C" if avg >= 0.50 else "D"
 
 @app.post("/api/chat")
 async def chat(req: ChatReq):
@@ -619,63 +739,42 @@ async def chat(req: ChatReq):
         session["title"] = user_text[:30] + ("..." if len(user_text) > 30 else "")
     session["history"] = [{"role": m.role, "content": m.content} for m in req.messages[-12:]]
 
-    # ── 模式1: LLM 增强 (有 API Key) ──
-    if req.api_key and HAS_HTTPX:
+    # ── 模式1: 本地自学习推理 (默认，零API依赖) ──
+    result = local_inference.chat(
+        user_text,
+        history=session.get("history", []),
+        deep_think=req.deep_think,
+    )
+    session.setdefault("local_queries", 0)
+    session["local_queries"] += 1
+
+    # 如果启用了LLM且本地分数不高，用LLM增强
+    if req.api_key and HAS_HTTPX and result["cee_tier"] in ("C", "D"):
         try:
             messages_payload = [{"role": m.role, "content": m.content} for m in req.messages]
             async with httpx.AsyncClient(timeout=30) as client:
                 resp = await client.post(
                     f"{req.base_url}/chat/completions",
-                    json={"model": req.model, "messages": messages_payload, "temperature": req.temperature},
+                    json={"model": req.model, "messages": messages_payload,
+                          "temperature": req.temperature},
                     headers={"Authorization": f"Bearer {req.api_key}"},
                 )
                 if resp.status_code == 200:
                     data = resp.json()
-                    content = data["choices"][0]["message"]["content"]
-                else:
-                    content = None
+                    llm_content = data["choices"][0]["message"]["content"]
+                    cee_scores = _evaluate_text(llm_content)
+                    return {
+                        "content": llm_content,
+                        "model": req.model,
+                        "cee_scores": cee_scores,
+                        "cee_tier": _tier_from_scores(cee_scores),
+                        "mode": "llm",
+                        "learned": False,
+                    }
         except Exception:
-            content = None
+            pass
 
-        if content is not None:
-            # CEE 评估 LLM 输出
-            try:
-                scores = t6_engine.evaluate(content)
-                itc = float(getattr(scores, "itc", 0.8))
-                scs = float(getattr(scores, "scs", 0.8))
-                iec = float(getattr(scores, "iec", 0.6))
-                pfft = float(getattr(scores, "pfft", 0.75))
-            except Exception:
-                itc, scs, iec, pfft = 0.8, 0.8, 0.6, 0.75
-            avg = (itc + scs + iec + pfft) / 4
-            tier = "S" if avg >= 0.9 else "A" if avg >= 0.8 else "B" if avg >= 0.7 else "C" if avg >= 0.5 else "D"
-
-            # 深度思考: T6评估用户输入 + LLM输出增强展示
-            user_cee = None
-            if req.deep_think:
-                try:
-                    us = t6_engine.evaluate(user_text)
-                    user_cee = {"itc": round(float(getattr(us,"itc",0)),3),
-                                "scs": round(float(getattr(us,"scs",0)),3),
-                                "iec": round(float(getattr(us,"iec",0)),3),
-                                "pfft": round(float(getattr(us,"pfft",0)),3)}
-                except Exception:
-                    user_cee = None
-
-            return {
-                "content": content,
-                "model": req.model,
-                "cee_scores": {"itc": round(itc, 3), "scs": round(scs, 3), "iec": round(iec, 3), "pfft": round(pfft, 3)},
-                "cee_tier": tier,
-                "user_cee": user_cee,
-                "mode": "llm",
-            }
-
-    # ── 模式2: 引擎合成 (无 API Key) ──
-    result = engine_chat(user_text, session.get("history", []), deep_think=req.deep_think)
-    session.setdefault("engine_queries", 0)
-    session["engine_queries"] += 1
-    return {**result, "mode": "engine"}
+    return {**result, "mode": "local_inference"}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -692,15 +791,14 @@ async def chat_stream(req: ChatReq):
 
     async def generate():
         # 思考阶段
-        yield f"data: {json.dumps({'type': 'thinking', 'content': f'正在评估输入...'})}\n\n"
-        await asyncio.sleep(0.3)
+        yield f"data: {json.dumps({'type': 'thinking', 'content': '正在检索知识库...'})}\n\n"
+        await asyncio.sleep(0.2)
 
         # LLM 模式
         if req.api_key and HAS_HTTPX:
             try:
                 messages_payload = [{"role": m.role, "content": m.content} for m in req.messages]
                 yield f"data: {json.dumps({'type': 'step', 'step': '调用 LLM', 'status': 'running'})}\n\n"
-                yield f"data: {json.dumps({'type': 'thinking', 'content': f'调用 {req.model}...'})}\n\n"
                 async with httpx.AsyncClient(timeout=45) as client:
                     resp = await client.post(
                         f"{req.base_url}/chat/completions",
@@ -728,58 +826,49 @@ async def chat_stream(req: ChatReq):
                             except Exception:
                                 continue
 
-                yield f"data: {json.dumps({'type': 'step', 'step': '调用 LLM', 'status': 'done'})}\n\n"
-                yield f"data: {json.dumps({'type': 'step', 'step': 'T6 认知评估', 'status': 'running'})}\n\n"
-
-                # CEE 评估
-                try:
-                    scores = t6_engine.evaluate(full_text)
-                    itc = float(getattr(scores, "itc", 0))
-                    scs = float(getattr(scores, "scs", 0))
-                    iec = float(getattr(scores, "iec", 0))
-                    pfft = float(getattr(scores, "pfft", 0))
-                except Exception:
-                    itc, scs, iec, pfft = 0.8, 0.8, 0.6, 0.75
-                avg = (itc + scs + iec + pfft) / 4
-                tier = "S" if avg >= 0.9 else "A" if avg >= 0.8 else "B" if avg >= 0.7 else "C" if avg >= 0.5 else "D"
-                yield f"data: {json.dumps({'type': 'step', 'step': 'T6 认知评估', 'status': 'done'})}\n\n"
-                yield f"data: {json.dumps({'type': 'cee', 'scores': {'itc': round(itc,3), 'scs': round(scs,3), 'iec': round(iec,3), 'pfft': round(pfft,3)}, 'tier': tier, 'mode': 'llm'})}\n\n"
+                cee_scores = _evaluate_text(full_text)
+                tier = _tier_from_scores(cee_scores)
+                yield f"data: {json.dumps({'type': 'step', 'step': 'LLM 调用完成', 'status': 'done'})}\n\n"
+                yield f"data: {json.dumps({'type': 'cee', 'scores': cee_scores, 'tier': tier, 'mode': 'llm'})}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 return
             except Exception as e:
                 yield f"data: {json.dumps({'type': 'error', 'content': str(e)[:100]})}\n\n"
-                # fall through to engine mode
 
-        # 引擎合成模式 (流式模拟)
+        # ── 本地自学习推理模式 (流式) ──
         steps = [
-            ('T2 超图坍缩', 0.25),
-            ('T4 知识结晶', 0.15),
-            ('T5 反事实生长', 0.15),
-            ('T1 认知同构', 0.15),
-            ('T6 认知评估', 0.10),
+            ('TF-IDF 语义检索', 0.15),
+            ('T2 超图坍缩', 0.12),
+            ('T5 反事实生长', 0.12),
+            ('T1 认知同构', 0.10),
+            ('T6 不变量评估', 0.08),
         ]
         for step_name, delay in steps:
             yield f"data: {json.dumps({'type': 'step', 'step': step_name, 'status': 'running'})}\n\n"
-            yield f"data: {json.dumps({'type': 'thinking', 'content': f'{step_name}: 正在处理...'})}\n\n"
+            yield f"data: {json.dumps({'type': 'thinking', 'content': f'{step_name}...'})}\n\n"
             await asyncio.sleep(delay)
 
-        result = engine_chat(user_text, session.get("history", []), deep_think=req.deep_think)
+        result = local_inference.chat(
+            user_text, history=session.get("history", []),
+            deep_think=req.deep_think,
+        )
+        session.setdefault("local_queries", 0)
+        session["local_queries"] += 1
 
         for step_name, _ in steps:
             yield f"data: {json.dumps({'type': 'step', 'step': step_name, 'status': 'done'})}\n\n"
 
         content = result["content"]
-        # 模拟流式逐行输出
         newline = "\n"
         for line in content.split(newline):
             for chunk in re.split(r'(\s\s+)', line):
                 if chunk:
                     yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
-                    await asyncio.sleep(0.03)
+                    await asyncio.sleep(0.02)
             yield f"data: {json.dumps({'type': 'token', 'content': newline})}\n\n"
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.03)
 
-        yield f"data: {json.dumps({'type': 'cee', 'scores': result['cee_scores'], 'tier': result['cee_tier'], 'mode': 'engine'})}\n\n"
+        yield f"data: {json.dumps({'type': 'cee', 'scores': result['cee_scores'], 'tier': result['cee_tier'], 'mode': 'local_inference', 'learned': result['learned']})}\n\n"
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream",

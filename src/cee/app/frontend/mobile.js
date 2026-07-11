@@ -1,10 +1,157 @@
 /* ═══════════════════════════════════════════════════════════════════
-   空间 Mobile — JavaScript 模块 v4.0
+   空间 Mobile — JavaScript 模块 v4.1
    认知涌现 AI 对话界面
    ═══════════════════════════════════════════════════════════════════ */
 
 (function () {
   'use strict';
+
+  /* ── 启动动画 & 背景粒子 ────────────────────────────────────────── */
+  (function initStartupAndParticles() {
+    const overlay = document.getElementById('startupOverlay');
+    if (!overlay) return;
+
+    /* ── 启动画布粒子 ── */
+    const suCanvas = document.getElementById('startupCanvas');
+    if (suCanvas) {
+      const ctx = suCanvas.getContext('2d');
+      let suParticles = [], suW, suH, suAnimId;
+
+      function initSuParticles() {
+        suW = suCanvas.width = window.innerWidth;
+        suH = suCanvas.height = window.innerHeight;
+        suParticles = [];
+        const cx = suW / 2, cy = suH / 2;
+        for (let i = 0; i < 80; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = Math.random() * Math.min(suW, suH) * 0.7;
+          suParticles.push({
+            x: cx + Math.cos(angle) * dist,
+            y: cy + Math.sin(angle) * dist,
+            ox: cx + Math.cos(angle) * dist,
+            oy: cy + Math.sin(angle) * dist,
+            r: Math.random() * 1.5 + 0.5,
+            speed: Math.random() * 0.003 + 0.002,
+            angle: Math.random() * Math.PI * 2,
+            amp: Math.random() * 30 + 10,
+            hue: Math.random() < 0.5 ? 200 : 270,
+          });
+        }
+      }
+
+      function drawSuParticles(t) {
+        ctx.clearRect(0, 0, suW, suH);
+        const cx = suW / 2, cy = suH / 2;
+        suParticles.forEach(p => {
+          p.angle += p.speed;
+          const dx = Math.cos(p.angle) * p.amp;
+          const dy = Math.sin(p.angle) * p.amp * 0.6;
+          const targetX = p.ox + dx;
+          const targetY = p.oy + dy;
+          p.x += (targetX - p.x) * 0.02;
+          p.y += (targetY - p.y) * 0.02;
+
+          const distToCenter = Math.hypot(p.x - cx, p.y - cy);
+          const alpha = Math.max(0.1, 1 - distToCenter / Math.min(suW, suH));
+
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${p.hue},70%,65%,${alpha * 0.7})`;
+          ctx.fill();
+        });
+
+        /* Draw connections between close particles */
+        for (let i = 0; i < suParticles.length; i++) {
+          for (let j = i + 1; j < suParticles.length; j++) {
+            const dx = suParticles[i].x - suParticles[j].x;
+            const dy = suParticles[i].y - suParticles[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 60) {
+              ctx.beginPath();
+              ctx.moveTo(suParticles[i].x, suParticles[i].y);
+              ctx.lineTo(suParticles[j].x, suParticles[j].y);
+              ctx.strokeStyle = `rgba(91,138,247,${0.08 * (1 - dist / 60)})`;
+              ctx.stroke();
+            }
+          }
+        }
+        suAnimId = requestAnimationFrame(drawSuParticles);
+      }
+
+      initSuParticles();
+      suAnimId = requestAnimationFrame(drawSuParticles);
+      window.addEventListener('resize', () => { cancelAnimationFrame(suAnimId); initSuParticles(); suAnimId = requestAnimationFrame(drawSuParticles); });
+
+      /* Dismiss startup after 3.5s */
+      setTimeout(() => {
+        if (suAnimId) cancelAnimationFrame(suAnimId);
+        overlay.classList.add('fade-out');
+        setTimeout(() => { if (overlay.parentNode) overlay.remove(); }, 700);
+      }, 3500);
+    }
+
+    /* ── 背景粒子画布 ── */
+    const bgCanvas = document.getElementById('bgParticles');
+    if (bgCanvas) {
+      const bgCtx = bgCanvas.getContext('2d');
+      let bgParticles = [], bgW, bgH, bgAnimId;
+
+      function initBgParticles() {
+        bgW = bgCanvas.width = window.innerWidth;
+        bgH = bgCanvas.height = window.innerHeight;
+        bgParticles = [];
+        for (let i = 0; i < 45; i++) {
+          bgParticles.push({
+            x: Math.random() * bgW,
+            y: Math.random() * bgH,
+            r: Math.random() * 1.2 + 0.3,
+            vx: (Math.random() - 0.5) * 0.15,
+            vy: (Math.random() - 0.5) * 0.15,
+            hue: Math.random() < 0.4 ? 215 : Math.random() < 0.6 ? 270 : 200,
+            alpha: Math.random() * 0.25 + 0.05,
+          });
+        }
+      }
+
+      function drawBgParticles() {
+        bgCtx.clearRect(0, 0, bgW, bgH);
+        bgParticles.forEach(p => {
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < -20) p.x = bgW + 20;
+          if (p.x > bgW + 20) p.x = -20;
+          if (p.y < -20) p.y = bgH + 20;
+          if (p.y > bgH + 20) p.y = -20;
+
+          bgCtx.beginPath();
+          bgCtx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          bgCtx.fillStyle = `hsla(${p.hue},60%,60%,${p.alpha})`;
+          bgCtx.fill();
+        });
+
+        /* Occasional connections */
+        for (let i = 0; i < bgParticles.length; i++) {
+          for (let j = i + 1; j < bgParticles.length; j++) {
+            const dx = bgParticles[i].x - bgParticles[j].x;
+            const dy = bgParticles[i].y - bgParticles[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 80) {
+              bgCtx.beginPath();
+              bgCtx.moveTo(bgParticles[i].x, bgParticles[i].y);
+              bgCtx.lineTo(bgParticles[j].x, bgParticles[j].y);
+              bgCtx.strokeStyle = `rgba(91,138,247,${0.04 * (1 - dist / 80)})`;
+              bgCtx.stroke();
+            }
+          }
+        }
+        bgAnimId = requestAnimationFrame(drawBgParticles);
+      }
+
+      initBgParticles();
+      bgAnimId = requestAnimationFrame(drawBgParticles);
+      window.addEventListener('resize', () => { cancelAnimationFrame(bgAnimId); initBgParticles(); bgAnimId = requestAnimationFrame(drawBgParticles); });
+    }
+  })();
 
   /* ── State ─────────────────────────────────────────────────────── */
   const STATE = {
@@ -15,22 +162,19 @@
     streaming: false,
     sessionId: 'default',
     conversations: [],
+    allConversations: [],
     drawerOpen: false,
-    settingsOpen: false,
-    knowledgeOpen: false,
-    searchEnabled: false,
-    loadedConvIds: new Set(),
     abortController: null,
     engineAnim: null,
     uploadedFiles: [],
+    lastSendPayload: null,
   };
 
-  /* ── DOM Refs ──────────────────────────────────────────────────── */
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: SessionManager — 会话CRUD、切换、懒加载
+     Module: SessionManager
      ═══════════════════════════════════════════════════════════════════ */
   const SessionManager = {
     async list() {
@@ -38,10 +182,23 @@
         const resp = await fetch('/api/sessions');
         const data = await resp.json();
         STATE.conversations = data.sessions || [];
+        STATE.allConversations = [...STATE.conversations];
         this.render();
       } catch (e) {
         console.error('Failed to load sessions:', e);
       }
+    },
+
+    filter(query) {
+      if (!query || !query.trim()) {
+        STATE.conversations = [...STATE.allConversations];
+      } else {
+        const q = query.toLowerCase().trim();
+        STATE.conversations = STATE.allConversations.filter(c =>
+          (c.title || '').toLowerCase().includes(q)
+        );
+      }
+      this.render();
     },
 
     async create() {
@@ -70,14 +227,22 @@
           const data = await resp.json();
           STATE.messages = data.history || [];
           this.clearMessages();
-          this.renderHistory();
-          this.hideWelcome();
+          if (STATE.messages.length > 0) {
+            this.hideWelcome();
+            STATE.messages.forEach((m) => {
+              if (m.role === 'user') ChatEngine.addMessageElement('user', m.content);
+              else if (m.role === 'assistant') ChatEngine.addMessageElement('ai', m.content);
+            });
+          } else {
+            this.showWelcome();
+          }
+          ChatEngine.scrollToBottom();
         }
       } catch (e) {
         console.error('Failed to switch session:', e);
       }
       UIManager.closeDrawer();
-      this.highlight(sessionId);
+      this.render();
     },
 
     async remove(sessionId, event) {
@@ -113,51 +278,31 @@
       if (el) el.style.display = 'none';
     },
 
-    renderHistory() {
-      const msgs = $('#messages');
-      if (!msgs) return;
-      STATE.messages.forEach((m) => {
-        if (m.role === 'user') {
-          ChatEngine.addMessageElement('user', m.content);
-        } else if (m.role === 'assistant') {
-          ChatEngine.addMessageElement('ai', m.content);
-        }
-      });
-      ChatEngine.scrollToBottom();
-    },
-
     render() {
       const body = $('#drawerBody');
       if (!body) return;
       if (STATE.conversations.length === 0) {
-        body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px">暂无历史对话</div>';
+        body.innerHTML = '<div class="empty-state"><div class="empty-state-icon">&#128172;</div><div class="empty-state-desc">暂无历史对话</div></div>';
         return;
       }
       body.innerHTML = STATE.conversations.map((c) => {
         const isActive = c.id === STATE.sessionId;
-        return `
-          <div class="drawer-conv ${isActive ? 'active' : ''}" onclick="CeeApp.SessionManager.switch('${c.id}')">
-            <div class="drawer-conv-icon">${isActive ? '&#9679;' : '&#9702;'}</div>
-            <div class="drawer-conv-info">
-              <div class="drawer-conv-title">${escapeHtml(c.title || '新对话')}</div>
-              <div class="drawer-conv-meta">${c.msg_count || 0} 条消息</div>
-            </div>
-            <div class="drawer-conv-delete" onclick="CeeApp.SessionManager.remove('${c.id}', event)">&times;</div>
-          </div>
-        `;
+        const title = escapeHtml(c.title || '新对话');
+        const count = c.msg_count || 0;
+        return '<div class="drawer-conv' + (isActive ? ' active' : '') + '" onclick="CeeApp.SessionManager.switch(\'' + c.id + '\')">' +
+          '<div class="drawer-conv-icon">' + (isActive ? '&#9679;' : '&#9702;') + '</div>' +
+          '<div class="drawer-conv-info">' +
+          '<div class="drawer-conv-title">' + title + '</div>' +
+          '<div class="drawer-conv-meta">' + count + ' 条消息</div>' +
+          '</div>' +
+          '<div class="drawer-conv-delete" onclick="CeeApp.SessionManager.remove(\'' + c.id + '\', event)">&times;</div>' +
+          '</div>';
       }).join('');
-    },
-
-    highlight(sessionId) {
-      $$('.drawer-conv').forEach((el) => {
-        el.classList.toggle('active', el.querySelector('.drawer-conv-title')?.textContent &&
-          STATE.conversations.find(c => c.id === sessionId && c.title === el.querySelector('.drawer-conv-title').textContent));
-      });
     },
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: ChatEngine — 消息发送、SSE流解析、step事件处理、令牌流渲染
+     Module: ChatEngine
      ═══════════════════════════════════════════════════════════════════ */
   const ChatEngine = {
     sendMessage() {
@@ -176,6 +321,15 @@
 
       SessionManager.hideWelcome();
 
+      // Add file context if any
+      let fullText = text;
+      const files = FileHandler.getFiles();
+      if (files.length > 0) {
+        const fileList = files.map(f => '- ' + f.name + ' (' + formatFileSize(f.size) + ')').join('\n');
+        fullText = text + '\n\n[已上传文件:]\n' + fileList;
+        FileHandler.clearFiles();
+      }
+
       this.addMessageElement('user', text);
       this.scrollToBottom();
 
@@ -186,24 +340,39 @@
 
       this.updateSendButton();
 
-      const apiKey = $('#apiKeyInput')?.value?.trim() || '';
-      const baseUrl = $('#baseUrlInput')?.value?.trim() || 'https://api.openai.com/v1';
-      const model = $('#modelInput')?.value?.trim() || 'gpt-4o-mini';
-      const temperature = parseFloat($('#tempSlider')?.value || '0.7');
-
+      const config = SettingsManager.defaults;
       const payload = {
-        messages: [...STATE.messages.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: text }],
+        messages: [...STATE.messages.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: fullText }],
         session_id: STATE.sessionId,
-        api_key: apiKey,
-        base_url: baseUrl,
-        model: model,
-        temperature: temperature,
+        api_key: config.apiKey || '',
+        base_url: config.baseUrl || 'https://api.openai.com/v1',
+        model: config.model || 'gpt-4o-mini',
+        temperature: config.temperature || 0.7,
         deep_think: STATE.deepThink,
       };
+      STATE.lastSendPayload = payload;
 
       STATE.abortController = new AbortController();
 
       this._streamChat(payload, typingEl, text);
+    },
+
+    retry() {
+      if (!STATE.lastSendPayload) return;
+      if (STATE.streaming) this.stopStreaming();
+
+      // Remove last AI message
+      const lastAi = STATE.messages.length > 0 && STATE.messages[STATE.messages.length - 1].role === 'assistant';
+      if (lastAi) STATE.messages.pop();
+
+      const typingEl = this.addTyping();
+      this.scrollToBottom();
+      STATE.typing = true;
+      STATE.streaming = true;
+      this.updateSendButton();
+
+      STATE.abortController = new AbortController();
+      this._streamChat(STATE.lastSendPayload, typingEl, STATE.messages.length > 0 ? STATE.messages[STATE.messages.length - 1].content : '');
     },
 
     async _streamChat(payload, typingEl, userText) {
@@ -213,6 +382,8 @@
       let ceeMode = '';
       let aiMsgEl = null;
       let genSteps = [];
+      let stepTimers = {};
+      let startTime = Date.now();
 
       try {
         const resp = await fetch('/api/chat/stream', {
@@ -226,33 +397,73 @@
 
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
+        let buffer = '';
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
           for (const line of lines) {
             if (!line.startsWith('data: ')) continue;
             const data = line.slice(6).trim();
             if (!data) continue;
             try {
               const parsed = JSON.parse(data);
-              this._handleStreamEvent(parsed, {
-                genSteps, aiMsgEl, aiContent, ceeScores, ceeTier, ceeMode,
-              });
-              if (parsed.type === 'token') { aiContent += parsed.content; }
-              if (parsed.type === 'cee') {
-                ceeScores = parsed.scores;
-                ceeTier = parsed.tier;
-                ceeMode = parsed.mode;
+              switch (parsed.type) {
+                case 'step': {
+                  const key = parsed.step;
+                  if (!stepTimers[key]) stepTimers[key] = Date.now();
+                  const existing = genSteps.find(s => s.step === parsed.step);
+                  if (existing) {
+                    existing.status = parsed.status;
+                    if (parsed.status === 'done') existing.duration = ((Date.now() - stepTimers[key]) / 1000).toFixed(1) + 's';
+                  } else {
+                    genSteps.push({ step: parsed.step, status: parsed.status });
+                  }
+                  if (!aiMsgEl) aiMsgEl = ChatEngine.addMessageElement('ai', '');
+                  updateGenProcess(aiMsgEl, genSteps);
+                  break;
+                }
+                case 'token':
+                  aiContent += parsed.content;
+                  if (!aiMsgEl) aiMsgEl = ChatEngine.addMessageElement('ai', '');
+                  updateAiContent(aiMsgEl, aiContent);
+                  ChatEngine.scrollToBottom();
+                  break;
+                case 'cee':
+                  ceeScores = parsed.scores;
+                  ceeTier = parsed.tier;
+                  ceeMode = parsed.mode;
+                  break;
+                case 'thinking':
+                  if (!aiMsgEl) aiMsgEl = ChatEngine.addMessageElement('ai', '');
+                  break;
+                case 'done':
+                  break;
+                case 'error':
+                  const err = parsed.content || '处理消息时遇到问题。';
+                  if (!aiMsgEl) aiMsgEl = ChatEngine.addMessageElement('ai', err);
+                  else {
+                    const bubble = aiMsgEl.querySelector('.msg-bubble');
+                    if (bubble) bubble.innerHTML = '<div class="error-banner">' + escapeHtml(err) + '<button class="retry-btn" onclick="CeeApp.ChatEngine.retry()">重试</button></div>';
+                  }
+                  break;
               }
-            } catch (e) { /* skip malformed JSON */ }
+            } catch (e) { /* skip */ }
           }
         }
 
         if (aiMsgEl && ceeScores) {
           finalizeAiMessage(aiMsgEl, ceeScores, ceeTier, ceeMode, aiContent);
+        }
+        if (aiMsgEl && !aiContent && !ceeScores) {
+          const bubble = aiMsgEl.querySelector('.msg-bubble');
+          if (bubble && !bubble.textContent.trim()) {
+            bubble.textContent = '(空响应)';
+          }
         }
 
         STATE.messages.push({ role: 'user', content: userText });
@@ -265,7 +476,12 @@
       } catch (e) {
         if (e.name !== 'AbortError') {
           if (typingEl) typingEl.remove();
-          ChatEngine.addMessageElement('ai', '连接失败，请稍后重试。');
+          if (aiMsgEl) {
+            const bubble = aiMsgEl.querySelector('.msg-bubble');
+            if (bubble) bubble.innerHTML = '<div class="error-banner">连接失败，请稍后重试<button class="retry-btn" onclick="CeeApp.ChatEngine.retry()">重试</button></div>';
+          } else {
+            ChatEngine.addMessageElement('ai', '连接失败，请稍后重试。');
+          }
           NotificationSystem.toast('网络错误', 'error');
         }
       }
@@ -275,38 +491,6 @@
       STATE.abortController = null;
       this.updateSendButton();
       this.scrollToBottom();
-    },
-
-    _handleStreamEvent(parsed, ctx) {
-      switch (parsed.type) {
-        case 'step': {
-          const existing = ctx.genSteps.find(s => s.step === parsed.step);
-          if (existing) {
-            existing.status = parsed.status;
-          } else {
-            ctx.genSteps.push({ step: parsed.step, status: parsed.status });
-          }
-          if (!ctx.aiMsgEl) ctx.aiMsgEl = ChatEngine.addMessageElement('ai', '');
-          updateGenProcess(ctx.aiMsgEl, ctx.genSteps);
-          break;
-        }
-        case 'thinking':
-          if (!ctx.aiMsgEl) ctx.aiMsgEl = ChatEngine.addMessageElement('ai', '');
-          break;
-        case 'token':
-          ctx.aiContent += parsed.content;
-          if (!ctx.aiMsgEl) ctx.aiMsgEl = ChatEngine.addMessageElement('ai', '');
-          updateAiContent(ctx.aiMsgEl, ctx.aiContent);
-          ChatEngine.scrollToBottom();
-          break;
-        case 'done':
-          break;
-        case 'error':
-          const err = parsed.content || '处理消息时遇到问题。';
-          if (!ctx.aiMsgEl) ctx.aiMsgEl = ChatEngine.addMessageElement('ai', err);
-          else updateAiContent(ctx.aiMsgEl, err);
-          break;
-      }
     },
 
     stopStreaming() {
@@ -324,14 +508,35 @@
       if (!msgs) return null;
       const div = document.createElement('div');
       div.className = 'msg ' + role;
+
+      const bubbleContent = role === 'user' ? escapeHtml(content) : (content ? renderMarkdown(content) : '');
       div.innerHTML =
-        '<div class="msg-avatar">' + (role === 'user' ? 'U' : '空') + '</div>' +
+        '<div class="msg-avatar">' + (role === 'user' ? '<span>U</span>' : '<img src="/static/avatar.svg" alt="CEE" width="28" height="28">') + '</div>' +
         '<div class="msg-content">' +
         (role === 'ai' ? '<div class="gen-process" style="display:none"></div>' : '') +
-        '<div class="msg-bubble">' + (role === 'user' ? escapeHtml(content) : (content ? renderMarkdown(content) : '')) + '</div>' +
+        '<div class="msg-bubble">' + bubbleContent + '</div>' +
+        '<div class="msg-actions">' +
+        '<button class="msg-action-btn" onclick="CeeApp.ChatEngine.copyMessage(this)" title="复制">' +
+        '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>' +
+        '</button>' +
+        (role === 'ai' ? '<button class="msg-action-btn" onclick="CeeApp.ChatEngine.retry()" title="重新生成"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></button>' : '') +
+        '</div>' +
         '</div>';
       msgs.appendChild(div);
       return div;
+    },
+
+    copyMessage(btn) {
+      const bubble = btn.closest('.msg-content').querySelector('.msg-bubble');
+      if (!bubble) return;
+      const text = bubble.textContent.trim();
+      navigator.clipboard.writeText(text).then(() => {
+        btn.classList.add('copied');
+        NotificationSystem.toast('已复制', 'success');
+        setTimeout(() => btn.classList.remove('copied'), 1500);
+      }).catch(() => {
+        NotificationSystem.toast('复制失败', 'warning');
+      });
     },
 
     addTyping() {
@@ -339,14 +544,14 @@
       if (!msgs) return null;
       const div = document.createElement('div');
       div.className = 'msg ai';
-      div.innerHTML = '<div class="msg-avatar">空</div><div class="msg-content"><div class="typing"><span></span><span></span><span></span></div></div>';
+      div.innerHTML = '<div class="msg-avatar"><img src="/static/avatar.svg" alt="CEE" width="28" height="28"></div><div class="msg-content"><div class="msg-bubble"><div class="typing"><span></span><span></span><span></span></div></div></div>';
       msgs.appendChild(div);
       return div;
     },
 
     scrollToBottom() {
-      const msgs = $('#messages');
-      if (msgs) setTimeout(() => { msgs.scrollTop = msgs.scrollHeight; }, 50);
+      const container = $('#chat-page');
+      if (container) setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
     },
 
     updateSendButton() {
@@ -357,39 +562,42 @@
         btn.className = 'btn-stop';
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
         btn.disabled = false;
+        btn.title = '停止生成';
         if (attach) attach.style.display = 'none';
       } else {
         btn.className = 'btn-send';
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>';
         btn.disabled = !($('#chatInput')?.value?.trim());
+        btn.title = '发送消息';
         if (attach) attach.style.display = '';
       }
     },
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: SearchModule — 联网搜索触发、结果展示、来源引用
+     Module: SearchModule
      ═══════════════════════════════════════════════════════════════════ */
   const SearchModule = {
     toggle() {
       STATE.searchEnabled = !STATE.searchEnabled;
       const btn = $('#searchToggle');
-      if (btn) btn.classList.toggle('active', STATE.searchEnabled);
+      if (btn) {
+        btn.classList.toggle('active', STATE.searchEnabled);
+        btn.title = STATE.searchEnabled ? '联网搜索已开启' : '联网搜索已关闭';
+      }
+      localStorage.setItem('cee_search', String(STATE.searchEnabled));
       NotificationSystem.toast(
         STATE.searchEnabled ? '联网搜索已开启' : '联网搜索已关闭',
-        STATE.searchEnabled ? 'info' : 'info'
+        'info'
       );
     },
 
-    isEnabled() {
-      return STATE.searchEnabled;
-    },
+    isEnabled() { return STATE.searchEnabled; },
 
     renderSources(sources, parentEl) {
       if (!sources || sources.length === 0) return;
       const wrapper = document.createElement('div');
-      wrapper.className = 'search-sources';
-      wrapper.style.cssText = 'margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;';
+      wrapper.style.cssText = 'margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;';
       sources.forEach((src) => {
         const el = document.createElement('span');
         el.className = 'search-source';
@@ -404,14 +612,14 @@
     renderIndicator(parentEl) {
       const el = document.createElement('div');
       el.className = 'search-indicator';
-      el.innerHTML = '<span class="search-indicator-spinner"></span> 正在搜索...';
+      el.innerHTML = '<span class="search-indicator-spinner"></span> 正在搜索相关资料...';
       parentEl.appendChild(el);
       return el;
     },
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: FileHandler — 文件拖拽上传、批量处理、进度显示
+     Module: FileHandler
      ═══════════════════════════════════════════════════════════════════ */
   const FileHandler = {
     init() {
@@ -441,9 +649,7 @@
         const input = document.createElement('input');
         input.type = 'file';
         input.multiple = true;
-        input.onchange = () => {
-          this.addFiles(Array.from(input.files));
-        };
+        input.onchange = () => { this.addFiles(Array.from(input.files)); };
         input.click();
       });
     },
@@ -455,6 +661,9 @@
         }
       });
       this.render();
+      if (STATE.uploadedFiles.length > 0 && STATE.currentPage === 'chat') {
+        SessionManager.hideWelcome();
+      }
     },
 
     removeFile(index) {
@@ -482,19 +691,17 @@
       list.innerHTML = STATE.uploadedFiles.map((f, i) =>
         '<div class="file-preview-card">' +
         '<span class="file-preview-card-name">' + escapeHtml(f.name) + '</span>' +
-        '<span style="font-size:10px;color:var(--text-muted)">' + formatFileSize(f.size) + '</span>' +
-        '<span class="file-preview-card-remove" onclick="CeeApp.FileHandler.removeFile(' + i + ')">x</span>' +
+        '<span style="font-size:10px;color:var(--text-muted);white-space:nowrap">' + formatFileSize(f.size) + '</span>' +
+        '<span class="file-preview-card-remove" onclick="CeeApp.FileHandler.removeFile(' + i + ')">&times;</span>' +
         '</div>'
       ).join('');
     },
 
-    getFiles() {
-      return STATE.uploadedFiles;
-    },
+    getFiles() { return STATE.uploadedFiles; },
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: ThinkPanel — 深度思考展示、CoT步骤动画
+     Module: ThinkPanel
      ═══════════════════════════════════════════════════════════════════ */
   const ThinkPanel = {
     create(element) {
@@ -517,8 +724,8 @@
       if (!panel) return;
       const arrow = panel.querySelector('.think-panel-arrow');
       const body = panel.querySelector('.think-panel-body');
-      arrow.classList.toggle('open');
-      body.classList.toggle('open');
+      if (arrow) arrow.classList.toggle('open');
+      if (body) body.classList.toggle('open');
     },
 
     addStep(id, stepName, detail) {
@@ -553,7 +760,7 @@
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: KnowledgePanel — 知识库浏览、搜索、收藏
+     Module: KnowledgePanel
      ═══════════════════════════════════════════════════════════════════ */
   const KnowledgePanel = {
     knowledgeData: [
@@ -568,7 +775,7 @@
       { id: 'emergence', title: '涌现', desc: '系统整体展现出其组成部分不具备的新属性。', category: 'concept' },
       { id: 'edge_of_chaos', title: '混沌边缘', desc: '复杂系统的最优运行区间，位于完全有序和完全随机之间的临界带。', category: 'concept' },
       { id: 'constitution', title: '项目宪章', desc: '空间五原则：数学严谨、客观优先、可验证、结构优先、长期存续。', category: 'rule' },
-      { id: 'free_alt', title: '免费替代方案', desc: '开源软件替代付费服务的推荐清单。', category: 'practical' },
+      { id: 'free_alt', title: '免费替代方案', desc: '开源软件替代付费服务的推荐清单，覆盖办公、设计、开发等场景。', category: 'practical' },
     ],
 
     open() {
@@ -593,9 +800,7 @@
       }
     },
 
-    search(query) {
-      this.render(query);
-    },
+    search(query) { this.render(query); },
 
     render(query) {
       const body = $('#knowledgePanelBody');
@@ -604,8 +809,12 @@
       if (query) {
         const q = query.toLowerCase();
         items = items.filter((i) =>
-          i.title.toLowerCase().includes(q) || i.desc.toLowerCase().includes(q)
+          i.title.toLowerCase().includes(q) || i.desc.toLowerCase().includes(q) || i.category.toLowerCase().includes(q)
         );
+      }
+      if (items.length === 0) {
+        body.innerHTML = '<div class="empty-state"><div class="empty-state-desc">未找到匹配条目</div></div>';
+        return;
       }
       body.innerHTML = items.map((i) =>
         '<div class="knowledge-card" onclick="CeeApp.KnowledgePanel.select(\'' + i.id + '\')">' +
@@ -621,11 +830,12 @@
       ChatEngine.addMessageElement('ai', '【' + item.title + '】\n' + item.desc);
       ChatEngine.scrollToBottom();
       STATE.messages.push({ role: 'assistant', content: '【' + item.title + '】\n' + item.desc });
+      this.close();
     },
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: SettingsManager — 设置读写、localStorage持久化
+     Module: SettingsManager
      ═══════════════════════════════════════════════════════════════════ */
   const SettingsManager = {
     defaults: {
@@ -641,31 +851,24 @@
     },
 
     load() {
-      const keys = ['cee_api_key', 'cee_base_url', 'cee_model', 'cee_theme',
-        'cee_temperature', 'cee_max_tokens', 'cee_deep_think', 'cee_search',
-        'cee_font_size'];
-      const values = {};
-      keys.forEach((k) => {
-        const v = localStorage.getItem(k);
-        const key = k.replace('cee_', '');
-        if (v !== null) values[key] = v;
-      });
-
-      this.defaults.apiKey = values.api_key || '';
-      this.defaults.baseUrl = values.base_url || 'https://api.openai.com/v1';
-      this.defaults.model = values.model || 'gpt-4o-mini';
-      this.defaults.theme = values.theme || 'dark';
-      this.defaults.temperature = parseFloat(values.temperature) || 0.7;
-      this.defaults.maxTokens = parseInt(values.max_tokens) || 4096;
-      this.defaults.deepThink = values.deep_think === 'true';
-      this.defaults.searchEnabled = values.search === 'true';
-      this.defaults.fontSize = parseInt(values.font_size) || 14;
-
+      try {
+        const d = this.defaults;
+        d.apiKey = localStorage.getItem('cee_api_key') || '';
+        d.baseUrl = localStorage.getItem('cee_base_url') || 'https://api.openai.com/v1';
+        d.model = localStorage.getItem('cee_model') || 'gpt-4o-mini';
+        d.theme = localStorage.getItem('cee_theme') || 'dark';
+        d.temperature = parseFloat(localStorage.getItem('cee_temperature')) || 0.7;
+        d.maxTokens = parseInt(localStorage.getItem('cee_max_tokens')) || 4096;
+        d.deepThink = localStorage.getItem('cee_deep_think') === 'true';
+        d.searchEnabled = localStorage.getItem('cee_search') === 'true';
+        d.fontSize = parseInt(localStorage.getItem('cee_font_size')) || 14;
+      } catch (e) { /* ignore */ }
       this.apply();
     },
 
     apply() {
       const d = this.defaults;
+
       const apiKeyEl = $('#apiKeyInput');
       const baseUrlEl = $('#baseUrlInput');
       const modelEl = $('#modelInput');
@@ -673,25 +876,20 @@
       const tempValue = $('#tempValue');
       const maxTokensEl = $('#maxTokensInput');
       const themeLabel = $('#themeLabel');
-      const fontSizeEl = $('#fontSizeInput');
 
       if (apiKeyEl) apiKeyEl.value = d.apiKey;
       if (baseUrlEl) baseUrlEl.value = d.baseUrl;
       if (modelEl) modelEl.value = d.model;
       if (tempSlider) { tempSlider.value = d.temperature; if (tempValue) tempValue.textContent = d.temperature; }
       if (maxTokensEl) maxTokensEl.value = d.maxTokens;
-      if (themeLabel) themeLabel.textContent = d.theme === 'dark' ? '暗色' : '亮色';
-      if (fontSizeEl) fontSizeEl.value = d.fontSize;
+      const label = d.theme === 'dark' ? '暗色' : '亮色';
+      if (themeLabel) themeLabel.textContent = label;
 
       document.documentElement.setAttribute('data-theme', d.theme);
-      document.body.style.fontSize = d.fontSize + 'px';
       STATE.deepThink = d.deepThink;
-      STATE.searchEnabled = d.searchEnabled;
 
       const deepBtn = $('#deepToggle');
       if (deepBtn) deepBtn.classList.toggle('active', d.deepThink);
-      const searchBtn = $('#searchToggle');
-      if (searchBtn) searchBtn.classList.toggle('active', d.searchEnabled);
     },
 
     save() {
@@ -700,7 +898,6 @@
       const model = $('#modelInput')?.value?.trim() || 'gpt-4o-mini';
       const temp = parseFloat($('#tempSlider')?.value || '0.7');
       const maxTokens = parseInt($('#maxTokensInput')?.value || '4096');
-      const fontSize = parseInt($('#fontSizeInput')?.value || '14');
 
       localStorage.setItem('cee_api_key', apiKey);
       localStorage.setItem('cee_base_url', baseUrl);
@@ -708,15 +905,9 @@
       localStorage.setItem('cee_temperature', String(temp));
       localStorage.setItem('cee_max_tokens', String(maxTokens));
       localStorage.setItem('cee_font_size', String(fontSize));
+      localStorage.setItem('cee_deep_think', String(STATE.deepThink));
 
-      this.defaults.apiKey = apiKey;
-      this.defaults.baseUrl = baseUrl;
-      this.defaults.model = model;
-      this.defaults.temperature = temp;
-      this.defaults.maxTokens = maxTokens;
-      this.defaults.fontSize = fontSize;
-
-      document.body.style.fontSize = fontSize + 'px';
+      Object.assign(this.defaults, { apiKey, baseUrl, model, temperature: temp, maxTokens });
       NotificationSystem.toast('设置已保存', 'success');
     },
 
@@ -726,23 +917,20 @@
       document.documentElement.setAttribute('data-theme', next);
       localStorage.setItem('cee_theme', next);
       this.defaults.theme = next;
-      const label = $('#themeLabel');
-      if (label) label.textContent = next === 'dark' ? '暗色' : '亮色';
-      const label2 = $('#themeLabel2');
-      if (label2) label2.textContent = next === 'dark' ? '暗色' : '亮色';
+      const label = next === 'dark' ? '暗色' : '亮色';
+      const el1 = $('#themeLabel');
+      if (el1) el1.textContent = label;
     },
 
     updateTempDisplay() {
       const slider = $('#tempSlider');
       const display = $('#tempValue');
-      if (slider && display) {
-        display.textContent = slider.value;
-      }
+      if (slider && display) display.textContent = slider.value;
     },
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: UIManager — 抽屉控制、面板切换、主题切换、响应式适配
+     Module: UIManager
      ═══════════════════════════════════════════════════════════════════ */
   const UIManager = {
     toggleDrawer() {
@@ -750,65 +938,39 @@
       const drawer = $('#drawer');
       const overlay = $('#drawerOverlay');
       if (drawer) drawer.classList.toggle('open', STATE.drawerOpen);
-      if (overlay) overlay.classList.toggle('open', STATE.drawerOpen || STATE.settingsOpen || STATE.knowledgeOpen);
+      if (overlay) overlay.classList.toggle('open', STATE.drawerOpen);
       if (STATE.drawerOpen) SessionManager.list();
     },
 
     closeDrawer() {
       STATE.drawerOpen = false;
       $('#drawer')?.classList.remove('open');
-      if (!STATE.settingsOpen && !STATE.knowledgeOpen) {
-        $('#drawerOverlay')?.classList.remove('open');
-      }
+      $('#drawerOverlay')?.classList.remove('open');
     },
 
-    toggleSettings() {
-      STATE.settingsOpen = !STATE.settingsOpen;
-      const panel = $('#settingsPanel');
-      const overlay = $('#drawerOverlay');
-      if (panel) panel.classList.toggle('open', STATE.settingsOpen);
-      if (overlay) overlay.classList.toggle('open', STATE.settingsOpen || STATE.drawerOpen || STATE.knowledgeOpen);
+    openSettings() {
+      const overlay = $('#settingsOverlay');
+      if (overlay) overlay.classList.add('active');
+      this.syncSettingsForm();
     },
 
     closeSettings() {
-      STATE.settingsOpen = false;
-      $('#settingsPanel')?.classList.remove('open');
-      if (!STATE.drawerOpen && !STATE.knowledgeOpen) {
-        $('#drawerOverlay')?.classList.remove('open');
-      }
+      $('#settingsOverlay')?.classList.remove('active');
     },
 
-    toggleKnowledge() {
-      if (STATE.knowledgeOpen) {
-        KnowledgePanel.close();
-      } else {
-        KnowledgePanel.open();
-      }
-    },
-
-    switchPage(page) {
-      STATE.currentPage = page;
-      $$('.page').forEach(p => p.classList.remove('active'));
-      const target = $('#' + page + '-page');
-      if (target) target.classList.add('active');
-      $$('.nav-item').forEach(n => {
-        n.classList.toggle('active', n.dataset.page === page);
-      });
-      this.updateInputBar();
-      if (page === 'engine') startSpiderWeb();
-      if (page === 'profile') {
-        const apiKeyEl = $('#apiKeyInput');
-        const baseUrlEl = $('#baseUrlInput');
-        const modelEl = $('#modelInput');
-        if (apiKeyEl) apiKeyEl.value = SettingsManager.defaults.apiKey;
-        if (baseUrlEl) baseUrlEl.value = SettingsManager.defaults.baseUrl;
-        if (modelEl) modelEl.value = SettingsManager.defaults.model;
-      }
-    },
-
-    updateInputBar() {
-      const bar = $('#inputBar');
-      if (bar) bar.style.display = STATE.currentPage === 'chat' ? 'flex' : 'none';
+    syncSettingsForm() {
+      const d = SettingsManager.defaults;
+      const apiKeyEl = $('#apiKeyInput');
+      const baseUrlEl = $('#baseUrlInput');
+      const modelEl = $('#modelInput');
+      const tempEl = $('#tempSlider');
+      const tempVEl = $('#tempValue');
+      const maxTEl = $('#maxTokensInput');
+      if (apiKeyEl && !apiKeyEl.value) apiKeyEl.value = d.apiKey || '';
+      if (baseUrlEl && !baseUrlEl.value) baseUrlEl.value = d.baseUrl;
+      if (modelEl && !modelEl.value) modelEl.value = d.model;
+      if (tempEl && !tempEl.value) { tempEl.value = d.temperature || 0.7; if (tempVEl) tempVEl.textContent = d.temperature || 0.7; }
+      if (maxTEl && !maxTEl.value) maxTEl.value = d.maxTokens || 4096;
     },
 
     toggleDeepThink() {
@@ -818,7 +980,7 @@
       localStorage.setItem('cee_deep_think', String(STATE.deepThink));
       SettingsManager.defaults.deepThink = STATE.deepThink;
       NotificationSystem.toast(
-        STATE.deepThink ? '深度思考已开启：每次回复将展示空间引擎全管线' : '深度思考已关闭',
+        STATE.deepThink ? '深度思考已开启：引擎全管线分析' : '深度思考已关闭',
         'info'
       );
     },
@@ -831,12 +993,14 @@
     },
 
     quickChat(text) {
+      if (STATE.currentPage !== 'chat') this.switchPage('chat');
       const input = $('#chatInput');
       if (input) {
         input.value = text;
         $('#sendBtn').disabled = false;
+        autoResize(input);
       }
-      ChatEngine.sendMessage();
+      setTimeout(() => ChatEngine.sendMessage(), 100);
     },
 
     handleInputKey(e) {
@@ -848,7 +1012,7 @@
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: CodeBlockManager — 代码块复制、语言检测、行号
+     Module: CodeBlockManager
      ═══════════════════════════════════════════════════════════════════ */
   const CodeBlockManager = {
     extractFromText(text) {
@@ -864,35 +1028,30 @@
     renderBlock(language, code) {
       const lines = code.split('\n');
       const lineNumbers = lines.map((_, i) => '<span>' + (i + 1) + '</span>').join('');
+      const encoded = code.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-      return (
-        '<div class="code-block-wrapper">' +
+      return '<div class="code-block-wrapper">' +
         '<div class="code-block-header">' +
         '<span class="code-block-lang">' + escapeHtml(language || 'text') + '</span>' +
-        '<button class="code-block-copy" onclick="CeeApp.CodeBlockManager.copyCode(this)" data-code="' + escapeHtml(code).replace(/"/g, '&quot;') + '">' +
+        '<button class="code-block-copy" onclick="CeeApp.CodeBlockManager.copyCode(this)" data-code="' + encoded + '">' +
         '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>' +
-        '复制' +
-        '</button>' +
-        '</div>' +
+        '复制</button></div>' +
         '<div class="code-block-body">' +
         '<div class="code-block-lines">' + lineNumbers + '</div>' +
         '<div class="code-block-content"><pre><code>' + highlightCode(code, language) + '</code></pre></div>' +
-        '</div>' +
-        '</div>'
-      );
+        '</div></div>';
     },
 
     copyCode(button) {
       const code = button.dataset.code;
+      if (!code) return;
       const decoded = code.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
       navigator.clipboard.writeText(decoded).then(() => {
         button.classList.add('copied');
-        button.innerHTML =
-          '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>已复制';
+        button.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>已复制';
         setTimeout(() => {
           button.classList.remove('copied');
-          button.innerHTML =
-            '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>复制';
+          button.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>复制';
         }, 2000);
       }).catch(() => {
         NotificationSystem.toast('复制失败，请手动复制', 'warning');
@@ -901,7 +1060,7 @@
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: NotificationSystem — toast通知
+     Module: NotificationSystem
      ═══════════════════════════════════════════════════════════════════ */
   const NotificationSystem = {
     toast(msg, type) {
@@ -915,7 +1074,7 @@
       el.innerHTML =
         '<span class="toast-icon">' + (icons[type] || '') + '</span>' +
         '<span class="toast-msg">' + escapeHtml(msg) + '</span>' +
-        '<span class="toast-close" onclick="this.parentElement.classList.remove(\'show\')">x</span>';
+        '<span class="toast-close" onclick="this.parentElement.classList.remove(\'show\')">&times;</span>';
 
       container.appendChild(el);
       requestAnimationFrame(() => el.classList.add('show'));
@@ -928,7 +1087,7 @@
   };
 
   /* ═══════════════════════════════════════════════════════════════════
-     Module: KeyboardShortcuts — 快捷键绑定
+     Module: KeyboardShortcuts
      ═══════════════════════════════════════════════════════════════════ */
   const KeyboardShortcuts = {
     init() {
@@ -939,50 +1098,15 @@
 
         if (e.ctrlKey || e.metaKey) {
           switch (e.key.toLowerCase()) {
-            case 'k':
-              if (!isInput) {
-                e.preventDefault();
-                SessionManager.create();
-              }
-              break;
-            case '/':
-              e.preventDefault();
-              SearchModule.toggle();
-              break;
-            case ',':
-              e.preventDefault();
-              UIManager.toggleSettings();
-              break;
-            case 'b':
-              if (!isInput) {
-                e.preventDefault();
-                UIManager.toggleDrawer();
-              }
-              break;
-            case 'j':
-              if (!isInput) {
-                e.preventDefault();
-                UIManager.toggleKnowledge();
-              }
-              break;
-            case 'enter':
-              if (isInput) {
-                e.preventDefault();
-                ChatEngine.sendMessage();
-              }
-              break;
-            case 'd':
-              if (!isInput) {
-                e.preventDefault();
-                UIManager.toggleDeepThink();
-              }
-              break;
+            case 'n': if (!isInput) { e.preventDefault(); CeeApp.newConversation(); } break;
+            case ',': e.preventDefault(); UIManager.openSettings(); break;
+            case 'b': if (!isInput) { e.preventDefault(); UIManager.toggleDrawer(); } break;
+            case 'enter': if (isInput) { e.preventDefault(); ChatEngine.sendMessage(); } break;
           }
         }
 
         if (e.key === 'Escape') {
-          if (STATE.settingsOpen) UIManager.closeSettings();
-          if (STATE.knowledgeOpen) KnowledgePanel.close();
+          UIManager.closeSettings();
           if (STATE.drawerOpen) UIManager.closeDrawer();
           if (STATE.streaming) ChatEngine.stopStreaming();
         }
@@ -993,86 +1117,20 @@
 
     renderBar() {
       const bar = $('#shortcutsBar');
+      if (!bar) return;
       const shortcuts = [
-        { key: 'Ctrl+K', label: '新对话' },
-        { key: 'Ctrl+/', label: '搜索' },
+        { key: 'Ctrl+N', label: '新对话' },
         { key: 'Ctrl+,', label: '设置' },
         { key: 'Ctrl+B', label: '历史' },
-        { key: 'Ctrl+J', label: '知识库' },
-        { key: 'Esc', label: '关闭面板' },
+        { key: 'Esc', label: '关闭' },
       ];
-      if (bar) {
-        bar.innerHTML = shortcuts.map((s) =>
-          '<span class="shortcut-item"><span class="shortcut-key">' + s.key + '</span>' + s.label + '</span>'
-        ).join('');
-      }
+      bar.innerHTML = shortcuts.map(s =>
+        '<span class="shortcut-item"><span class="shortcut-key">' + s.key + '</span>' + s.label + '</span>'
+      ).join('');
     },
 
-    show() {
-      $('#shortcutsBar')?.classList.add('visible');
-    },
-
-    hide() {
-      $('#shortcutsBar')?.classList.remove('visible');
-    },
-  };
-
-  /* ═══════════════════════════════════════════════════════════════════
-     Module: Analytics — 使用统计收集（本地）
-     ═══════════════════════════════════════════════════════════════════ */
-  const Analytics = {
-    stats: {
-      messageCount: 0,
-      engineQueries: 0,
-      llmQueries: 0,
-      sessionsCreated: 0,
-      deepThinkUses: 0,
-      searchUses: 0,
-      startTime: Date.now(),
-    },
-
-    init() {
-      const saved = localStorage.getItem('cee_analytics');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          Object.assign(this.stats, parsed);
-          this.stats.startTime = Date.now();
-        } catch (e) { /* ignore */ }
-      }
-    },
-
-    track(event, value) {
-      value = value || 1;
-      switch (event) {
-        case 'message': this.stats.messageCount += value; break;
-        case 'engine_query': this.stats.engineQueries += value; break;
-        case 'llm_query': this.stats.llmQueries += value; break;
-        case 'session_created': this.stats.sessionsCreated += value; break;
-        case 'deep_think': this.stats.deepThinkUses += value; break;
-        case 'search': this.stats.searchUses += value; break;
-      }
-      this.save();
-    },
-
-    save() {
-      try {
-        localStorage.setItem('cee_analytics', JSON.stringify(this.stats));
-      } catch (e) { /* ignore */ }
-    },
-
-    getSummary() {
-      const elapsed = Math.round((Date.now() - this.stats.startTime) / 1000);
-      return {
-        ...this.stats,
-        uptime: elapsed,
-        uptimeStr: elapsed > 3600
-          ? Math.round(elapsed / 3600) + '小时'
-          : elapsed > 60
-            ? Math.round(elapsed / 60) + '分钟'
-            : elapsed + '秒',
-      };
-    },
+    show() { $('#shortcutsBar')?.classList.add('visible'); },
+    hide() { $('#shortcutsBar')?.classList.remove('visible'); },
   };
 
   /* ═══════════════════════════════════════════════════════════════════
@@ -1080,12 +1138,12 @@
      ═══════════════════════════════════════════════════════════════════ */
   function buildEngineCards() {
     const engines = [
-      { id: 't1', name: '我的 T1 认知同构镜', desc: '建立认知对象的自反同构映射，保证形式等价转换', endpoint: '/api/t1/mirror' },
-      { id: 't2', name: '我的 T2 超图坍缩棱镜', desc: '多维度坍缩高维语义超图，生成多视角折射结果', endpoint: '/api/t2/prism' },
-      { id: 't3', name: '我的 T3 测地线导航', desc: '在语义空间中计算最短测地线路径，发现原子突破', endpoint: '/api/t3/geodesic' },
-      { id: 't4', name: '我的 T4 知识结晶', desc: '从文本中析出晶体化知识单元，发现涌现性关联', endpoint: '/api/t4/crystallize' },
-      { id: 't5', name: '我的 T5 反事实生长', desc: '分支演化+杂交育种，生成高适应度的反事实方案', endpoint: '/api/t5/genesis' },
-      { id: 't6', name: '我的 T6 认知几何评估', desc: 'ITC/SCS/IEC/PFFT四不变量评测，输出综合等级', endpoint: '/api/t6/evaluate' },
+      { id: 't1', name: 'T1 认知同构镜', desc: '建立认知对象的自反同构映射，保证形式等价转换', endpoint: '/api/t1/mirror' },
+      { id: 't2', name: 'T2 超图坍缩棱镜', desc: '多维度坍缩高维语义超图，生成多视角折射结果', endpoint: '/api/t2/prism' },
+      { id: 't3', name: 'T3 测地线导航', desc: '在语义空间中计算最短测地线路径，发现原子突破', endpoint: '/api/t3/geodesic' },
+      { id: 't4', name: 'T4 知识结晶', desc: '从文本中析出晶体化知识单元，发现涌现性关联', endpoint: '/api/t4/crystallize' },
+      { id: 't5', name: 'T5 反事实生长', desc: '分支演化+杂交育种，生成高适应度的反事实方案', endpoint: '/api/t5/genesis' },
+      { id: 't6', name: 'T6 认知几何评估', desc: 'ITC/SCS/IEC/PFFT四不变量评测，输出综合等级', endpoint: '/api/t6/evaluate' },
     ];
 
     const container = $('#engine-page');
@@ -1114,10 +1172,9 @@
 
   async function runEngine(id, endpoint) {
     const input = document.getElementById('input-' + id)?.value?.trim();
-    if (!input) return;
+    if (!input) { NotificationSystem.toast('请输入测试文本', 'warning'); return; }
     const resultEl = document.getElementById('result-' + id);
-    if (resultEl) resultEl.textContent = '运行中...';
-    Analytics.track('engine_query');
+    if (resultEl) resultEl.innerHTML = '<div class="loading-spinner"></div>';
     try {
       const resp = await fetch(endpoint, {
         method: 'POST',
@@ -1126,38 +1183,30 @@
       });
       const data = await resp.json();
       if (resultEl) {
-        resultEl.innerHTML = '<pre style="white-space:pre-wrap;font-size:11px">' +
-          escapeHtml(JSON.stringify(data, null, 2).slice(0, 500)) + '</pre>';
+        resultEl.innerHTML = '<pre style="white-space:pre-wrap;font-size:11px;line-height:1.5">' +
+          escapeHtml(JSON.stringify(data, null, 2).slice(0, 800)) + '</pre>';
       }
       updateTemp(data);
     } catch (e) {
-      if (resultEl) resultEl.textContent = '错误: ' + e.message;
+      if (resultEl) resultEl.innerHTML = '<div class="error-banner">错误: ' + escapeHtml(e.message) + '</div>';
     }
   }
 
   function updateTemp(data) {
-    if (data.iec !== undefined || data.itc !== undefined) {
-      const iec = data.iec || data.scores?.iec || 0.65;
-      const pct = Math.round(iec * 100);
-      const fill = $('#tempFill');
-      const status = $('#tempStatus');
-      const value = $('#tempValue');
-      if (fill) fill.style.width = pct + '%';
-      if (iec < 0.4) {
-        if (fill) fill.style.background = 'var(--tier-d)';
-        if (status) status.textContent = '冗余态';
-      } else if (iec < 0.6) {
-        if (fill) fill.style.background = 'var(--tier-c)';
-        if (status) status.textContent = '临界带';
-      } else if (iec < 0.85) {
-        if (fill) fill.style.background = 'var(--tier-a)';
-        if (status) status.textContent = '最优态';
-      } else {
-        if (fill) fill.style.background = 'var(--tier-s)';
-        if (status) status.textContent = '混沌态';
-      }
-      if (value) value.textContent = 'IEC ' + iec.toFixed(2);
-    }
+    const iec = data.iec || data.scores?.iec || 0.65;
+    const pct = Math.round(iec * 100);
+    const fill = $('#tempFill');
+    const status = $('#tempStatus');
+    const value = $('#tempValue');
+    if (fill) fill.style.width = pct + '%';
+    let statusText, bg;
+    if (iec < 0.4) { statusText = '冗余态'; bg = 'var(--tier-d)'; }
+    else if (iec < 0.6) { statusText = '临界带'; bg = 'var(--tier-c)'; }
+    else if (iec < 0.85) { statusText = '最优态'; bg = 'var(--tier-a)'; }
+    else { statusText = '混沌态'; bg = 'var(--tier-s)'; }
+    if (fill) fill.style.background = bg;
+    if (status) status.textContent = statusText;
+    if (value) value.textContent = 'IEC ' + iec.toFixed(2);
   }
 
   /* ═══════════════════════════════════════════════════════════════════
@@ -1184,7 +1233,7 @@
         baseX: cx + Math.cos(angle) * radius,
         baseY: cy + Math.sin(angle) * radius,
         phase: Math.random() * Math.PI * 2,
-        size: 3 + Math.random() * 4,
+        size: 3 + Math.random() * 5,
         pulse: 0,
         pulseDir: 1,
       });
@@ -1205,8 +1254,8 @@
       for (let i = 0; i < nodeCount; i++) {
         for (let j = i + 1; j < nodeCount; j++) {
           const dist = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
-          const alpha = Math.max(0, 1 - dist / 140) * 0.2;
-          ctx.strokeStyle = 'rgba(74,222,128,' + alpha + ')';
+          const alpha = Math.max(0, 1 - dist / 140) * 0.25;
+          ctx.strokeStyle = 'rgba(91,138,247,' + alpha + ')';
           ctx.lineWidth = 0.5;
           ctx.beginPath();
           ctx.moveTo(nodes[i].x, nodes[i].y);
@@ -1219,7 +1268,7 @@
         const na = nodes[p.a], nb = nodes[p.b];
         const px = na.x + (nb.x - na.x) * p.t;
         const py = na.y + (nb.y - na.y) * p.t;
-        ctx.fillStyle = 'rgba(74,222,128,0.7)';
+        ctx.fillStyle = 'rgba(91,138,247,0.8)';
         ctx.beginPath();
         ctx.arc(px, py, 1.5, 0, Math.PI * 2);
         ctx.fill();
@@ -1231,14 +1280,14 @@
         n.pulse += 0.02 * n.pulseDir;
         if (n.pulse > 1) { n.pulse = 1; n.pulseDir = -1; }
         if (n.pulse < 0) { n.pulse = 0; n.pulseDir = 1; }
-        n.x = n.baseX + Math.sin(Date.now() * 0.001 + n.phase) * 2;
-        n.y = n.baseY + Math.cos(Date.now() * 0.0015 + n.phase) * 2;
+        n.x = n.baseX + Math.sin(Date.now() * 0.001 + n.phase) * 2.5;
+        n.y = n.baseY + Math.cos(Date.now() * 0.0015 + n.phase) * 2.5;
         const r = n.size + n.pulse * 2;
-        ctx.fillStyle = 'rgba(74,222,128,0.9)';
+        ctx.fillStyle = 'rgba(91,138,247,0.9)';
         ctx.beginPath();
         ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
         ctx.beginPath();
         ctx.arc(n.x, n.y, r * 0.4, 0, Math.PI * 2);
         ctx.fill();
@@ -1266,36 +1315,91 @@
 
   function autoResize(el) {
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 100) + 'px';
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
   }
 
   function renderMarkdown(text) {
     let html = escapeHtml(text);
 
+    // Pre-process: extract code blocks
+    const codeBlockMap = {};
     const codeBlocks = CodeBlockManager.extractFromText(text);
     html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-      return CodeBlockManager.renderBlock(lang, code);
+      const id = 'cb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      codeBlockMap[id] = CodeBlockManager.renderBlock(lang, code);
+      return id;
     });
 
+    // Tables
+    html = html.replace(/^\|(.+)\|\n\|[-: |]+\|\n((?:\|.+\|\n?)*)/gm, (match, header, rows) => {
+      const hCols = header.split('|').map(c => c.trim()).filter(c => c);
+      const rLines = rows.trim().split('\n');
+      let table = '<table><thead><tr>';
+      hCols.forEach(c => table += '<th>' + c + '</th>');
+      table += '</tr></thead><tbody>';
+      rLines.forEach(line => {
+        const cols = line.split('|').map(c => c.trim()).filter(c => c);
+        table += '<tr>';
+        cols.forEach(c => table += '<td>' + c + '</td>');
+        table += '</tr>';
+      });
+      table += '</tbody></table>';
+      return table;
+    });
+
+    // Headers
+    html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
     html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
+    // Bold and italic
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    html = html.replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, '<em>$1</em>');
+
+    // Inline code
     html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 
-    html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-    html = html.replace(/^---$/gm, '<hr>');
+    // Strikethrough
+    html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
 
+    // Blockquotes
+    html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+    // Horizontal rules
+    html = html.replace(/^---$/gm, '<hr>');
+    html = html.replace(/^\*\*\*$/gm, '<hr>');
+
+    // Links
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
-    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+    // Ordered lists
+    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
 
-    html = html.replace(/\n\n/g, '</p><p>');
+    // Unordered lists
+    html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+
+    // Wrap adjacent <li> in <ul> or <ol>
+    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, (match) => {
+      if (match.includes('<li>') && !match.includes('<ul>') && !match.includes('<ol>')) {
+        return '<ul>' + match + '</ul>';
+      }
+      return match;
+    });
+
+    // Paragraphs
+    html = html.replace(/\n\n+/g, '</p><p>');
     html = '<p>' + html + '</p>';
+
+    // Clean up empty paragraphs
     html = html.replace(/<p>\s*<\/p>/g, '');
+    html = html.replace(/<p><\/p>/g, '');
+
+    // Restore code blocks
+    Object.keys(codeBlockMap).forEach(id => {
+      html = html.replace(id, codeBlockMap[id]);
+    });
 
     return html;
   }
@@ -1303,24 +1407,30 @@
   function highlightCode(code, lang) {
     let escaped = escapeHtml(code);
 
+    // Comments
     escaped = escaped.replace(/(\/\/.*$)/gm, '<span class="hl-comment">$1</span>');
     escaped = escaped.replace(/(#.*$)/gm, '<span class="hl-comment">$1</span>');
 
+    // Strings
     escaped = escaped.replace(/"([^"]*)"/g, '<span class="hl-string">"$1"</span>');
     escaped = escaped.replace(/'([^']*)'/g, '<span class="hl-string">\'$1\'</span>');
     escaped = escaped.replace(/`([^`]*)`/g, '<span class="hl-string">`$1`</span>');
 
-    const keywords = ['function', 'const', 'let', 'var', 'return', 'if', 'else', 'for', 'while',
+    // Keywords
+    const keywords = [
+      'function', 'const', 'let', 'var', 'return', 'if', 'else', 'for', 'while',
       'class', 'import', 'export', 'default', 'from', 'async', 'await', 'try', 'catch',
       'throw', 'new', 'this', 'super', 'extends', 'switch', 'case', 'break', 'continue',
       'typeof', 'instanceof', 'void', 'delete', 'in', 'of', 'def', 'pass', 'yield',
       'with', 'finally', 'do', 'static', 'get', 'set', 'enum', 'type', 'interface',
-      'implements', 'package', 'private', 'protected', 'public'];
-    keywords.forEach((kw) => {
+      'implements', 'package', 'private', 'protected', 'public',
+    ];
+    keywords.forEach(kw => {
       const regex = new RegExp('\\b(' + kw + ')\\b', 'g');
       escaped = escaped.replace(regex, '<span class="hl-keyword">$1</span>');
     });
 
+    // Numbers
     escaped = escaped.replace(/\b(\d+\.?\d*)\b/g, '<span class="hl-number">$1</span>');
 
     return escaped;
@@ -1337,6 +1447,7 @@
       return '<div class="gen-step ' + s.status + '">' +
         '<div class="gen-step-icon">' + icon + '</div>' +
         '<div class="gen-step-name">' + escapeHtml(s.step) + '</div>' +
+        (s.duration ? '<span style="font-size:10px;color:var(--text-muted)">' + s.duration + '</span>' : '') +
         '</div>';
     }).join('');
     gpEl.innerHTML =
@@ -1351,8 +1462,8 @@
   function toggleGenProcess(header) {
     const arrow = header.querySelector('.arrow');
     const body = header.nextElementSibling;
-    arrow.classList.toggle('open');
-    body.classList.toggle('open');
+    if (arrow) arrow.classList.toggle('open');
+    if (body) body.classList.toggle('open');
   }
 
   function updateAiContent(el, content) {
@@ -1364,28 +1475,43 @@
     const contentDiv = el.querySelector('.msg-content');
     if (!contentDiv) return;
 
+    // Remove existing CEE elements
     const existingBadge = contentDiv.querySelector('.cee-badge');
     if (existingBadge) existingBadge.remove();
-
     const existingMetrics = contentDiv.querySelector('.cee-metrics');
     if (existingMetrics) existingMetrics.remove();
 
+    // Add CEE badge
     const badge = document.createElement('div');
     badge.className = 'cee-badge tier-' + (tier || 'C');
-    badge.textContent = (tier || 'C') + ' 级 · ' + (mode === 'llm' ? 'LLM增强' : '空间引擎');
-    contentDiv.insertBefore(badge, contentDiv.firstChild);
+    const tierLabel = tier || 'C';
+    const modeLabel = mode === 'llm' ? 'LLM' : '空间引擎';
+    const tierIcons = { S: '&#9733;', A: '&#9733;', B: '&#9679;', C: '&#9679;', D: '&#9888;' };
+    badge.innerHTML = (tierIcons[tierLabel] || '') + ' ' + tierLabel + ' 级 &middot; ' + modeLabel;
+    if (contentDiv.firstChild) {
+      contentDiv.insertBefore(badge, contentDiv.firstChild);
+    } else {
+      contentDiv.appendChild(badge);
+    }
 
+    // Add metrics
     if (scores) {
       const metrics = document.createElement('div');
       metrics.className = 'cee-metrics';
-      metrics.innerHTML =
-        '<span class="cee-metric ' + (scores.itc >= 0.7 ? 'high' : scores.itc >= 0.5 ? 'mid' : 'low') + '">ITC:' + (scores.itc || 0).toFixed(2) + '</span>' +
-        '<span class="cee-metric ' + (scores.scs >= 0.7 ? 'high' : scores.scs >= 0.5 ? 'mid' : 'low') + '">SCS:' + (scores.scs || 0).toFixed(2) + '</span>' +
-        '<span class="cee-metric ' + (scores.iec >= 0.4 && scores.iec <= 0.85 ? 'high' : scores.iec >= 0.3 ? 'mid' : 'low') + '">IEC:' + (scores.iec || 0).toFixed(2) + '</span>' +
-        '<span class="cee-metric ' + (scores.pfft >= 0.7 ? 'high' : scores.pfft >= 0.5 ? 'mid' : 'low') + '">PFFT:' + (scores.pfft || 0).toFixed(2) + '</span>';
+      const items = [
+        { label: 'ITC', value: scores.itc || 0 },
+        { label: 'SCS', value: scores.scs || 0 },
+        { label: 'IEC', value: scores.iec || 0 },
+        { label: 'PFFT', value: scores.pfft || 0 },
+      ];
+      metrics.innerHTML = items.map(item => {
+        const cls = item.value >= 0.7 ? 'high' : item.value >= 0.5 ? 'mid' : 'low';
+        return '<span class="cee-metric ' + cls + '">' + item.label + ':' + item.value.toFixed(2) + '</span>';
+      }).join('');
       contentDiv.appendChild(metrics);
     }
 
+    // Update message content
     const bubble = el.querySelector('.msg-bubble');
     if (bubble && content) {
       bubble.innerHTML = renderMarkdown(content);
@@ -1393,7 +1519,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════════
-     Global API (exposed for onclick handlers in HTML)
+     Global API
      ═══════════════════════════════════════════════════════════════════ */
   window.CeeApp = {
     SessionManager,
@@ -1407,10 +1533,10 @@
     CodeBlockManager,
     NotificationSystem,
     KeyboardShortcuts,
-    Analytics,
     runEngine,
     toggleGenProcess,
-    /* Legacy aliases for HTML onclick compatibility */
+
+    /* Legacy aliases */
     toggleDrawer: () => UIManager.toggleDrawer(),
     toggleDeepThink: () => UIManager.toggleDeepThink(),
     toggleTheme: () => SettingsManager.toggleTheme(),
@@ -1428,53 +1554,33 @@
      ═══════════════════════════════════════════════════════════════════ */
   document.addEventListener('DOMContentLoaded', () => {
     SettingsManager.load();
-    Analytics.init();
     KeyboardShortcuts.init();
     FileHandler.init();
-    buildEngineCards();
-    startSpiderWeb();
-    UIManager.updateInputBar();
     SessionManager.list();
 
-    /* Input event listeners */
+    /* Chat input */
     const chatInput = $('#chatInput');
     if (chatInput) {
       chatInput.addEventListener('input', () => {
         $('#sendBtn').disabled = !chatInput.value.trim();
-        const count = $('#charCount');
-        if (count) {
-          count.textContent = chatInput.value.length;
-          count.classList.toggle('near-limit', chatInput.value.length > 3500);
-          count.classList.toggle('at-limit', chatInput.value.length >= 4000);
-        }
       });
     }
 
-    /* Settings panel event listeners */
+    /* Settings form event listeners */
     const tempSlider = $('#tempSlider');
     if (tempSlider) {
       tempSlider.addEventListener('input', () => SettingsManager.updateTempDisplay());
     }
 
-    /* Knowledge search */
-    const knowledgeSearch = $('#knowledgeSearchInput');
-    if (knowledgeSearch) {
-      knowledgeSearch.addEventListener('input', (e) => {
-        KnowledgePanel.search(e.target.value);
-      });
-    }
-
-    /* Close panels when clicking overlay */
+    /* Drawer overlay click */
     const overlay = $('#drawerOverlay');
     if (overlay) {
       overlay.addEventListener('click', () => {
         if (STATE.drawerOpen) UIManager.closeDrawer();
-        if (STATE.settingsOpen) UIManager.closeSettings();
-        if (STATE.knowledgeOpen) KnowledgePanel.close();
       });
     }
 
-    /* Keyboard shortcuts bar visibility */
+    /* Keyboard shortcuts bar */
     let shortcutsTimeout;
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey || e.metaKey) {
@@ -1484,7 +1590,7 @@
       }
     });
 
-    NotificationSystem.toast('空间 v4.0 已就绪', 'success');
+    NotificationSystem.toast('空间已就绪', 'success');
   });
 
 })();

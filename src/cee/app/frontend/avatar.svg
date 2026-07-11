@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <radialGradient id="bgGrad" cx="50%" cy="40%" r="70%">
+      <stop offset="0%" stop-color="#1a2538"/>
+      <stop offset="100%" stop-color="#080c14"/>
+    </radialGradient>
+    <radialGradient id="coreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.9"/>
+      <stop offset="40%" stop-color="#38bdf8" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="coreInner" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff"/>
+      <stop offset="30%" stop-color="#e2e8f0"/>
+      <stop offset="60%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#a855f7"/>
+    </radialGradient>
+    <linearGradient id="ray1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.9"/>
+    </linearGradient>
+    <linearGradient id="ray2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.9"/>
+    </linearGradient>
+    <linearGradient id="ray3" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.8"/>
+    </linearGradient>
+    <linearGradient id="ray4" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.8"/>
+    </linearGradient>
+    <linearGradient id="ray5" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.7"/>
+    </linearGradient>
+    <linearGradient id="ray6" x1="0%" y1="80%" x2="100%" y2="20%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.7"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="neon">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feComponentTransfer in="blur" result="glow1">
+        <feFuncA type="linear" slope="1.5"/>
+      </feComponentTransfer>
+      <feMerge><feMergeNode in="glow1"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="128" cy="128" r="124" fill="url(#bgGrad)" stroke="#2a3a5c" stroke-width="1.5" opacity="0.6"/>
+
+  <!-- Ambient glow behind core -->
+  <circle cx="128" cy="115" r="75" fill="url(#coreGlow)" filter="url(#softGlow)" opacity="0.4"/>
+
+  <!-- Six rays representing T1-T6 engines -->
+  <!-- T1: top-right (认知同构) -->
+  <line x1="128" y1="110" x2="192" y2="46" stroke="url(#ray1)" stroke-width="1.2" stroke-linecap="round" filter="url(#neon)"/>
+  <!-- T2: bottom-right (语义共振) -->
+  <line x1="128" y1="110" x2="200" y2="166" stroke="url(#ray2)" stroke-width="1.2" stroke-linecap="round" filter="url(#neon)"/>
+  <!-- T3: bottom (测地线) -->
+  <line x1="128" y1="110" x2="128" y2="198" stroke="url(#ray3)" stroke-width="1.2" stroke-linecap="round" filter="url(#neon)"/>
+  <!-- T4: bottom-left (蜕变) -->
+  <line x1="128" y1="110" x2="56" y2="174" stroke="url(#ray4)" stroke-width="1.2" stroke-linecap="round" filter="url(#neon)"/>
+  <!-- T5: top-left (反事实) -->
+  <line x1="128" y1="110" x2="54" y2="46" stroke="url(#ray5)" stroke-width="1.2" stroke-linecap="round" filter="url(#neon)"/>
+  <!-- T6: top (不变量) -->
+  <line x1="128" y1="110" x2="128" y2="38" stroke="url(#ray6)" stroke-width="1.2" stroke-linecap="round" filter="url(#neon)"/>
+
+  <!-- Orbital nodes on rays -->
+  <circle cx="184" cy="56" r="3.5" fill="#38bdf8" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="194" cy="158" r="3" fill="#a855f7" filter="url(#glow)" opacity="0.8"/>
+  <circle cx="128" cy="190" r="3.5" fill="#38bdf8" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="64" cy="168" r="3" fill="#a855f7" filter="url(#glow)" opacity="0.8"/>
+  <circle cx="62" cy="56" r="3.5" fill="#38bdf8" filter="url(#glow)" opacity="0.9"/>
+  <circle cx="128" cy="46" r="3" fill="#a855f7" filter="url(#glow)" opacity="0.8"/>
+
+  <!-- Orbital ring arcs -->
+  <ellipse cx="128" cy="115" rx="70" ry="20" fill="none" stroke="#38bdf8" stroke-width="0.6" opacity="0.15" stroke-dasharray="8 16" transform="rotate(-15 128 115)"/>
+  <ellipse cx="128" cy="115" rx="70" ry="20" fill="none" stroke="#a855f7" stroke-width="0.6" opacity="0.15" stroke-dasharray="8 16" transform="rotate(75 128 115)"/>
+  <ellipse cx="128" cy="115" rx="70" ry="20" fill="none" stroke="#38bdf8" stroke-width="0.6" opacity="0.12" stroke-dasharray="4 20" transform="rotate(165 128 115)"/>
+
+  <!-- Core node (the 空 / emergence point) -->
+  <circle cx="128" cy="115" r="22" fill="url(#coreInner)" filter="url(#glow)"/>
+
+  <!-- Inner core highlight -->
+  <circle cx="128" cy="115" r="12" fill="none" stroke="#fff" stroke-width="0.5" opacity="0.4"/>
+  <circle cx="124" cy="110" r="6" fill="#fff" opacity="0.25"/>
+
+</svg>
