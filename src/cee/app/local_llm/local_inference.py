@@ -1,24 +1,22 @@
 """
-认知涌现引擎 — 本地推理引擎 v6.0
+认知涌现引擎 — 本地推理引擎 v7.0
 ===============================
-十层智能管线：情感感知 → 加速缓存 → 意图澄清 → 阅读理解 →
-              记忆召回 → 用户画像 → 知识图谱扩展 → 知识库检索 →
-              规则模板 → CEE引擎合成 → 自我反思
+十层智能管线 + 自学习血肉
 
-全模块:
-- AffectEngine: 情绪检测+语气调节
-- InferenceSpeedup: L1哈希+L2语义缓存
-- ClarificationEngine: 模糊追问
-- ReadingComprehension: 指代消解
-- MemoryEngine: 三层记忆
-- UserProfile: 用户画像
-- KnowledgeGraph: 知识关联图谱
-- ReflectionEngine: 自我反思
-- FeedbackLearner: 即时学习
+管线: 情感感知 → 加速缓存 → 意图澄清 → 阅读理解 →
+      记忆召回 → 用户画像 → 知识图谱 → 知识库检索 →
+      规则模板 → CEE引擎合成 → 自我反思 → 自学习管道
+
+v7.0 新增:
+- AutoLearner: 从对话中自动提取和存储知识事实
+- ConversationFlow: 多轮对话话题深度追踪
+- AutoTuner: 反思驱动的自动参数校准闭环
+- KG动态扩展: 知识图谱从对话中吸收新节点
 """
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Optional, Any
 
@@ -33,16 +31,19 @@ from .affect_engine import AffectEngine
 from .knowledge_graph import KnowledgeGraph
 from .reflection_engine import ReflectionEngine
 from .feedback_learner import FeedbackLearner
+from .auto_learner import AutoLearner
+from .conversation_flow import ConversationFlow
 
 
 class LocalInferenceEngine:
     """
-    本地推理引擎 v6.0: 零API依赖，十层智能管线
+    本地推理引擎 v7.0: 零API依赖，十层管线 + 自学习
 
     使用方法:
         engine = LocalInferenceEngine()
         result = engine.chat("你好")
-        engine.feedback("你好", "like")  # 用户点赞
+        engine.feedback("你好", "like")
+        summary = engine.get_conversation_summary()
     """
 
     def __init__(self, quality_threshold: float = 0.70,
@@ -69,6 +70,8 @@ class LocalInferenceEngine:
         self._kgraph = KnowledgeGraph()
         self._reflection = ReflectionEngine()
         self._feedback = FeedbackLearner()
+        self._auto_learner = AutoLearner(self.store)
+        self._conversation = ConversationFlow(session_id=session_id)
 
         self._last_reply: dict[str, Any] = {}
 
@@ -83,13 +86,19 @@ class LocalInferenceEngine:
         self._session_id = session_id
         self._memory = MemoryEngine(session_id=session_id)
         self._profile = UserProfile(session_id=session_id)
+        self._conversation = ConversationFlow(session_id=session_id)
 
     def chat(self, user_text: str, history: list[dict] | None = None,
              deep_think: bool = False) -> dict[str, Any]:
-        """主推理入口 — 十层管线"""
+        """主推理入口 — 十二层管线"""
 
         start = time.perf_counter()
         self._stats["total_queries"] += 1
+
+        # ── 第0层：对话流追踪 ──
+        flow = self._conversation.push_query(user_text)
+        flow_context = self._conversation.enrich_context()
+        conversation_depth = flow["depth"]
 
         # ── 第0层：情感感知 ──
         affect = self._affect.detect(user_text)
@@ -110,7 +119,7 @@ class LocalInferenceEngine:
                 "content": cached.content,
                 "cee_scores": cached.cee_scores,
                 "cee_tier": cached.cee_tier,
-                "model": "空间引擎 v6.0 (缓存命中)",
+                "model": "空间引擎 v7.0 (缓存命中)",
                 "source": cached.source,
                 "learned": False, "optimized": False, "retries": 0,
                 "knowledge_hits": 0, "intent": cached.intent,
@@ -119,6 +128,7 @@ class LocalInferenceEngine:
                 "cached": True,
                 "speedup_stats": self._speedup.stats(),
                 "affect": affect,
+                "conversation_flow": flow,
             }
 
         # ── 第0.5层：意图澄清 ──
@@ -138,12 +148,13 @@ class LocalInferenceEngine:
                 "content": clarification["question"] + options_html,
                 "cee_scores": {"itc": 0, "scs": 0, "iec": 0, "pfft": 0},
                 "cee_tier": "CLARIFY",
-                "model": "空间引擎 v6.0 (需要澄清)",
+                "model": "空间引擎 v7.0 (需要澄清)",
                 "source": "clarification", "learned": False, "optimized": False,
                 "retries": 0, "knowledge_hits": 0,
                 "intent": "needs_clarification", "elapsed_s": elapsed,
                 "total_learned": self.store.stats()["total_pairs"],
                 "clarification": True, "affect": affect,
+                "conversation_flow": flow,
             }
 
         # ── 第0.6层：阅读理解 ──
@@ -162,6 +173,10 @@ class LocalInferenceEngine:
         # ── 第0.9层：知识图谱扩展 ──
         kg_enrichment = self._enrich_with_kgraph(user_text)
 
+        # ── 自学习管道事实查询 ──
+        learner_facts = self._auto_learner.query(user_text, top_k=3)
+        learner_context = self._auto_learner.get_enrichment(user_text)
+
         # ── 第1层：知识库检索 ──
         intent = detect_intent(user_text)
         retrieved = self.store.retrieve(user_text, top_k=3, min_similarity=0.25)
@@ -170,13 +185,28 @@ class LocalInferenceEngine:
             self._stats["cache_hits"] += 1
             content = self._enrich_with_history(
                 user_text, retrieved, episodic_facts, memory_context,
-                profile_context, kg_enrichment, tone, affect,
+                profile_context, kg_enrichment, learner_context, flow_context,
+                tone, affect,
             )
             source = "knowledge_base"
         else:
             self._stats["fallback_uses"] += 1
             content = generate_fallback(user_text, intent=intent)
+
+            # 话题深度≥3时，追加跟进建议
+            if conversation_depth >= 3:
+                followup = self._conversation.suggest_followup()
+                content += f"\n\n{followup}"
+
             source = "fallback_rules"
+
+        # ── 第X层：自学习 — 尝试学习新知识 ──
+        self._auto_learner.learn_from(user_text, content,
+                                      composite=self._evaluate_composite(content),
+                                      source=source)
+
+        # ── 知识图谱吸收 ──
+        self._absorb_to_kgraph(user_text, content)
 
         # ── 情感语气注入 ──
         content = self._inject_tone(content, tone, affect)
@@ -238,7 +268,7 @@ class LocalInferenceEngine:
             "content": content,
             "cee_scores": cee_scores,
             "cee_tier": tier,
-            "model": "空间引擎 v6.0 (本地推理)",
+            "model": "空间引擎 v7.0 (本地推理)",
             "source": source, "learned": learned, "optimized": optimized,
             "retries": retries, "knowledge_hits": len(retrieved) if retrieved else 0,
             "intent": intent, "elapsed_s": elapsed,
@@ -248,20 +278,26 @@ class LocalInferenceEngine:
             "has_profile": bool(self._profile.get_context()),
             "clarification": False, "affect": affect,
             "tone": tone,
+            "conversation_flow": flow,
+            "learner_facts": len(learner_facts),
+            "learner_total": self._auto_learner.stats()["total_facts"],
         }
 
-        # ── 周期反思 ──
+        # ── 周期反思 + 自动调参 ──
         if self._reflection.should_reflect():
-            self._reflection.reflect()
+            _, tunings = self._reflection.reflect()
+            if tunings:
+                self._reflection.auto_tune()
+                new_params = self._reflection.get_tuner_params()
+                if new_params.get("quality_threshold"):
+                    self._quality_threshold = new_params["quality_threshold"]
+                    self.store = SelfLearningKnowledgeStore(
+                        quality_threshold=self._quality_threshold)
 
         return result
 
     def feedback(self, query: str, rating: str):
-        """
-        用户反馈: rating = "like" | "dislike"
-
-        engine.feedback("认知涌现是什么", "like")
-        """
+        """用户反馈: rating = 'like' | 'dislike'"""
         if not self._last_reply:
             return
         self._feedback.record(
@@ -275,8 +311,11 @@ class LocalInferenceEngine:
 
     # ── 内部方法 ─────────────────────────────────────────────
 
+    def _evaluate_composite(self, text: str) -> float:
+        scores = self._evaluate(text)
+        return (scores["itc"] + scores["scs"] + scores["iec"] + scores["pfft"]) / 4
+
     def _enrich_with_kgraph(self, query: str) -> str:
-        """知识图谱关联扩展"""
         from .fallback_rules import BUILTIN_KNOWLEDGE
         for keyword in BUILTIN_KNOWLEDGE:
             kn = keyword.replace(" ", "").lower()
@@ -289,16 +328,35 @@ class LocalInferenceEngine:
                         return self._kgraph.get_enrichment(keyword)
         return ""
 
+    def _absorb_to_kgraph(self, query: str, response: str):
+        """从本轮对话提取关键词注入知识图谱"""
+        combined = query + " " + response[:300]
+        # 从内置知识库中提取匹配的关键词
+        from .fallback_rules import BUILTIN_KNOWLEDGE
+        keywords = []
+        for kw in BUILTIN_KNOWLEDGE:
+            if kw.replace(" ", "").lower() in combined.replace(" ", "").lower():
+                keywords.append(kw)
+        # 从回答中提取英文缩写和技术词
+        tech_terms = re.findall(r'\b([A-Z][a-zA-Z]{2,}|[a-z]{3,}(?:\.(?:js|py|ts|rs|go)|[A-Z][a-z]+))\b', response[:500])
+        keywords.extend(tech_terms[:5])
+        if keywords:
+            self._kgraph.absorb_from(combined, keywords=list(set(keywords)))
+
     def _enrich_with_history(self, query: str, retrieved: list[ConversationPair],
                              episodic_facts: list[str], memory_context: str,
                              profile_context: str, kg_text: str,
+                             learner_context: str, flow_context: str,
                              tone: str, affect: dict) -> str:
         best = retrieved[0]
-
         lines: list[str] = []
 
         if kg_text:
             lines.append(kg_text)
+            lines.append("")
+
+        if learner_context:
+            lines.append(learner_context)
             lines.append("")
 
         lines.append(best.ai_response)
@@ -313,15 +371,12 @@ class LocalInferenceEngine:
         return "\n".join(lines)
 
     def _inject_tone(self, content: str, tone: str, affect: dict) -> str:
-        """在回复前后注入情感语气"""
         prefix = self._affect.tone_prefix(tone)
         postfix = self._affect.tone_postfix(tone, affect)
-
         if prefix and not content.startswith(prefix):
             content = prefix + ". " + content
         if postfix and not content.endswith(postfix):
             content = content.rstrip() + "\n\n" + postfix
-
         return content
 
     def _evaluate(self, text: str) -> dict[str, float]:
@@ -371,10 +426,9 @@ class LocalInferenceEngine:
         return len(common) / max(1, min(len(set(ql)), len(set(pl)))) < 0.15
 
     def _is_template_response(self, content: str) -> bool:
-        markers = ["【基础定义】", "【深层理解】", "【实际应用】",
-                   "关于这个问题，让我从代码层面分析",
+        markers = ["关于这个问题，让我从几个维度分析",
                    "让我推荐几个方案", "学习路线建议",
-                   "让我用 T5 反事实生长引擎"]
+                   "用 T5 反事实生长引擎"]
         return any(m in content for m in markers)
 
     # ── 公开接口 ─────────────────────────────────────────────
@@ -393,6 +447,8 @@ class LocalInferenceEngine:
         s["kgraph"] = self._kgraph.stats()
         s["reflection"] = self._reflection.stats()
         s["feedback"] = self._feedback.stats()
+        s["auto_learner"] = self._auto_learner.stats()
+        s["conversation"] = self._conversation.stats()
         return s
 
     def export_training_data(self) -> list[dict]:
@@ -415,6 +471,15 @@ class LocalInferenceEngine:
 
     def get_reflection_advice(self) -> str:
         return self._reflection.get_advice()
+
+    def get_auto_learner_stats(self) -> dict:
+        return self._auto_learner.stats()
+
+    def get_conversation_summary(self) -> str:
+        return self._conversation.get_topic_summary()
+
+    def get_followup_suggestion(self) -> str:
+        return self._conversation.suggest_followup()
 
     def clear_speedup_cache(self):
         self._speedup.clear()

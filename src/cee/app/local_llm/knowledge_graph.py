@@ -238,9 +238,125 @@ class KnowledgeGraph:
         except Exception:
             pass
 
+    def learn_cooccurrence(self, keywords: list[str], weight: float = 0.3):
+        """
+        从对话中共现的词学习关联
+        keywords: ["Python", "深度学习", "GPU"] → 两两建边
+        """
+        keywords = [k.strip() for k in keywords if len(k.strip()) > 1]
+        for i in range(len(keywords)):
+            for j in range(i + 1, len(keywords)):
+                a = keywords[i]
+                b = keywords[j]
+                if a not in self._graph:
+                    self._graph[a] = {}
+                if b not in self._graph:
+                    self._graph[b] = {}
+                if b not in self._graph[a]:
+                    self._graph[a][b] = ("共现关联", weight)
+                    self._graph[b][a] = ("共现关联", weight)
+                else:
+                    _, old_w = self._graph[a][b]
+                    self._graph[a][b] = ("共现关联", min(1.0, old_w + weight * 0.5))
+                    _, old_w = self._graph[b][a]
+                    self._graph[b][a] = ("共现关联", min(1.0, old_w + weight * 0.5))
+        if keywords:
+            self._save()
+
+    def decay_edges(self, decay_factor: float = 0.98, min_weight: float = 0.1):
+        """
+        边衰减: 长期未强化的边逐渐削弱
+        返回被移除的边数
+        """
+        removed = 0
+        to_remove = []
+        for source, neighbors in self._graph.items():
+            for target in list(neighbors.keys()):
+                rel, w = neighbors[target]
+                new_w = w * decay_factor
+                if new_w < min_weight:
+                    to_remove.append((source, target))
+                else:
+                    neighbors[target] = (rel, round(new_w, 3))
+        for source, target in to_remove:
+            if source in self._graph and target in self._graph[source]:
+                del self._graph[source][target]
+                removed += 1
+        self._graph = {k: v for k, v in self._graph.items() if v}
+        if removed > 0:
+            self._save()
+        return removed
+
+    def strengthen_edge(self, source: str, target: str, boost: float = 0.1):
+        """强化某条边的权重"""
+        source = self._normalize(source)
+        target = self._normalize(target)
+        if source in self._graph and target in self._graph[source]:
+            rel, w = self._graph[source][target]
+            self._graph[source][target] = (rel, min(1.0, round(w + boost, 3)))
+
+            if target in self._graph and source in self._graph[target]:
+                rel2, w2 = self._graph[target][source]
+                self._graph[target][source] = (rel2, min(1.0, round(w2 + boost, 3)))
+            else:
+                if target not in self._graph:
+                    self._graph[target] = {}
+                self._graph[target][source] = ("反向关联", min(1.0, round(w + boost, 3)))
+            self._save()
+
+    def absorb_from(self, text: str, keywords: list[str] | None = None):
+        """
+        从文本中吸收新知识节点
+        对文本中的每个关键词，检测是否已存在，不存在则创建
+        然后在关键词间建立共现边
+        """
+        if keywords:
+            self.learn_cooccurrence(keywords)
+
+        text_lower = text.lower()
+        new_nodes = []
+        for node_name in list(self._graph.keys()):
+            nl = node_name.replace(" ", "").lower()
+            if nl in text_lower and len(node_name) > 1:
+                new_nodes.append(node_name)
+
+        if len(new_nodes) >= 2:
+            for i in range(len(new_nodes)):
+                for j in range(i + 1, len(new_nodes)):
+                    a = new_nodes[i]
+                    b = new_nodes[j]
+                    if a in self._graph and b not in self._graph.get(a, {}):
+                        self._graph.setdefault(a, {})[b] = ("上下文关联", 0.25)
+                    if b in self._graph and a not in self._graph.get(b, {}):
+                        self._graph.setdefault(b, {})[a] = ("上下文关联", 0.25)
+
+            if any(b not in self._graph.get(a, {}) for a in new_nodes for b in new_nodes if a != b):
+                self._save()
+
+        return new_nodes
+
+    def infer_relation(self, source: str, target: str, context: str) -> str:
+        """根据上下文推断两个概念的关系类型"""
+        cl = context.lower()
+        if any(w in cl for w in ["是", "属于", "定义为", "指"]):
+            return "定义关系"
+        if any(w in cl for w in ["因为", "导致", "产生", "来源"]):
+            return "因果关系"
+        if any(w in cl for w in ["类似", "相似", "如同", "类比"]):
+            return "类比关系"
+        if any(w in cl for w in ["包含", "组成", "部分", "构成"]):
+            return "组成关系"
+        if any(w in cl for w in ["用于", "应用", "使用", "采用"]):
+            return "应用关系"
+        if any(w in cl for w in ["优于", "替代", "对比"]):
+            return "替代/对比关系"
+        return "关联关系"
+
     def stats(self) -> dict:
         return {
             "nodes": len(self._graph),
             "edges": sum(len(v) for v in self._graph.values()),
             "avg_degree": round(sum(len(v) for v in self._graph.values()) / max(1, len(self._graph)), 1),
+            "dynamic_nodes": sum(1 for v in self._graph.values()
+                                for _, w in v.values() if w <= 0.3),
         }
