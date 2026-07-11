@@ -20,6 +20,7 @@ import hashlib
 import html.parser
 import json
 import math
+import os
 import re
 import threading
 import time
@@ -327,12 +328,18 @@ class DuckDuckGoProvider(SearchProvider):
 
 
 # ============================================================
-# Bing Provider (via basic web search heuristics placeholder)
+# Bing Provider (via Bing Web Search API with HTML fallback)
 # ============================================================
 
 class BingProvider(SearchProvider):
-    """Bing 搜索提供商 — 基于纯 Python HTTP 请求的轻量实现。"""
+    """Bing 搜索提供商 — 优先使用 Bing Web Search API，无法访问时回退 HTML。
 
+    配置:
+      BING_API_KEY 环境变量 — 从 Azure Portal 获取的 API Key
+      BING_ENDPOINT   环境变量 — 可选，自定义 API 端点
+    """
+
+    API_ENDPOINT = "https://api.bing.microsoft.com/v7.0/search"
     BASE_URL = "https://www.bing.com/search"
 
     @property
@@ -340,17 +347,45 @@ class BingProvider(SearchProvider):
         return "bing"
 
     def search(self, query: str, config: SearchConfig) -> list[SearchResult]:
+        api_key = os.environ.get("BING_API_KEY", "")
+        if api_key:
+            results = self._search_api(query, config, api_key)
+            if results:
+                return results
+        return self._search_html(query, config)
+
+    def _search_api(
+        self, query: str, config: SearchConfig, api_key: str
+    ) -> list[SearchResult]:
+        endpoint = os.environ.get("BING_ENDPOINT", self.API_ENDPOINT)
+        params = urllib.parse.urlencode({"q": query, "count": config.max_results, "mkt": "zh-CN"})
+        url = f"{endpoint}?{params}"
+        req = urllib.request.Request(url, headers={"Ocp-Apim-Subscription-Key": api_key})
+        try:
+            with urllib.request.urlopen(req, timeout=config.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return []
+
+        results: list[SearchResult] = []
+        for item in data.get("webPages", {}).get("value", []):
+            results.append(SearchResult(
+                url=item.get("url", ""),
+                title=item.get("name", ""),
+                snippet=item.get("snippet", ""),
+                source=self.name,
+            ))
+            if len(results) >= config.max_results:
+                break
+        return results
+
+    def _search_html(self, query: str, config: SearchConfig) -> list[SearchResult]:
         params = urllib.parse.urlencode({"q": query, "count": config.max_results})
         url = f"{self.BASE_URL}?{params}"
         html_content = self._fetch_url(url, config.timeout)
         if not html_content:
             return []
-
         results: list[SearchResult] = []
-        cite_pattern = re.compile(
-            r'<cite[^>]*>(.*?)</cite>',
-            re.DOTALL | re.IGNORECASE,
-        )
         h2_pattern = re.compile(
             r'<h2[^>]*>\s*<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>',
             re.DOTALL | re.IGNORECASE,
@@ -359,10 +394,8 @@ class BingProvider(SearchProvider):
             r'<p[^>]*class="[^"]*b_lineclamp[^"]*"[^>]*>(.*?)</p>',
             re.DOTALL | re.IGNORECASE,
         )
-
         links = h2_pattern.findall(html_content)
         snippets = p_pattern.findall(html_content)
-
         for i, (href, title) in enumerate(links):
             clean_title = re.sub(r"<[^>]+>", "", title).strip()
             if not clean_title:
@@ -370,27 +403,27 @@ class BingProvider(SearchProvider):
             snippet = ""
             if i < len(snippets):
                 snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
-            results.append(
-                SearchResult(
-                    url=href,
-                    title=clean_title,
-                    snippet=snippet,
-                    source=self.name,
-                )
-            )
+            results.append(SearchResult(
+                url=href, title=clean_title, snippet=snippet, source=self.name,
+            ))
             if len(results) >= config.max_results:
                 break
-
         return results
 
 
 # ============================================================
-# Google Provider (via basic web search heuristics placeholder)
+# Google Provider (via Google Custom Search API with HTML fallback)
 # ============================================================
 
 class GoogleProvider(SearchProvider):
-    """Google 搜索提供商 — 基于纯 Python HTTP 请求的轻量实现。"""
+    """Google 搜索提供商 — 优先使用 Google Custom Search JSON API，无法访问时回退 HTML。
 
+    配置:
+      GOOGLE_API_KEY  环境变量 — Google Cloud Console 获取的 API Key
+      GOOGLE_CSE_ID   环境变量 — Custom Search Engine ID
+    """
+
+    API_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
     BASE_URL = "https://www.google.com/search"
 
     @property
@@ -398,16 +431,48 @@ class GoogleProvider(SearchProvider):
         return "google"
 
     def search(self, query: str, config: SearchConfig) -> list[SearchResult]:
+        api_key = os.environ.get("GOOGLE_API_KEY", "")
+        cse_id = os.environ.get("GOOGLE_CSE_ID", "")
+        if api_key and cse_id:
+            results = self._search_api(query, config, api_key, cse_id)
+            if results:
+                return results
+        return self._search_html(query, config)
+
+    def _search_api(
+        self, query: str, config: SearchConfig, api_key: str, cse_id: str
+    ) -> list[SearchResult]:
         params = urllib.parse.urlencode({
-            "q": query,
-            "num": config.max_results,
-            "hl": config.language,
+            "key": api_key, "cx": cse_id, "q": query,
+            "num": min(config.max_results, 10), "hl": config.language,
+        })
+        url = f"{self.API_ENDPOINT}?{params}"
+        try:
+            with urllib.request.urlopen(url, timeout=config.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return []
+
+        results: list[SearchResult] = []
+        for item in data.get("items", []):
+            results.append(SearchResult(
+                url=item.get("link", ""),
+                title=item.get("title", ""),
+                snippet=item.get("snippet", ""),
+                source=self.name,
+            ))
+            if len(results) >= config.max_results:
+                break
+        return results
+
+    def _search_html(self, query: str, config: SearchConfig) -> list[SearchResult]:
+        params = urllib.parse.urlencode({
+            "q": query, "num": config.max_results, "hl": config.language,
         })
         url = f"{self.BASE_URL}?{params}"
         html_content = self._fetch_url(url, config.timeout)
         if not html_content:
             return []
-
         results: list[SearchResult] = []
         h3_pattern = re.compile(
             r'<h3[^>]*>(?:<a[^>]*href="([^"]*)"[^>]*>)?(.*?)(?:</a>)?</h3>',
@@ -417,10 +482,8 @@ class GoogleProvider(SearchProvider):
             r'<span[^>]*class="[^"]*st[^"]*"[^>]*>(.*?)</span>',
             re.DOTALL | re.IGNORECASE,
         )
-
         titles = h3_pattern.findall(html_content)
         snippets = span_pattern.findall(html_content)
-
         for i, (href, title) in enumerate(titles):
             clean_title = re.sub(r"<[^>]+>", "", title).strip()
             if not clean_title:
@@ -428,17 +491,12 @@ class GoogleProvider(SearchProvider):
             snippet = ""
             if i < len(snippets):
                 snippet = re.sub(r"<[^>]+>", "", snippets[i]).strip()
-            results.append(
-                SearchResult(
-                    url=urllib.parse.unquote(href),
-                    title=clean_title,
-                    snippet=snippet,
-                    source=self.name,
-                )
-            )
+            results.append(SearchResult(
+                url=urllib.parse.unquote(href),
+                title=clean_title, snippet=snippet, source=self.name,
+            ))
             if len(results) >= config.max_results:
                 break
-
         return results
 
 

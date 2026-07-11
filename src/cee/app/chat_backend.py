@@ -22,6 +22,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..core.types import InvariantScores
+from ..engine.t1_mirror import CognitiveIsomorphismEngine as MirrorEngine
+from ..engine.t2_prism import HyperGraphCollapseEngine as PrismEngine
+from ..engine.t3_geodesic import GeodesicNavigationEngine as GeodesicEngine
+from ..engine.t4_crystallization import CrystallizationEngine
+from ..engine.t5_genesis import GenesisEngine
 from ..engine.t6_invariant import InvariantEngine
 from .engine.context_memory import get_global_context
 
@@ -116,8 +121,8 @@ async def call_llm(messages: list[dict], api_key: str, base_url: str,
 # ── 质量评估反馈 ──────────────────────────────────────────────────
 
 
-def build_optimization_prompt(scores: InvariantScores) -> str:
-    """根据 CEE 评分构建优化提示."""
+def build_optimization_content(scores: InvariantScores, content: str) -> tuple[str, str | None]:
+    """Return (optimization_prompt, improved_variant_or_none)."""
     prompts = []
 
     if scores.itc < 0.5:
@@ -143,13 +148,35 @@ def build_optimization_prompt(scores: InvariantScores) -> str:
         )
 
     if not prompts:
-        return ""
+        return "", None
 
-    return (
+    optimization_prompt = (
         "Please rewrite your response to address these structural issues:\n"
         + "\n".join(prompts)
         + "\n\nKeep the same core content and meaning, only improve the structure and clarity."
     )
+
+    improved_variant: str | None = None
+
+    try:
+        mirror = MirrorEngine()
+        improved_variant = mirror.mirror_generate(content)
+    except Exception:
+        pass
+
+    try:
+        prism = PrismEngine()
+        perspectives = prism.collapse_to_perspectives(content)
+        if perspectives:
+            best = max(perspectives, key=lambda p: p.get("traceability", 0))
+            if best.get("traceability", 0) > 0.5:
+                alt = prism.reconstruct_from_perspective(best)
+                if not improved_variant:
+                    improved_variant = alt
+    except Exception:
+        pass
+
+    return optimization_prompt, improved_variant
 
 
 # ── 主聊天端点 ───────────────────────────────────────────────────
@@ -228,9 +255,18 @@ async def chat(req: ChatRequest):
         if attempt < req.max_retries:
             retries += 1
             optimized = True
-            cee_prompt = build_optimization_prompt(scores)
-            system_prompt = system_prompt + "\n" + cee_prompt if system_prompt else cee_prompt
-            if not cee_prompt:
+            cee_prompt, improved_variant = build_optimization_content(scores, content)
+            if improved_variant:
+                content = improved_variant
+                history.append({
+                    "attempt": attempt,
+                    "scores": scores.to_dict(),
+                    "content_preview": content[:100],
+                    "t_engine_optimized": True,
+                })
+            elif cee_prompt:
+                system_prompt = system_prompt + "\n" + cee_prompt if system_prompt else cee_prompt
+            else:
                 break
 
     if req.enable_context_memory and best_content:
@@ -327,6 +363,20 @@ async def learn_recall(query: str = "", session_id: str = "default", top_k: int 
     cm = get_global_context(session_id)
     results = cm.recall(query, top_k=top_k)
     return {"query": query, "results": results, "session_id": session_id}
+
+
+@app.post("/api/learn/crystallize")
+async def crystallize_knowledge(session_id: str = "default"):
+    cm = get_global_context(session_id)
+    result = cm.crystallize_knowledge()
+    return {"status": "ok", "session_id": session_id, "result": result}
+
+
+@app.post("/api/learn/crystallize/schedule")
+async def schedule_crystallization(session_id: str = "default", interval: int = 3600):
+    cm = get_global_context(session_id)
+    cm.schedule_crystallization(interval)
+    return {"status": "ok", "session_id": session_id, "interval": interval}
 
 
 def main():

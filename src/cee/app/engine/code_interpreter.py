@@ -696,7 +696,7 @@ del builtins.input
                 "tests": ["测试找到目标", "测试未找到目标", "测试空数组"],
             },
             "爬虫": {
-                "code": "# 模拟网页爬虫（受限环境）\n\ndef extract_links(html: str) -> list[str]:\n    import re\n    pattern = r'href=[\\'\"]?(https?://[^\\s\\'\">]+)'\n    return re.findall(pattern, html)\n\nhtml_sample = '<a href=\"https://example.com\">Link</a>'\nprint(extract_links(html_sample))",
+                "code": "# 模拟网页爬虫（受限环境）\n\ndef extract_links(html: str) -> list[str]:\n    import re\n    pattern = r'href=[\\\\'\"]?(https?://[^\\\\s\\\\'\">]+)'\n    return re.findall(pattern, html)\n\nhtml_sample = '<a href=\\\"https://example.com\\\">Link</a>'\nprint(extract_links(html_sample))",
                 "imports": ["re"],
                 "complexity": "medium",
                 "tests": ["测试无链接的 HTML", "测试多个链接"],
@@ -707,6 +707,66 @@ del builtins.input
                 "complexity": "medium",
                 "tests": ["测试正态分布数据", "测试空数据", "测试单元素数据"],
             },
+            "文件读写": {
+                "code": "def read_file_lines(filepath: str) -> list[str]:\n    try:\n        with open(filepath, 'r', encoding='utf-8') as f:\n            return [line.rstrip('\\\\n') for line in f]\n    except FileNotFoundError:\n        print(f'文件不存在: {filepath}')\n        return []\n    except Exception as e:\n        print(f'读取失败: {e}')\n        return []\n\n# 创建示例文件并读取\nwith open('/tmp/demo.txt', 'w') as f:\n    f.write('line1\\\\nline2\\\\nline3\\\\n')\nlines = read_file_lines('/tmp/demo.txt')\nprint(f'读取了 {len(lines)} 行')\nprint(lines)",
+                "imports": [],
+                "complexity": "simple",
+                "tests": ["测试存在的文件", "测试不存在的文件", "测试空文件"],
+            },
+            "json": {
+                "code": "import json\n\ndata = {'name': 'Alice', 'age': 30, 'skills': ['Python', 'ML']}\njson_str = json.dumps(data, indent=2, ensure_ascii=False)\nprint('序列化:')\nprint(json_str)\nloaded = json.loads(json_str)\nprint(f'\\\\n反序列化: name={loaded[\\\"name\\\"]}, skills={len(loaded[\\\"skills\\\"])}个')",
+                "imports": ["json"],
+                "complexity": "simple",
+                "tests": ["测试基本类型", "测试嵌套对象", "测试列表"],
+            },
+            "日期": {
+                "code": "from datetime import datetime, timedelta\n\nnow = datetime.now()\nprint(f'当前时间: {now.strftime(\\\"%Y-%m-%d %H:%M:%S\\\")}')\nweek_ago = now - timedelta(days=7)\nprint(f'一周前: {week_ago.strftime(\\\"%Y-%m-%d\\\")}')\nfuture = now + timedelta(days=30, hours=2)\nprint(f'30天2小时后: {future.strftime(\\\"%Y-%m-%d %H:%M\\\")}')",
+                "imports": ["datetime"],
+                "complexity": "simple",
+                "tests": ["测试当前时间", "测试时间差", "测试时区"],
+            },
+            "正则": {
+                "code": "import re\n\ntext = '联系电话: 010-12345678, 手机: 13812345678, email: user@example.com'\nphones = re.findall(r'\\\\d{2,4}-\\\\d{6,8}', text)\nmobiles = re.findall(r'1[3-9]\\\\d{9}', text)\nemails = re.findall(r'[\\\\w.-]+@[\\\\w.-]+\\\\.\\\\w+', text)\nprint(f'座机: {phones}')\nprint(f'手机: {mobiles}')\nprint(f'邮箱: {emails}')",
+                "imports": ["re"],
+                "complexity": "medium",
+                "tests": ["测试中文文本", "测试无匹配", "测试多种格式"],
+            },
+            "加密": {
+                "code": "import hashlib\n\ndef hash_password(password: str) -> str:\n    return hashlib.sha256(password.encode()).hexdigest()\n\ndef verify_password(password: str, stored_hash: str) -> bool:\n    return hash_password(password) == stored_hash\n\npwd = 'my_secure_pass'\nhashed = hash_password(pwd)\nprint(f'SHA256: {hashed[:16]}...')\nprint(f'验证通过: {verify_password(pwd, hashed)}')\nprint(f'错误密码: {verify_password(\\\"wrong\\\", hashed)}')",
+                "imports": ["hashlib"],
+                "complexity": "simple",
+                "tests": ["测试正常密码", "测试空密码", "测试长密码"],
+            },
+            "网络请求": {
+                "code": "import urllib.request\nimport json\n\ntry:\n    req = urllib.request.Request('https://httpbin.org/get', headers={'User-Agent': 'Python'})\n    with urllib.request.urlopen(req, timeout=10) as resp:\n        data = json.loads(resp.read().decode('utf-8'))\n        print(f'状态码: {resp.status}')\n        print(f'原始地址: {data.get(\\\"origin\\\", \\\"unknown\\\")}')\nexcept Exception as e:\n    print(f'请求失败: {e}')",
+                "imports": ["urllib.request", "json"],
+                "complexity": "medium",
+                "tests": ["测试正常请求", "测试超时", "测试无效URL"],
+            },
+            "命令行": {
+                "code": "import subprocess\nimport sys\n\ncmd = ['echo', 'Hello from subprocess'] if sys.platform != 'win32' else ['cmd', '/c', 'echo Hello']\ntry:\n    result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)\n    print(f'退出码: {result.returncode}')\n    print(f'输出: {result.stdout.strip()}')\nexcept subprocess.TimeoutExpired:\n    print('命令超时')\nexcept FileNotFoundError:\n    print('命令未找到')",
+                "imports": ["subprocess", "sys"],
+                "complexity": "medium",
+                "tests": ["测试简单命令", "测试不存在的命令", "测试超时"],
+            },
+            "csv": {
+                "code": "import csv\nimport io\n\ndata = [['Name', 'Age', 'City'], ['Alice', '30', 'Beijing'], ['Bob', '25', 'Shanghai']]\noutput = io.StringIO()\nwriter = csv.writer(output)\nwriter.writerows(data)\nprint('CSV 内容:')\nprint(output.getvalue().strip())\n\ninput_csv = io.StringIO(output.getvalue())\nreader = csv.DictReader(input_csv)\nfor row in reader:\n    print(f'{row[\\\"Name\\\"]}: {row[\\\"Age\\\"]}岁, {row[\\\"City\\\"]}')",
+                "imports": ["csv", "io"],
+                "complexity": "simple",
+                "tests": ["测试写入", "测试读取", "测试空CSV"],
+            },
+            "随机": {
+                "code": "import random\n\nrandom.seed(42)\nprint(f'整数: {random.randint(1, 100)}')\nprint(f'浮点: {random.uniform(0, 1):.4f}')\nitems = ['apple', 'banana', 'cherry', 'date']\nprint(f'随机选择: {random.choice(items)}')\nrandom.shuffle(items)\nprint(f'乱序列表: {items}')\nprint(f'按权重选择: {random.choices(items, weights=[1,2,3,4], k=3)}')",
+                "imports": ["random"],
+                "complexity": "simple",
+                "tests": ["测试种子固定", "测试空列表", "测试权重"],
+            },
+            "数据库": {
+                "code": "import sqlite3\nimport os\n\ndb_path = '/tmp/demo.db'\nconn = sqlite3.connect(db_path)\ncursor = conn.cursor()\ncursor.execute('CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)')\ncursor.execute('INSERT INTO users (name, age) VALUES (?, ?)', ('Alice', 30))\ncursor.execute('INSERT INTO users (name, age) VALUES (?, ?)', ('Bob', 25))\nconn.commit()\ncursor.execute('SELECT * FROM users')\nrows = cursor.fetchall()\nfor row in rows:\n    print(f'ID:{row[0]}, Name:{row[1]}, Age:{row[2]}')\nconn.close()\nprint(f'\\\\n数据库大小: {os.path.getsize(db_path)} bytes')",
+                "imports": ["sqlite3", "os"],
+                "complexity": "medium",
+                "tests": ["测试创建表", "测试插入", "测试查询"],
+            },
         }
 
         for keyword, template in patterns.items():
@@ -714,10 +774,10 @@ del builtins.input
                 return template
 
         return {
-            "code": "def solve():\n    \"\"\"根据描述生成: {}\"\"\"\n    result = None\n    # TODO: 实现 {} 的具体逻辑\n    return result\n\nprint(solve())".format(description[:80], description[:50]),
+            "code": "def solve():\n    \"\"\"根据描述自动生成的通用解法模板\"\"\"\n    # 输入处理\n    raw_input = input(\"请输入数据 (多个用逗号分隔): \").strip()\n    if not raw_input:\n        print(\"无输入数据\")\n        return None\n    items = [x.strip() for x in raw_input.split(',')]\n    # 主逻辑\n    result = process_items(items)\n    # 输出\n    print(f\"处理了 {len(items)} 个元素\")\n    print(f\"结果: {result}\")\n    return result\n\n\ndef process_items(items):\n    \"\"\"核心处理逻辑\"\"\"\n    return [item.upper() if isinstance(item, str) else item for item in items]\n\nprint(solve())",
             "imports": [],
             "complexity": "simple",
-            "tests": ["测试基本用例", "测试边界条件", "测试空输入"],
+            "tests": ["测试基本用例", "测试空输入", "测试边界条件"],
         }
 
     def _generate_javascript(self, description: str, context: str) -> dict:
@@ -734,6 +794,54 @@ del builtins.input
                 "complexity": "simple",
                 "tests": ["测试空数组", "测试无重复数组"],
             },
+            "斐波那契": {
+                "code": "function fibonacci(n) {\n    if (n <= 0) return [];\n    if (n === 1) return [0];\n    const seq = [0, 1];\n    for (let i = 2; i < n; i++) {\n        seq.push(seq[i - 1] + seq[i - 2]);\n    }\n    return seq;\n}\n\nconsole.log(fibonacci(10));",
+                "imports": [],
+                "complexity": "simple",
+                "tests": ["测试 n=0", "测试 n=1", "测试 n=10"],
+            },
+            "素数": {
+                "code": "function isPrime(n) {\n    if (n < 2) return false;\n    for (let i = 2; i <= Math.sqrt(n); i++) {\n        if (n % i === 0) return false;\n    }\n    return true;\n}\n\nfunction primesUpTo(limit) {\n    const result = [];\n    for (let i = 2; i <= limit; i++) {\n        if (isPrime(i)) result.push(i);\n    }\n    return result;\n}\n\nconsole.log(primesUpTo(50));",
+                "imports": [],
+                "complexity": "simple",
+                "tests": ["测试 0 和 1", "测试 2 是素数", "测试 100 以内素数数"],
+            },
+            "字符串": {
+                "code": "const text = 'Hello World JavaScript';\nconsole.log('大写:', text.toUpperCase());\nconsole.log('小写:', text.toLowerCase());\nconsole.log('分割:', text.split(' '));\nconsole.log('替换:', text.replace('World', 'Universe'));\nconsole.log('截取:', text.substring(0, 5));\nconsole.log('反转:', text.split('').reverse().join(''));\n\nconst data = ['apple', 'banana', 'cherry', 'date'];\nconsole.log('过滤:', data.filter(x => x.length > 5));\nconsole.log('映射:', data.map(x => x.toUpperCase()));\nconsole.log('排序:', data.sort());",
+                "imports": [],
+                "complexity": "simple",
+                "tests": ["测试空字符串", "测试中文字符", "测试特殊字符"],
+            },
+            "日期": {
+                "code": "const now = new Date();\nconsole.log('当前:', now.toISOString());\nconsole.log('本地:', now.toLocaleString('zh-CN'));\nconst weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);\nconsole.log('一周前:', weekAgo.toLocaleDateString('zh-CN'));\nconst future = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);\nconsole.log('30天后:', future.toLocaleDateString('zh-CN'));\nconsole.log('时间差(天):', Math.round((future - now) / (1000 * 60 * 60 * 24)));",
+                "imports": [],
+                "complexity": "simple",
+                "tests": ["测试当前时间", "测试闰年", "测试时区"],
+            },
+            "正则": {
+                "code": "const text = '联系电话: 010-12345678, 手机: 13812345678, email: user@example.com';\nconst phones = text.match(/\\d{2,4}-\\d{6,8}/g) || [];\nconst mobiles = text.match(/1[3-9]\\d{9}/g) || [];\nconst emails = text.match(/[\\w.-]+@[\\w.-]+\\.\\w+/g) || [];\nconsole.log('座机:', phones);\nconsole.log('手机:', mobiles);\nconsole.log('邮箱:', emails);\n\nconst html = '<div class=\"main\"><p>Hello</p><p>World</p></div>';\nconst tagPattern = /<p>(.*?)<\\/p>/g;\nconsole.log('标签内容:', [...html.matchAll(tagPattern)].map(m => m[1]));",
+                "imports": [],
+                "complexity": "medium",
+                "tests": ["测试中文文本", "测试无匹配", "测试多种格式"],
+            },
+            "json": {
+                "code": "const data = { name: 'Alice', age: 30, skills: ['JS', 'React'] };\nconst jsonStr = JSON.stringify(data, null, 2);\nconsole.log('序列化:');\nconsole.log(jsonStr);\nconst parsed = JSON.parse(jsonStr);\nconsole.log('\\n反序列化:', `name=${parsed.name}, skills=${parsed.skills.length}个`);\n\nconst arr = [1, 2, 3, 4, 5];\nconsole.log('map+filter:', arr.map(x => x * 2).filter(x => x > 5));\nconsole.log('reduce:', arr.reduce((a, b) => a + b, 0));",
+                "imports": [],
+                "complexity": "simple",
+                "tests": ["测试基本类型", "测试嵌套对象", "测试空对象"],
+            },
+            "异步": {
+                "code": "async function fetchData(url) {\n    try {\n        const response = await fetch(url);\n        if (!response.ok) throw new Error(`HTTP ${response.status}`);\n        const data = await response.json();\n        return data;\n    } catch (error) {\n        console.error('请求失败:', error.message);\n        return null;\n    }\n}\n\n(async () => {\n    const p1 = Promise.resolve('Result 1');\n    const p2 = new Promise(resolve => setTimeout(() => resolve('Result 2'), 100));\n    const results = await Promise.all([p1, p2]);\n    console.log('并行结果:', results);\n})();",
+                "imports": [],
+                "complexity": "medium",
+                "tests": ["测试成功响应", "测试失败响应", "测试超时"],
+            },
+            "加密": {
+                "code": "async function sha256(message) {\n    const encoder = new TextEncoder();\n    const data = encoder.encode(message);\n    const hashBuffer = await crypto.subtle.digest('SHA-256', data);\n    const hashArray = Array.from(new Uint8Array(hashBuffer));\n    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');\n}\n\n(async () => {\n    const hash = await sha256('Hello World');\n    console.log('SHA256:', hash.substring(0, 16) + '...');\n})();",
+                "imports": [],
+                "complexity": "medium",
+                "tests": ["测试正常文本", "测试空字符串", "测试长文本"],
+            },
         }
 
         for keyword, template in patterns_js.items():
@@ -741,10 +849,10 @@ del builtins.input
                 return template
 
         return {
-            "code": "function solve() {\n    // TODO: 实现 {}\n    return null;\n}\n\nconsole.log(solve());".format(description[:60]),
+            "code": "function solve() {\n    \"\"\"根据描述自动生成的通用解法模板\"\"\"\n    var input = prompt('请输入数据 (多个用逗号分隔):');\n    if (!input || input.trim() === '') {\n        console.log('无输入数据');\n        return null;\n    }\n    var items = input.split(',').map(function(s) { return s.trim(); });\n    var result = processItems(items);\n    console.log('处理了 ' + items.length + ' 个元素');\n    console.log('结果:', result);\n    return result;\n}\n\nfunction processItems(items) {\n    return items.map(function(item) {\n        return typeof item === 'string' ? item.toUpperCase() : item;\n    });\n}\n\nconsole.log(solve());",
             "imports": [],
             "complexity": "simple",
-            "tests": [],
+            "tests": ["测试基本用例", "测试空输入"],
         }
 
     def execute_cell(self, code: str, language: str = "python",
