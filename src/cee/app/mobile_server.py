@@ -28,6 +28,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..core.types import InvariantScores, QualityTier, OptimizationPath, GovernanceConfig
@@ -38,6 +39,9 @@ from ..engine.t4_crystallization import CrystallizationEngine
 from ..engine.t5_genesis import GenesisEngine
 from ..engine.t6_invariant import InvariantEngine, InvariantTheoretical
 from ..core.controller import ClosedLoopController
+from cee.app.engine.pipeline import PipelineOrchestrator
+from cee.app.engine.synthesis import SynthesisEngine
+from cee.app.engine.agent import AgentEngine
 
 STATIC_DIR = Path(__file__).parent / "frontend"
 
@@ -307,6 +311,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="空间 Mobile AI", version="4.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+# ── 静态文件 ─────────────────────────────────────────────────────────
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ── 请求/响应模型 ───────────────────────────────────────────────────
@@ -812,6 +819,144 @@ async def get_session(session_id: str):
 async def clear_session(session_id: str):
     _sessions.pop(session_id, None)
     return {"status": "cleared"}
+
+
+# ── 新增引擎实例 ─────────────────────────────────────────────────────
+
+pipeline_orchestrator = PipelineOrchestrator()
+synthesis_engine = SynthesisEngine()
+agent_engine = AgentEngine()
+
+# ═══════════════════════════════════════════════════════════════════
+# 引擎管线
+# ═══════════════════════════════════════════════════════════════════
+
+class PipelineRequest(BaseModel):
+    input_text: str = Field(..., min_length=1)
+    pipeline_name: str = "deep_research"
+    options: dict = Field(default_factory=dict)
+    steps: list[dict] = Field(default_factory=list)
+
+
+@app.post("/api/engine/pipeline")
+async def execute_pipeline(req: PipelineRequest):
+    try:
+        result = pipeline_orchestrator.execute(
+            input_text=req.input_text,
+            pipeline_name=req.pipeline_name,
+            options=req.options,
+            steps=req.steps if req.steps else None,
+        )
+        return result.to_dict()
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error": str(e)[:200],
+            "pipeline": req.pipeline_name,
+        }
+
+
+@app.get("/api/engine/pipeline/info/{pipeline_name}")
+async def get_pipeline_info(pipeline_name: str):
+    info = pipeline_orchestrator.get_pipeline_info(pipeline_name)
+    return info
+
+
+@app.get("/api/engine/pipelines")
+async def list_pipelines():
+    return {
+        "predefined": pipeline_orchestrator.get_predefined_pipelines(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 综合合成
+# ═══════════════════════════════════════════════════════════════════
+
+class SynthesisRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    sources: list[str] = Field(default_factory=lambda: ["search", "knowledge_base"])
+    detail_level: str = "standard"
+    options: dict = Field(default_factory=dict)
+
+
+@app.post("/api/engine/synthesis")
+async def synthesize(req: SynthesisRequest):
+    try:
+        result = synthesis_engine.synthesize(
+            query=req.query,
+            sources=req.sources,
+            detail_level=req.detail_level,
+            options=req.options,
+        )
+        return result.to_dict()
+    except Exception as e:
+        return {
+            "status": "failed",
+            "error": str(e)[:200],
+        }
+
+
+@app.get("/api/engine/synthesis/sources")
+async def list_synthesis_sources():
+    return {
+        "sources": synthesis_engine.list_available_sources(),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 智能体任务
+# ═══════════════════════════════════════════════════════════════════
+
+class AgentRequest(BaseModel):
+    task: str = Field(..., min_length=1)
+    tools: list[str] = Field(default_factory=list)
+    options: dict = Field(default_factory=dict)
+
+
+@app.post("/api/engine/agent")
+async def submit_agent_task(req: AgentRequest):
+    try:
+        result = agent_engine.execute(
+            task=req.task,
+            tools=req.tools if req.tools else None,
+            options=req.options,
+        )
+        return result
+    except Exception as e:
+        return {
+            "status": "failed",
+            "task_id": "",
+            "error": str(e)[:200],
+        }
+
+
+@app.get("/api/engine/agent/{task_id}")
+async def get_agent_task(task_id: str):
+    result = agent_engine.get_task_status(task_id)
+    if result is None:
+        return {"error": "not found", "task_id": task_id}
+    return result
+
+
+@app.delete("/api/engine/agent/{task_id}")
+async def cancel_agent_task(task_id: str):
+    cancelled = agent_engine.cancel_task(task_id)
+    if not cancelled:
+        return {"error": "任务不存在或已完成", "task_id": task_id}
+    return {"task_id": task_id, "status": "cancelled"}
+
+
+@app.get("/api/engine/agent")
+async def list_agent_tasks(status: str = ""):
+    tasks = agent_engine.list_tasks(status=status if status else None)
+    return {"tasks": tasks, "total": len(tasks)}
+
+
+@app.get("/api/engine/agent/tools")
+async def list_agent_tools():
+    tools = agent_engine.get_available_tools()
+    return {"tools": tools}
 
 
 def main():
