@@ -17,6 +17,10 @@ Usage:
   cee-learn feedback add --score 0.8
   cee-learn analyze
   cee-learn tune --params threshold:0.5,0.7,0.9
+  cee-learn toggle [session_id] [on|off]
+  cee-learn stats [session_id]
+  cee-learn recall [session_id] [query]
+  cee-learn config [session_id] [key=value ...]
   cee-cloud detect
   cee-cloud generate docker
   cee-cloud generate k8s
@@ -665,12 +669,71 @@ def process():
 def learn():
     """Auto-learning CLI."""
     if len(sys.argv) < 2:
-        print("Usage: cee-learn [feedback|analyze|tune] [options]")
+        print("Usage: cee-learn [feedback|analyze|tune|toggle|stats|recall|config] [options]")
         return
 
     subcmd = sys.argv[1]
 
-    if subcmd == "feedback":
+    if subcmd == "toggle":
+        from cee.app.engine.context_memory import get_global_context
+        session_id = sys.argv[2] if len(sys.argv) > 2 else "default"
+        enabled = sys.argv[3].lower() in ("true", "on", "1", "yes") if len(sys.argv) > 3 else None
+
+        cm = get_global_context(session_id)
+        if enabled is not None:
+            cm.toggle_learning(enabled)
+            print(json.dumps({
+                "session_id": session_id,
+                "auto_learn_enabled": enabled,
+                "message": f"自动学习已{'开启' if enabled else '关闭'}",
+            }, ensure_ascii=False, indent=2))
+        else:
+            cfg = cm.get_config()
+            print(json.dumps({
+                "session_id": session_id,
+                "auto_learn_enabled": cfg["auto_learn_enabled"],
+            }, ensure_ascii=False, indent=2))
+
+    elif subcmd == "stats":
+        from cee.app.engine.context_memory import get_global_context
+        session_id = sys.argv[2] if len(sys.argv) > 2 else "default"
+        cm = get_global_context(session_id)
+        print(json.dumps(cm.stats(), ensure_ascii=False, indent=2))
+
+    elif subcmd == "recall":
+        from cee.app.engine.context_memory import get_global_context
+        session_id = sys.argv[2] if len(sys.argv) > 2 else "default"
+        query = " ".join(sys.argv[3:]) if len(sys.argv) > 3 else ""
+        cm = get_global_context(session_id)
+        results = cm.recall(query, top_k=10)
+        print(f"查询: {query}")
+        for r in results:
+            print(f"  {r}")
+
+    elif subcmd == "config":
+        from cee.app.engine.context_memory import get_global_context
+        session_id = sys.argv[2] if len(sys.argv) > 2 else "default"
+        cm = get_global_context(session_id)
+
+        updates = {}
+        for arg in sys.argv[3:]:
+            if "=" in arg:
+                k, v = arg.split("=", 1)
+                if v.lower() in ("true", "on", "1", "yes"):
+                    updates[k] = True
+                elif v.lower() in ("false", "off", "0", "no"):
+                    updates[k] = False
+                else:
+                    try:
+                        updates[k] = float(v)
+                    except ValueError:
+                        updates[k] = v
+
+        if updates:
+            cm.set_config(**updates)
+        print(json.dumps(cm.get_config(), ensure_ascii=False, indent=2))
+
+    elif subcmd == "feedback":
         from cee.learning import FeedbackStore, FeedbackType
         store = FeedbackStore()
         store.add(score=0.85, feedback_type=FeedbackType.EXPLICIT, message="Great output", tags=["quality"])

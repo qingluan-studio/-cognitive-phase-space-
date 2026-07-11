@@ -83,6 +83,12 @@ from cee.app.engine.memory import (
     MemoryConfig,
 )
 
+from cee.app.engine.context_memory import (
+    ContextAwareMemory,
+    ContextMemoryConfig,
+    get_global_context,
+)
+
 __all__ = [
     # search
     "WebSearchEngine", "SearchProvider", "SearchResult",
@@ -106,4 +112,6 @@ __all__ = [
     # memory
     "MemorySystem", "MemoryEntry", "MemoryType",
     "ShortTermMemory", "LongTermMemory", "UserProfile", "MemoryConfig",
+    # context_memory
+    "ContextAwareMemory", "ContextMemoryConfig", "get_global_context",
 ]

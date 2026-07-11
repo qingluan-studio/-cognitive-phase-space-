@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from ..core.types import InvariantScores
 from ..engine.t6_invariant import InvariantEngine
+from .engine.context_memory import get_global_context
 
 STATIC_DIR = Path(__file__).parent / "frontend"
 
@@ -42,6 +43,8 @@ class ChatRequest(BaseModel):
     enable_cee: bool = True
     cee_threshold: float = 0.7
     max_retries: int = 3
+    session_id: str = "default"
+    enable_context_memory: bool = True
 
 
 class ChatResponse(BaseModel):
@@ -52,6 +55,8 @@ class ChatResponse(BaseModel):
     retries: int = 0
     optimized: bool = False
     history: list[dict] | None = None
+    context_memory: dict | None = None
+    learned_facts: list[str] | None = None
 
 
 invariant_engine = InvariantEngine()
@@ -156,13 +161,22 @@ async def chat(req: ChatRequest):
     enable_cee = req.enable_cee and bool(req.api_key)
     history = []
 
+    cm = get_global_context(req.session_id)
+
+    user_text = messages_dict[-1]["content"] if messages_dict else ""
+
     best_content = ""
     best_scores = InvariantScores(itc=0, scs=0, iec=0, pfft=0)
     best_score = 0.0
     retries = 0
     optimized = False
+    learned_facts: list[str] = []
 
     system_prompt = ""
+    if req.enable_context_memory:
+        ctx = cm.get_context(user_text)
+        if ctx:
+            system_prompt = ctx
 
     for attempt in range(req.max_retries + 1):
         content = await call_llm(
@@ -176,6 +190,12 @@ async def chat(req: ChatRequest):
         )
 
         if not enable_cee:
+            if req.enable_context_memory:
+                result = cm.learn_from_conversation(
+                    user_text=user_text,
+                    ai_response=content,
+                )
+                learned_facts = result.get("facts", [])
             return ChatResponse(
                 content=content,
                 model=req.model,
@@ -183,6 +203,8 @@ async def chat(req: ChatRequest):
                 cee_tier=None,
                 retries=0,
                 optimized=False,
+                context_memory=cm.stats() if req.enable_context_memory else None,
+                learned_facts=learned_facts if req.enable_context_memory else None,
             )
 
         scores = invariant_engine.evaluate(content)
@@ -206,9 +228,18 @@ async def chat(req: ChatRequest):
         if attempt < req.max_retries:
             retries += 1
             optimized = True
-            system_prompt = build_optimization_prompt(scores)
-            if not system_prompt:
+            cee_prompt = build_optimization_prompt(scores)
+            system_prompt = system_prompt + "\n" + cee_prompt if system_prompt else cee_prompt
+            if not cee_prompt:
                 break
+
+    if req.enable_context_memory and best_content:
+        result = cm.learn_from_conversation(
+            user_text=user_text,
+            ai_response=best_content,
+            scores=best_scores.to_dict(),
+        )
+        learned_facts = result.get("facts", [])
 
     return ChatResponse(
         content=best_content,
@@ -218,12 +249,84 @@ async def chat(req: ChatRequest):
         retries=retries,
         optimized=optimized,
         history=history,
+        context_memory=cm.stats() if req.enable_context_memory else None,
+        learned_facts=learned_facts if req.enable_context_memory else None,
     )
 
 
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "cee-chat"}
+
+
+# ── 自动学习控制端点 ──────────────────────────────────────────────
+
+class LearnToggleRequest(BaseModel):
+    session_id: str = "default"
+    enabled: bool = True
+
+
+class LearnConfigRequest(BaseModel):
+    session_id: str = "default"
+    auto_learn: bool | None = None
+    auto_graph: bool | None = None
+    auto_profile: bool | None = None
+    learn_from_user: bool | None = None
+    learn_from_ai: bool | None = None
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = "default"
+    query: str
+    response: str
+    rating: str  # "like" or "dislike"
+
+
+@app.post("/api/learn/toggle")
+async def toggle_learning(req: LearnToggleRequest):
+    cm = get_global_context(req.session_id)
+    cm.toggle_learning(req.enabled)
+    return {"auto_learn_enabled": req.enabled, "session_id": req.session_id}
+
+
+@app.post("/api/learn/config")
+async def set_learn_config(req: LearnConfigRequest):
+    cm = get_global_context(req.session_id)
+    updates = {}
+    if req.auto_learn is not None:
+        cm.toggle_learning(req.auto_learn)
+    if req.auto_graph is not None:
+        cm.toggle_graph(req.auto_graph)
+    if req.auto_profile is not None:
+        cm.toggle_profile(req.auto_profile)
+    if req.learn_from_user is not None or req.learn_from_ai is not None:
+        kwargs = {}
+        if req.learn_from_user is not None:
+            kwargs["learn_from_user"] = req.learn_from_user
+        if req.learn_from_ai is not None:
+            kwargs["learn_from_ai"] = req.learn_from_ai
+        cm.set_config(**kwargs)
+    return {"config": cm.get_config(), "session_id": req.session_id}
+
+
+@app.get("/api/learn/stats")
+async def learn_stats(session_id: str = "default"):
+    cm = get_global_context(session_id)
+    return cm.stats()
+
+
+@app.post("/api/learn/feedback")
+async def learn_feedback(req: FeedbackRequest):
+    cm = get_global_context(req.session_id)
+    cm.mark_feedback(req.query, req.response, req.rating)
+    return {"status": "ok", "rating": req.rating}
+
+
+@app.post("/api/learn/recall")
+async def learn_recall(query: str = "", session_id: str = "default", top_k: int = 5):
+    cm = get_global_context(session_id)
+    results = cm.recall(query, top_k=top_k)
+    return {"query": query, "results": results, "session_id": session_id}
 
 
 def main():
