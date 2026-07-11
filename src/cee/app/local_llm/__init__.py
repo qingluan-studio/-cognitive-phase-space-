@@ -1,23 +1,21 @@
 """
-认知涌现引擎 — 本地推理模块 v8.0
+认知涌现引擎 — 本地推理模块 v8.1
 ===========================
-零 API 依赖的自学习对话引擎，十八引擎协同
+零 API 依赖的自学习对话引擎，六本字典+去模板化组装
 
-新六引擎(v8.0):
-  PhaseTransitionDetector — 相变检测 (探索↔利用/发散↔收敛/感性↔理性)
-  MetaCognition            — 元认知 (置信度校准+未知觉察+自适应策略)
-  ConceptualBlending       — 概念融合 (双域混合创造涌现洞察)
-  DreamConsolidator        — 梦境巩固 (知识回放+随机重组+抽象爬梯)
-  CounterfactualReasoning   — 反事实推理 (条件反转+后果投射+因果洞察)
-  SalienceNetwork          — 突显网络 (六维评分+动态注意力预算)
+新七引擎(v8.0+):
+  PhaseTransitionDetector — 相变检测
+  MetaCognition            — 元认知校准
+  ConceptualBlending       — 概念融合
+  DreamConsolidator        — 梦境巩固
+  CounterfactualReasoning   — 反事实推理
+  SalienceNetwork          — 突显网络
+  DictionaryAssembler      — 字典组装引擎(六本字典: 句子/感情/符号/字母/模式/意图)
 
 用法:
-    from cee.app.local_llm import LocalInferenceEngine, ConceptualBlending
-
+    from cee.app.local_llm import LocalInferenceEngine, DictionaryAssembler
     engine = LocalInferenceEngine()
-    result = engine.chat("如果深度学习没有GPU会怎样")
-    engine.feedback("如果深度学习没有GPU会怎样", "like")
-    engine.dream()  # 手动触发梦境巩固
+    result = engine.chat("给我一个排序代码，要详细解释")
 """
 
 from .local_inference import LocalInferenceEngine
@@ -41,6 +39,7 @@ from .conceptual_blending import ConceptualBlending
 from .dream_consolidator import DreamConsolidator
 from .counterfactual import CounterfactualReasoning
 from .salience_network import SalienceNetwork
+from .dictionary_assembler import DictionaryAssembler
 
 __all__ = [
     "LocalInferenceEngine",
@@ -67,4 +66,5 @@ __all__ = [
     "DreamConsolidator",
     "CounterfactualReasoning",
     "SalienceNetwork",
+    "DictionaryAssembler",
 ]

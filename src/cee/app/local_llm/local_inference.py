@@ -49,6 +49,7 @@ from .conceptual_blending import ConceptualBlending
 from .dream_consolidator import DreamConsolidator
 from .counterfactual import CounterfactualReasoning
 from .salience_network import SalienceNetwork
+from .dictionary_assembler import DictionaryAssembler
 
 
 class LocalInferenceEngine:
@@ -87,6 +88,7 @@ class LocalInferenceEngine:
         self._dreamer = DreamConsolidator(self.store, self._auto_learner,
                                           self._kgraph, self._blender)
         self._counterfactual = CounterfactualReasoning(self._kgraph, self._auto_learner)
+        self._assembler = DictionaryAssembler(self)
 
         self._last_reply: dict[str, Any] = {}
 
@@ -230,13 +232,16 @@ class LocalInferenceEngine:
             source = "knowledge_base"
         else:
             self._stats["fallback_uses"] += 1
-            content = generate_fallback(user_text, intent=intent)
+            content = self._assembler.assemble(
+                user_text, affect=affect,
+                conversation_depth=flow["depth"],
+                profile=self._profile.get_profile_dict(),
+            )
 
             if flow["depth"] >= 3:
                 followup = self._conversation.suggest_followup()
                 content += f"\n\n{followup}"
 
-            # 反事实洞察注入fallback
             if cf_result:
                 content += f"\n\n【反事实视角】{cf_result.insight[:300]}"
 
@@ -300,8 +305,9 @@ class LocalInferenceEngine:
 
         elapsed = round(time.perf_counter() - start, 3)
 
-        self._speedup.store(user_text, content, cee_scores, tier, source, intent,
-                            vectorizer=vectorizer)
+        if source == "knowledge_base":
+            self._speedup.store(user_text, content, cee_scores, tier, source, intent,
+                                vectorizer=vectorizer)
 
         self._memory.add_exchange(user_text, content)
 
@@ -365,6 +371,7 @@ class LocalInferenceEngine:
         self._metacog.calibrate(
             query, self._last_reply.get("metacog_confidence", 0.5), rating,
         )
+        self._assembler.feedback(query, rating)
 
     # ── 内部方法 ─────────────────────────────────────────────
 
@@ -548,6 +555,7 @@ class LocalInferenceEngine:
         s["dreamer"] = self._dreamer.stats()
         s["counterfactual"] = self._counterfactual.stats()
         s["salience"] = self._salience.stats()
+        s["assembler"] = self._assembler.stats()
         return s
 
     def export_training_data(self) -> list[dict]:
