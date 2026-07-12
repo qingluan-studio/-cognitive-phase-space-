@@ -379,6 +379,316 @@ async def schedule_crystallization(session_id: str = "default", interval: int = 
     return {"status": "ok", "session_id": session_id, "interval": interval}
 
 
+# ── 持续学习 / 错误规避 端点 ────────────────────────────────────────
+
+
+class ContinualFeedbackRequest(BaseModel):
+    session_id: str = "default"
+    query: str
+    response: str
+    feedback: str
+    rating: Optional[int] = None
+
+
+class ApplyRulesRequest(BaseModel):
+    query: str
+    response: str
+
+
+class ErrorPatternRequest(BaseModel):
+    query: str
+    response: str
+    correction: str
+    category: str = "unclear"
+
+
+@app.post("/api/learn/continual/feedback")
+async def record_continual_feedback(req: ContinualFeedbackRequest):
+    from ..engine.continual_learner import get_continuous_learner
+    learner = get_continuous_learner()
+    learner.learn_from_feedback(
+        req.session_id, req.query, req.response, req.feedback, req.rating,
+    )
+    return {"status": "ok"}
+
+
+@app.get("/api/learn/continual/avoidance")
+async def get_avoidance(query: str):
+    from ..engine.continual_learner import get_continuous_learner
+    learner = get_continuous_learner()
+    ctx = learner.get_avoidance_context(query)
+    return {"context": ctx, "has_suggestions": bool(ctx)}
+
+
+@app.post("/api/learn/continual/apply-rules")
+async def apply_learned_rules(req: ApplyRulesRequest):
+    from ..engine.continual_learner import get_continuous_learner
+    learner = get_continuous_learner()
+    improved = learner.apply_learned_rules(req.query, req.response)
+    return {"improved": improved is not None, "response": improved or req.response}
+
+
+@app.get("/api/learn/continual/report")
+async def learning_report():
+    from ..engine.continual_learner import get_continuous_learner
+    return get_continuous_learner().get_learning_report()
+
+
+@app.post("/api/learn/continual/error-pattern")
+async def record_error_pattern(req: ErrorPatternRequest):
+    from ..engine.continual_learner import get_continuous_learner, ErrorCategory
+    learner = get_continuous_learner()
+    valid_categories = [e.value for e in ErrorCategory]
+    cat = (
+        ErrorCategory(req.category)
+        if req.category in valid_categories
+        else ErrorCategory.UNCLEAR
+    )
+    instance = learner.error_miner.record_error(
+        req.query, req.response, req.correction, cat,
+    )
+    return {"error_id": instance.error_id, "category": instance.category.value}
+
+
+# ── Self-Reflection Metacognition 端点 ──────────────────────────────
+
+
+class ReflectEvaluateRequest(BaseModel):
+    query: str
+    response: str
+    context: Optional[str] = None
+
+
+class ReflectImproveRequest(BaseModel):
+    query: str
+    response: str
+    context: Optional[str] = None
+
+
+@app.post("/api/reflect/evaluate")
+async def evaluate_response(req: ReflectEvaluateRequest):
+    from ..engine.reflect import get_reflect_engine
+
+    engine = get_reflect_engine()
+    result = engine.critic.evaluate(req.query, req.response, req.context)
+    return {
+        "overall_score": result.overall_score,
+        "confidence": result.confidence.value,
+        "dimension_scores": result.dimension_scores,
+        "issues": result.issues,
+        "suggestions": result.suggestions,
+    }
+
+
+@app.post("/api/reflect/improve")
+async def improve_response(req: ReflectImproveRequest):
+    from ..engine.reflect import get_reflect_engine, get_metacognitive_monitor
+
+    engine = get_reflect_engine()
+    result = engine.reflect_and_improve(req.query, req.response, req.context)
+    get_metacognitive_monitor().record_reflection("default", result)
+    return {
+        "original_score": result.overall_score,
+        "confidence": result.confidence.value,
+        "dimension_scores": result.dimension_scores,
+        "improved_version": result.improved_version,
+        "issues": result.issues,
+        "suggestions": result.suggestions,
+        "iteration_count": result.iteration_count,
+    }
+
+
+@app.get("/api/reflect/report")
+async def reflection_report(session_id: str = "default"):
+    from ..engine.reflect import get_metacognitive_monitor
+
+    monitor = get_metacognitive_monitor()
+    return monitor.get_session_report(session_id)
+
+
+@app.get("/api/reflect/stats")
+async def reflection_stats():
+    from ..engine.reflect import get_metacognitive_monitor
+
+    return get_metacognitive_monitor().get_global_stats()
+
+
+class PlanCreateRequest(BaseModel):
+    goal: str
+    context: Optional[str] = None
+
+
+class PlanExecuteRequest(BaseModel):
+    goal: str
+    executor_fn: Optional[str] = None
+
+
+class PlanTreeRequest(BaseModel):
+    goal: str
+
+
+@app.post("/api/plan/create")
+async def create_plan(req: PlanCreateRequest):
+    from ..engine.planner import get_planner
+
+    planner = get_planner()
+    tasks = planner.plan(req.goal, req.context)
+    tree = planner.get_task_tree(req.goal)
+    return {
+        "goal": req.goal,
+        "task_count": len(tasks),
+        "tasks": [
+            {
+                "id": t.task_id,
+                "name": t.name,
+                "status": t.status.value,
+                "priority": t.priority.value,
+                "dependencies": t.dependencies,
+            }
+            for t in tasks
+        ],
+        "tree": tree,
+    }
+
+
+@app.post("/api/plan/execute")
+async def execute_plan(req: PlanExecuteRequest):
+    from ..engine.planner import get_planner
+
+    planner = get_planner()
+    result = planner.execute_plan(req.goal)
+    return {
+        "plan_id": result.plan_id,
+        "goal": result.goal,
+        "progress": result.progress,
+        "completed": len(result.completed),
+        "failed": len(result.failed),
+        "pending": len(result.pending),
+        "summary": result.summary,
+        "execution_time_ms": result.execution_time_ms,
+    }
+
+
+@app.get("/api/plan/list")
+async def list_plans():
+    from ..engine.planner import get_planner
+
+    return {"plans": get_planner().list_plans()}
+
+
+@app.get("/api/plan/{plan_id}")
+async def get_plan(plan_id: str):
+    from ..engine.planner import get_planner
+
+    plan = get_planner().get_plan(plan_id)
+    if not plan:
+        return {"error": "Plan not found"}
+    return {
+        "plan_id": plan.plan_id,
+        "goal": plan.goal,
+        "progress": plan.progress,
+        "summary": plan.summary,
+    }
+
+
+@app.post("/api/plan/tree")
+async def task_tree(req: PlanTreeRequest):
+    from ..engine.planner import get_planner
+
+    return get_planner().get_task_tree(req.goal)
+
+
+# ── CoT Reasoning 端点 ──────────────────────────────────────────
+
+
+class CoTReasonRequest(BaseModel):
+    query: str
+    strategy: Optional[str] = None
+    context: Optional[str] = None
+
+
+class CoTAnalogyRequest(BaseModel):
+    domain: str
+    concept: Optional[str] = None
+
+
+@app.post("/api/cot/reason")
+async def cot_reason(req: CoTReasonRequest):
+    from ..engine.cot_reasoner import get_cot_reasoner, ReasoningStrategy
+
+    reasoner = get_cot_reasoner()
+    strat = ReasoningStrategy(req.strategy) if req.strategy else None
+    result = reasoner.reason(req.query, strat, req.context)
+    return {
+        "query": result.query,
+        "strategy": result.strategy.value,
+        "steps": [
+            {
+                "id": s.step_id,
+                "type": s.step_type.value,
+                "content": s.content,
+                "confidence": s.confidence,
+            }
+            for s in result.steps
+        ],
+        "final_answer": result.final_answer,
+        "total_confidence": result.total_confidence,
+        "trace": result.trace,
+        "verified": result.verified,
+    }
+
+
+@app.post("/api/cot/reason-tool")
+async def cot_reason_with_tools(query: str, tool_results: Optional[dict] = None):
+    from ..engine.cot_reasoner import get_cot_reasoner
+
+    reasoner = get_cot_reasoner()
+    result = reasoner.reason_with_tool_use(query, tool_results)
+    return {
+        "query": result.query,
+        "strategy": result.strategy.value,
+        "steps": [
+            {
+                "id": s.step_id,
+                "type": s.step_type.value,
+                "content": s.content,
+                "confidence": s.confidence,
+            }
+            for s in result.steps
+        ],
+        "final_answer": result.final_answer,
+        "total_confidence": result.total_confidence,
+        "trace": result.trace,
+        "verified": result.verified,
+    }
+
+
+@app.get("/api/cot/strategies")
+async def list_strategies():
+    from ..engine.cot_reasoner import ReasoningStrategy
+
+    return {"strategies": [s.value for s in ReasoningStrategy]}
+
+
+@app.post("/api/cot/analogy")
+async def find_analogy(req: CoTAnalogyRequest):
+    from ..engine.cot_reasoner import ReasonByAnalogy
+
+    rba = ReasonByAnalogy()
+    source_info = rba.find_analogy(req.domain)
+    source_domain = source_info[0] if source_info else None
+    mapped_concept = None
+    if req.concept and source_domain:
+        mapped_concept = rba.map_concepts(source_domain, req.domain, req.concept)
+    return {
+        "domain": req.domain,
+        "source_domain": source_domain,
+        "mapped_concept": mapped_concept,
+    }
+
+
+# ── 启动入口 ──────────────────────────────────────────────────────
+
 def main():
     uvicorn.run(
         "cee.app.chat_backend:app",
