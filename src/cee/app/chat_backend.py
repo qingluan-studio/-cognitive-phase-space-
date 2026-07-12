@@ -613,6 +613,11 @@ class CoTAnalogyRequest(BaseModel):
     concept: Optional[str] = None
 
 
+class CoTReasonToolRequest(BaseModel):
+    query: str
+    tool_results: Optional[dict] = None
+
+
 @app.post("/api/cot/reason")
 async def cot_reason(req: CoTReasonRequest):
     from .engine.cot_reasoner import get_cot_reasoner, ReasoningStrategy
@@ -640,11 +645,11 @@ async def cot_reason(req: CoTReasonRequest):
 
 
 @app.post("/api/cot/reason-tool")
-async def cot_reason_with_tools(query: str, tool_results: Optional[dict] = None):
+async def cot_reason_with_tools(req: CoTReasonToolRequest):
     from .engine.cot_reasoner import get_cot_reasoner
 
     reasoner = get_cot_reasoner()
-    result = reasoner.reason_with_tool_use(query, tool_results)
+    result = reasoner.reason_with_tool_use(req.query, req.tool_results)
     return {
         "query": result.query,
         "strategy": result.strategy.value,
