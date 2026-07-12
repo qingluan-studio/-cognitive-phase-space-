@@ -11,14 +11,12 @@ import json
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from ..core.types import InvariantScores
@@ -73,7 +71,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "mobile.html")
 
 
 # ── LLM 调用 ──────────────────────────────────────────────────────

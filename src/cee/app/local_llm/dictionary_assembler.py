@@ -660,12 +660,12 @@ class DictionaryAssembler:
                     updates = {}
                     if rating == "like":
                         for f in r.fragments_used:
-                            key = f[:20]
+                            key = f[:30]
                             self._fragment_usage[key] += 2
                         updates[intent] = {"fragments": r.fragments_used, "score": +1}
                     elif rating == "dislike":
                         for f in r.fragments_used:
-                            key = f[:20]
+                            key = f[:30]
                             self._fragment_usage[key] = max(0, self._fragment_usage.get(key, 0) - 1)
                         updates[intent] = {"fragments": r.fragments_used, "score": -1}
                     self._save()
@@ -807,7 +807,7 @@ class DictionaryAssembler:
 
         if not candidates:
             for sym, cfg in SYMBOL_DICT.items():
-                if any(w in keyword for w in keyword.split()[:3]):
+                if any(w in sym.lower() for w in keyword.split()[:3]):
                     candidates.append((sym, cfg))
                     if len(candidates) >= 3:
                         break

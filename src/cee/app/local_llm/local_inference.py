@@ -313,7 +313,8 @@ class LocalInferenceEngine:
 
         self._last_reply = {"content": content, "cee_scores": cee_scores,
                             "cee_tier": tier, "source": source,
-                            "intent": intent, "elapsed_s": elapsed}
+                            "intent": intent, "elapsed_s": elapsed,
+                            "metacog_confidence": metacog_confidence}
         self._reflection.push_reply(self._last_reply)
 
         result = {
@@ -348,8 +349,7 @@ class LocalInferenceEngine:
                 new_params = self._reflection.get_tuner_params()
                 if new_params.get("quality_threshold"):
                     self._quality_threshold = new_params["quality_threshold"]
-                    self.store = SelfLearningKnowledgeStore(
-                        quality_threshold=self._quality_threshold)
+                    self.store._quality_threshold = self._quality_threshold
 
         # ── 周期梦境巩固 ──
         if self._stats["total_queries"] % 40 == 0:

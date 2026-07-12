@@ -16,7 +16,6 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 try:
     import httpx
@@ -25,9 +24,9 @@ except ImportError:
     HAS_HTTPX = False
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -294,9 +293,9 @@ def engine_chat(user_text: str, history: list[dict], deep_think: bool = False) -
 
     if avg < 0.7:
         try:
-            optimized = controller.optimize(body, threshold=0.7)
-            if hasattr(optimized, "text"):
-                body = optimized.text
+            optimized = controller.optimize(body, target_threshold=0.7)
+            if hasattr(optimized, "optimized") and hasattr(optimized.optimized, "content"):
+                body = optimized.optimized.content
             elif isinstance(optimized, str):
                 body = optimized
         except Exception:
@@ -550,8 +549,8 @@ async def t6_evaluate(req: TextInput):
 async def optimize(req: TextInput):
     try:
         before = t6_engine.evaluate(req.text)
-        result = controller.optimize(req.text, threshold=req.options.get("threshold"))
-        optimized_text = result.text if hasattr(result, "text") else str(result)
+        result = controller.optimize(req.text, target_threshold=req.options.get("threshold"))
+        optimized_text = result.optimized.content if hasattr(result, "optimized") else str(result)
         after = t6_engine.evaluate(optimized_text)
         return {
             "original": req.text,

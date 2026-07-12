@@ -244,6 +244,8 @@ def _adversarial_experiment():
 
 
 def _run_deviation_detection_experiment():
+    from cee.governance.adversarial import DeviationDetector
+
     detector = DeviationDetector()
 
     test_cases = [
@@ -308,6 +310,8 @@ def _run_deviation_detection_experiment():
 
 
 def _run_innovation_protection_experiment():
+    from cee.governance.adversarial import DeviationDetector
+
     detector = DeviationDetector()
 
     test_cases = [
@@ -355,10 +359,10 @@ def _run_long_term_stability_experiment():
 
     def make_scores(itc=0.7, scs=0.7, iec=0.7, pfft=0.7):
         return InvariantScores(
-            iterative_coherence=itc,
-            structural_coherence=scs,
-            information_efficiency=iec,
-            formal_fidelity=pfft,
+            itc=itc,
+            scs=scs,
+            iec=iec,
+            pfft=pfft,
         )
 
     print("=" * 70)

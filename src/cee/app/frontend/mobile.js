@@ -289,13 +289,14 @@
         const isActive = c.id === STATE.sessionId;
         const title = escapeHtml(c.title || '新对话');
         const count = c.msg_count || 0;
-        return '<div class="drawer-conv' + (isActive ? ' active' : '') + '" onclick="CeeApp.SessionManager.switch(\'' + c.id + '\')">' +
+        const escapedId = String(c.id).replace(/'/g, "\\'");
+        return '<div class="drawer-conv' + (isActive ? ' active' : '') + '" onclick="CeeApp.SessionManager.switch(\'' + escapedId + '\')">' +
           '<div class="drawer-conv-icon">' + (isActive ? '&#9679;' : '&#9702;') + '</div>' +
           '<div class="drawer-conv-info">' +
           '<div class="drawer-conv-title">' + title + '</div>' +
           '<div class="drawer-conv-meta">' + count + ' 条消息</div>' +
           '</div>' +
-          '<div class="drawer-conv-delete" onclick="CeeApp.SessionManager.remove(\'' + c.id + '\', event)">&times;</div>' +
+          '<div class="drawer-conv-delete" onclick="CeeApp.SessionManager.remove(\'' + escapedId + '\', event)">&times;</div>' +
           '</div>';
       }).join('');
     },
@@ -365,6 +366,10 @@
       const lastAi = STATE.messages.length > 0 && STATE.messages[STATE.messages.length - 1].role === 'assistant';
       if (lastAi) STATE.messages.pop();
 
+      // Also remove the corresponding user message (it will be re-pushed by _streamChat)
+      const lastUser = STATE.messages.length > 0 && STATE.messages[STATE.messages.length - 1].role === 'user';
+      if (lastUser) STATE.messages.pop();
+
       const typingEl = this.addTyping();
       this.scrollToBottom();
       STATE.typing = true;
@@ -394,6 +399,12 @@
         });
 
         if (typingEl) typingEl.remove();
+
+        if (!resp.ok) {
+          const errText = await resp.text().catch(() => 'HTTP ' + resp.status);
+          throw new Error(errText);
+        }
+        if (!resp.body) throw new Error('无响应体');
 
         const reader = resp.body.getReader();
         const decoder = new TextDecoder();
@@ -550,7 +561,7 @@
     },
 
     scrollToBottom() {
-      const container = $('#chat-page');
+      const container = document.getElementById('chat-page') || document.querySelector('main');
       if (container) setTimeout(() => { container.scrollTop = container.scrollHeight; }, 50);
     },
 
@@ -857,7 +868,8 @@
         d.baseUrl = localStorage.getItem('cee_base_url') || 'https://api.openai.com/v1';
         d.model = localStorage.getItem('cee_model') || 'gpt-4o-mini';
         d.theme = localStorage.getItem('cee_theme') || 'dark';
-        d.temperature = parseFloat(localStorage.getItem('cee_temperature')) || 0.7;
+        const tempVal = parseFloat(localStorage.getItem('cee_temperature'));
+        d.temperature = isNaN(tempVal) ? 0.7 : tempVal;
         d.maxTokens = parseInt(localStorage.getItem('cee_max_tokens')) || 4096;
         d.deepThink = localStorage.getItem('cee_deep_think') === 'true';
         d.searchEnabled = localStorage.getItem('cee_search') === 'true';
@@ -893,22 +905,26 @@
     },
 
     save() {
-      const apiKey = $('#apiKeyInput')?.value?.trim() || '';
-      const baseUrl = $('#baseUrlInput')?.value?.trim() || 'https://api.openai.com/v1';
-      const model = $('#modelInput')?.value?.trim() || 'gpt-4o-mini';
-      const temp = parseFloat($('#tempSlider')?.value || '0.7');
-      const maxTokens = parseInt($('#maxTokensInput')?.value || '4096');
+      try {
+        const apiKey = $('#apiKeyInput')?.value?.trim() || '';
+        const baseUrl = $('#baseUrlInput')?.value?.trim() || 'https://api.openai.com/v1';
+        const model = $('#modelInput')?.value?.trim() || 'gpt-4o-mini';
+        const temp = parseFloat($('#tempSlider')?.value || '0.7');
+        const maxTokens = parseInt($('#maxTokensInput')?.value || '4096');
 
-      localStorage.setItem('cee_api_key', apiKey);
-      localStorage.setItem('cee_base_url', baseUrl);
-      localStorage.setItem('cee_model', model);
-      localStorage.setItem('cee_temperature', String(temp));
-      localStorage.setItem('cee_max_tokens', String(maxTokens));
-      localStorage.setItem('cee_font_size', String(fontSize));
-      localStorage.setItem('cee_deep_think', String(STATE.deepThink));
+        localStorage.setItem('cee_api_key', apiKey);
+        localStorage.setItem('cee_base_url', baseUrl);
+        localStorage.setItem('cee_model', model);
+        localStorage.setItem('cee_temperature', String(temp));
+        localStorage.setItem('cee_max_tokens', String(maxTokens));
+        localStorage.setItem('cee_font_size', String(this.defaults.fontSize));
+        localStorage.setItem('cee_deep_think', String(STATE.deepThink));
 
-      Object.assign(this.defaults, { apiKey, baseUrl, model, temperature: temp, maxTokens });
-      NotificationSystem.toast('设置已保存', 'success');
+        Object.assign(this.defaults, { apiKey, baseUrl, model, temperature: temp, maxTokens });
+        NotificationSystem.toast('设置已保存', 'success');
+      } catch (e) {
+        console.error('SettingsManager.save failed:', e);
+      }
     },
 
     toggleTheme() {
@@ -992,6 +1008,13 @@
       setTimeout(() => overlay.classList.remove('active'), 1800);
     },
 
+    switchPage(page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      const el = document.getElementById(page + '-page') || document.getElementById(page);
+      if (el) el.classList.add('active');
+      STATE.currentPage = page;
+    },
+
     quickChat(text) {
       if (STATE.currentPage !== 'chat') this.switchPage('chat');
       const input = $('#chatInput');
@@ -1045,7 +1068,7 @@
     copyCode(button) {
       const code = button.dataset.code;
       if (!code) return;
-      const decoded = code.replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+      const decoded = code.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
       navigator.clipboard.writeText(decoded).then(() => {
         button.classList.add('copied');
         button.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>已复制';
@@ -1302,6 +1325,7 @@
      Utility Functions
      ═══════════════════════════════════════════════════════════════════ */
   function escapeHtml(text) {
+    if (text == null) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
@@ -1319,16 +1343,15 @@
   }
 
   function renderMarkdown(text) {
-    let html = escapeHtml(text);
-
-    // Pre-process: extract code blocks
+    // Pre-process: extract code blocks BEFORE escaping to avoid double-escaping
     const codeBlockMap = {};
-    const codeBlocks = CodeBlockManager.extractFromText(text);
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-      const id = 'cb_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-      codeBlockMap[id] = CodeBlockManager.renderBlock(lang, code);
+    let workText = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+      const id = '@@CODEBLOCK_' + Object.keys(codeBlockMap).length + '@@';
+      codeBlockMap[id] = CodeBlockManager.renderBlock(lang, code.trim());
       return id;
     });
+
+    let html = escapeHtml(workText);
 
     // Tables
     html = html.replace(/^\|(.+)\|\n\|[-: |]+\|\n((?:\|.+\|\n?)*)/gm, (match, header, rows) => {
@@ -1372,7 +1395,10 @@
     html = html.replace(/^\*\*\*$/gm, '<hr>');
 
     // Links
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+      const safeUrl = /^(https?:|mailto:)/i.test(url) ? url : '#';
+      return '<a href="' + safeUrl + '" target="_blank" rel="noopener">' + text + '</a>';
+    });
 
     // Ordered lists
     html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
