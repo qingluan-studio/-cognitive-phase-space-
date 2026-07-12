@@ -81,6 +81,9 @@ async def index():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
 # ── LLM 调用 ──────────────────────────────────────────────────────
 
 
