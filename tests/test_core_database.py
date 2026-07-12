@@ -336,7 +336,7 @@ class TestSearchLogs:
         assert result.total >= 1
 
 
-@pytest.mark.asyncio
+
 class TestPageInfo:
     """Tests for PageInfo helper."""
 

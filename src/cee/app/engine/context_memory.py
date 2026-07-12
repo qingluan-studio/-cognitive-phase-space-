@@ -382,6 +382,95 @@ class ContextAwareMemory:
                     tags=["feedback", "negative"],
                 )
 
+    def crystallize_knowledge(self) -> dict:
+        """Periodic knowledge crystallization -- consolidate recent learning into long-term knowledge.
+
+        This method:
+        1. Takes conversation buffer items from recent session
+        2. Extracts key topics from the buffer using the knowledge graph
+        3. Creates consolidated "crystal" memories from AutoLearner facts
+        4. Strengthens important edges in the knowledge graph
+        5. Returns crystallization summary
+        """
+        with self._lock:
+            result = {
+                "session_id": self._session_id,
+                "timestamp": time.time(),
+                "buffer_items": len(self._conversation_buffer),
+                "facts_crystallized": 0,
+                "edges_strengthened": 0,
+                "low_quality_removed": 0,
+            }
+
+            if not self._conversation_buffer:
+                result["status"] = "no_buffer"
+                return result
+
+            combined_text = " ".join(
+                item.get("user", "") + " " + item.get("ai", "")
+                for item in self._conversation_buffer
+            )
+
+            keywords = self._extract_keywords(combined_text, max_kw=10)
+            if keywords:
+                seed_keywords = keywords[:5]
+                activated = self._knowledge_graph.hot_activation(seed_keywords, spread=2)
+
+                for kw, activation in activated:
+                    if activation >= 0.2:
+                        for seed in seed_keywords:
+                            if seed in self._knowledge_graph._graph:
+                                self._knowledge_graph.strengthen_edge(seed, kw, boost=0.05)
+                                result["edges_strengthened"] += 1
+
+                for i in range(len(seed_keywords)):
+                    for j in range(i + 1, len(seed_keywords)):
+                        self._knowledge_graph.strengthen_edge(
+                            seed_keywords[i], seed_keywords[j], boost=0.05
+                        )
+                        result["edges_strengthened"] += 1
+
+            facts = self._auto_learner._facts
+            crystallized_count = 0
+
+            if facts:
+                for fact in facts:
+                    for item in self._conversation_buffer:
+                        user_text = item.get("user", "")
+                        if any(word in user_text for word in fact.fact.split()[:3]):
+                            fact.recalled_count += 1
+                            fact.confidence = min(1.0, fact.confidence + 0.03)
+                            crystallized_count += 1
+                            break
+
+                result["facts_crystallized"] = crystallized_count
+
+                self._auto_learner._save()
+
+            removed = self._auto_learner.consolidate()
+            result["low_quality_removed"] = removed
+
+            self._conversation_buffer = []
+            self._save_config()
+
+            result["status"] = "ok"
+            return result
+
+    def schedule_crystallization(self, interval_seconds: int = 3600):
+        """Schedule periodic knowledge crystallization every interval_seconds."""
+        def _run():
+            self.crystallize_knowledge()
+            self._crystallization_timer = threading.Timer(interval_seconds, _run)
+            self._crystallization_timer.daemon = True
+            self._crystallization_timer.start()
+
+        if hasattr(self, "_crystallization_timer") and self._crystallization_timer is not None:
+            self._crystallization_timer.cancel()
+
+        self._crystallization_timer = threading.Timer(interval_seconds, _run)
+        self._crystallization_timer.daemon = True
+        self._crystallization_timer.start()
+
     def get_session_summary(self, max_items: int = 10) -> str:
         """获取当前会话摘要"""
         with self._lock:
