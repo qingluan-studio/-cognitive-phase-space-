@@ -404,7 +404,7 @@ class ErrorPatternRequest(BaseModel):
 
 @app.post("/api/learn/continual/feedback")
 async def record_continual_feedback(req: ContinualFeedbackRequest):
-    from ..engine.continual_learner import get_continuous_learner
+    from .engine.continual_learner import get_continuous_learner
     learner = get_continuous_learner()
     learner.learn_from_feedback(
         req.session_id, req.query, req.response, req.feedback, req.rating,
@@ -414,7 +414,7 @@ async def record_continual_feedback(req: ContinualFeedbackRequest):
 
 @app.get("/api/learn/continual/avoidance")
 async def get_avoidance(query: str):
-    from ..engine.continual_learner import get_continuous_learner
+    from .engine.continual_learner import get_continuous_learner
     learner = get_continuous_learner()
     ctx = learner.get_avoidance_context(query)
     return {"context": ctx, "has_suggestions": bool(ctx)}
@@ -422,7 +422,7 @@ async def get_avoidance(query: str):
 
 @app.post("/api/learn/continual/apply-rules")
 async def apply_learned_rules(req: ApplyRulesRequest):
-    from ..engine.continual_learner import get_continuous_learner
+    from .engine.continual_learner import get_continuous_learner
     learner = get_continuous_learner()
     improved = learner.apply_learned_rules(req.query, req.response)
     return {"improved": improved is not None, "response": improved or req.response}
@@ -430,13 +430,13 @@ async def apply_learned_rules(req: ApplyRulesRequest):
 
 @app.get("/api/learn/continual/report")
 async def learning_report():
-    from ..engine.continual_learner import get_continuous_learner
+    from .engine.continual_learner import get_continuous_learner
     return get_continuous_learner().get_learning_report()
 
 
 @app.post("/api/learn/continual/error-pattern")
 async def record_error_pattern(req: ErrorPatternRequest):
-    from ..engine.continual_learner import get_continuous_learner, ErrorCategory
+    from .engine.continual_learner import get_continuous_learner, ErrorCategory
     learner = get_continuous_learner()
     valid_categories = [e.value for e in ErrorCategory]
     cat = (
@@ -467,7 +467,7 @@ class ReflectImproveRequest(BaseModel):
 
 @app.post("/api/reflect/evaluate")
 async def evaluate_response(req: ReflectEvaluateRequest):
-    from ..engine.reflect import get_reflect_engine
+    from .engine.reflect import get_reflect_engine
 
     engine = get_reflect_engine()
     result = engine.critic.evaluate(req.query, req.response, req.context)
@@ -482,7 +482,7 @@ async def evaluate_response(req: ReflectEvaluateRequest):
 
 @app.post("/api/reflect/improve")
 async def improve_response(req: ReflectImproveRequest):
-    from ..engine.reflect import get_reflect_engine, get_metacognitive_monitor
+    from .engine.reflect import get_reflect_engine, get_metacognitive_monitor
 
     engine = get_reflect_engine()
     result = engine.reflect_and_improve(req.query, req.response, req.context)
@@ -500,7 +500,7 @@ async def improve_response(req: ReflectImproveRequest):
 
 @app.get("/api/reflect/report")
 async def reflection_report(session_id: str = "default"):
-    from ..engine.reflect import get_metacognitive_monitor
+    from .engine.reflect import get_metacognitive_monitor
 
     monitor = get_metacognitive_monitor()
     return monitor.get_session_report(session_id)
@@ -508,7 +508,7 @@ async def reflection_report(session_id: str = "default"):
 
 @app.get("/api/reflect/stats")
 async def reflection_stats():
-    from ..engine.reflect import get_metacognitive_monitor
+    from .engine.reflect import get_metacognitive_monitor
 
     return get_metacognitive_monitor().get_global_stats()
 
@@ -529,7 +529,7 @@ class PlanTreeRequest(BaseModel):
 
 @app.post("/api/plan/create")
 async def create_plan(req: PlanCreateRequest):
-    from ..engine.planner import get_planner
+    from .engine.planner import get_planner
 
     planner = get_planner()
     tasks = planner.plan(req.goal, req.context)
@@ -553,7 +553,7 @@ async def create_plan(req: PlanCreateRequest):
 
 @app.post("/api/plan/execute")
 async def execute_plan(req: PlanExecuteRequest):
-    from ..engine.planner import get_planner
+    from .engine.planner import get_planner
 
     planner = get_planner()
     result = planner.execute_plan(req.goal)
@@ -571,14 +571,14 @@ async def execute_plan(req: PlanExecuteRequest):
 
 @app.get("/api/plan/list")
 async def list_plans():
-    from ..engine.planner import get_planner
+    from .engine.planner import get_planner
 
     return {"plans": get_planner().list_plans()}
 
 
 @app.get("/api/plan/{plan_id}")
 async def get_plan(plan_id: str):
-    from ..engine.planner import get_planner
+    from .engine.planner import get_planner
 
     plan = get_planner().get_plan(plan_id)
     if not plan:
@@ -593,7 +593,7 @@ async def get_plan(plan_id: str):
 
 @app.post("/api/plan/tree")
 async def task_tree(req: PlanTreeRequest):
-    from ..engine.planner import get_planner
+    from .engine.planner import get_planner
 
     return get_planner().get_task_tree(req.goal)
 
@@ -614,7 +614,7 @@ class CoTAnalogyRequest(BaseModel):
 
 @app.post("/api/cot/reason")
 async def cot_reason(req: CoTReasonRequest):
-    from ..engine.cot_reasoner import get_cot_reasoner, ReasoningStrategy
+    from .engine.cot_reasoner import get_cot_reasoner, ReasoningStrategy
 
     reasoner = get_cot_reasoner()
     strat = ReasoningStrategy(req.strategy) if req.strategy else None
@@ -640,7 +640,7 @@ async def cot_reason(req: CoTReasonRequest):
 
 @app.post("/api/cot/reason-tool")
 async def cot_reason_with_tools(query: str, tool_results: Optional[dict] = None):
-    from ..engine.cot_reasoner import get_cot_reasoner
+    from .engine.cot_reasoner import get_cot_reasoner
 
     reasoner = get_cot_reasoner()
     result = reasoner.reason_with_tool_use(query, tool_results)
@@ -665,14 +665,14 @@ async def cot_reason_with_tools(query: str, tool_results: Optional[dict] = None)
 
 @app.get("/api/cot/strategies")
 async def list_strategies():
-    from ..engine.cot_reasoner import ReasoningStrategy
+    from .engine.cot_reasoner import ReasoningStrategy
 
     return {"strategies": [s.value for s in ReasoningStrategy]}
 
 
 @app.post("/api/cot/analogy")
 async def find_analogy(req: CoTAnalogyRequest):
-    from ..engine.cot_reasoner import ReasonByAnalogy
+    from .engine.cot_reasoner import ReasonByAnalogy
 
     rba = ReasonByAnalogy()
     source_info = rba.find_analogy(req.domain)
