@@ -159,7 +159,13 @@ from cee.learning.shadow_ops import (
     OptimizationAdvice, OptimizationDimension,
 )
 
-__version__ = "4.0.0"
+from cee.middle_end import (
+    MiddleEndOrchestrator, IndependentAlarmSystem, HumanHands,
+    UserProfilingSystem, DualEngineRouter,
+    WaterLogicMachine, TriangleTopologyEngine,
+)
+
+__version__ = "4.2.0"
 __all__ = [
     # T1-T6 Engines
     "InvariantEngine", "InvariantTheoretical",
@@ -247,4 +253,8 @@ __all__ = [
     # ShadowOps
     "ShadowRunner", "ShadowConfig", "ShadowTrial",
     "OptimizationAdvice", "OptimizationDimension",
+    # Middle-End v4.2
+    "MiddleEndOrchestrator", "IndependentAlarmSystem", "HumanHands",
+    "UserProfilingSystem", "DualEngineRouter",
+    "WaterLogicMachine", "TriangleTopologyEngine",
 ]

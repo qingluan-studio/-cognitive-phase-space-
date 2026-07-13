@@ -1376,3 +1376,115 @@ def _read_text_or_stdin() -> str:
         except Exception:
             pass
     return text
+
+
+def middle_end_cli():
+    """Middle-End orchestrator CLI."""
+    from cee.middle_end.orchestrator import MiddleEndOrchestrator
+
+    orch = MiddleEndOrchestrator()
+    orch.bootstrap()
+    print(json.dumps(orch.get_dashboard(), ensure_ascii=False, indent=2))
+    print(f"\n{orch.summary}")
+    orch.shutdown()
+
+
+def alarm_cli():
+    """Independent alarm system CLI."""
+    from cee.middle_end.alarm import IndependentAlarmSystem, AlarmPriority
+
+    alarm = IndependentAlarmSystem()
+    alarm.start()
+
+    counter = [0]
+
+    def task():
+        counter[0] += 1
+        print(f"Alarm fired: task #{counter[0]}")
+
+    alarm.register_cron("demo", 3.0, task, priority=AlarmPriority.HIGH)
+    print("Alarm system running (Ctrl+C to stop)...")
+    try:
+        import time as _time
+
+        _time.sleep(15)
+    except KeyboardInterrupt:
+        pass
+    alarm.stop()
+    print(json.dumps(alarm.stats, ensure_ascii=False, indent=2))
+
+
+def hands_cli():
+    """Human hands (simulated browsing) CLI."""
+    from cee.middle_end.human_hands import HumanHands
+
+    text = _read_text_or_stdin()
+    if not text:
+        print("Usage: cee-hands '<search query>'")
+        return
+
+    hands = HumanHands()
+    result = hands.quick_search(text)
+    print(result)
+    print(json.dumps(hands.stats, ensure_ascii=False, indent=2))
+
+
+def profile_cli():
+    """User profiling CLI."""
+    from cee.middle_end.profiler import UserProfilingSystem, BehaviorCategory
+
+    profiler = UserProfilingSystem()
+    profiler.track_event("demo-user", BehaviorCategory.DIALOGUE, "测试对话: 人工智能与认知科学")
+    profiler.track_event("demo-user", BehaviorCategory.SEARCH, "搜索: 深度学习论文")
+    profiler.track_event("demo-user", BehaviorCategory.FEEDBACK, "点赞: 高质量回答")
+
+    profile = profiler.get_behavior_summary("demo-user")
+    print(json.dumps(profile, ensure_ascii=False, indent=2))
+
+
+def triangle_cli():
+    """Triangle topology CLI."""
+    from cee.middle_end.triangle import TriangleTopologyEngine, DeformationMode
+
+    triangle = TriangleTopologyEngine()
+    triangle.register_asset("core_model", triangle.kernel.LockLevel.SEALED)
+    triangle.register_asset("public_api", triangle.kernel.LockLevel.OPEN)
+
+    print("=== Standard Triangle ===")
+    print(json.dumps(triangle.health_check(), ensure_ascii=False, indent=2))
+
+    triangle.deform(DeformationMode.PARALLEL, "high_concurrency")
+    print("\n=== Parallel Lines ===")
+    print(json.dumps(triangle.health_check(), ensure_ascii=False, indent=2))
+
+    triangle.deform(DeformationMode.SEGMENT, "pipeline_mode")
+    print("\n=== Line Segment ===")
+    print(json.dumps(triangle.health_check(), ensure_ascii=False, indent=2))
+
+    triangle.deform(DeformationMode.TRIANGLE, "restore")
+    print(f"\nStability: {triangle.stability_metric:.3f}")
+
+
+def water_cli():
+    """Water logic CLI."""
+    from cee.middle_end.water_logic import WaterLogicMachine, PhaseState
+
+    wlm = WaterLogicMachine()
+    wlm.add_node("front", "Frontend", PhaseState.LIQUID, capacity=200)
+    wlm.add_node("middle", "Middle-End", PhaseState.SOLID, capacity=500)
+    wlm.add_node("back", "Backend", PhaseState.GASEOUS, capacity=300)
+    wlm.connect("front", "middle", latency_ms=5.0)
+    wlm.connect("middle", "back", latency_ms=10.0)
+    wlm.connect("back", "middle", latency_ms=8.0)
+
+    fid = wlm.start_flow("request-1", "front", "middle")
+    wlm.close_flow(fid, duration_ms=15.0)
+
+    fid2 = wlm.start_flow("request-2", "front", "middle")
+    wlm.close_flow(fid2, duration_ms=22.0)
+
+    print(json.dumps(wlm.get_flow_map(), ensure_ascii=False, indent=2))
+
+    leaks = wlm.detect_leaks()
+    deadlocks = wlm.detect_deadlocks()
+    print(f"\nLeaks: {len(leaks)}, Deadlocks: {len(deadlocks)}, Closed: {wlm.is_closed}")

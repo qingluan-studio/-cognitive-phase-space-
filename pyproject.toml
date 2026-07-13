@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cognitive-emergence-engine"
-version = "4.1.0"
-description = "Cognitive Emergence Engine (CEE) v4.1 — 认知涌现引擎：九项认知几何引擎(T1-T9) + 向量存储 + 工作流编排 + 伦理对齐 + 基准框架 + 多智能体 + 治理体系"
+version = "4.2.0"
+description = "Cognitive Emergence Engine (CEE) v4.2 — 认知涌现引擎：九项认知几何引擎(T1-T9) + 中端核心架构(闹钟/人手/画像/路由/水逻辑/三角形/编排器) + 向量存储 + 工作流编排 + 伦理对齐 + 基准框架 + 多智能体 + 治理体系"
 authors = [
     {name = "Qingluan Studio & AI Collaborators"}
 ]
@@ -86,6 +86,12 @@ cee-factcheck = "cee.core.cli:factcheck_cli"
 cee-curriculum = "cee.core.cli:curriculum_cli"
 cee-analogy = "cee.core.cli:analogy_cli"
 cee-explain = "cee.core.cli:explain_cli"
+cee-middle-end = "cee.core.cli:middle_end_cli"
+cee-alarm = "cee.core.cli:alarm_cli"
+cee-hands = "cee.core.cli:hands_cli"
+cee-profile = "cee.core.cli:profile_cli"
+cee-triangle = "cee.core.cli:triangle_cli"
+cee-water = "cee.core.cli:water_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]
