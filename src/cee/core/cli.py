@@ -1200,3 +1200,179 @@ def shadow_cli():
         for a in advice:
             print(f"  [{a.dimension.value}] {a.current_value} -> {a.recommended_value} "
                   f"(置信度: {a.confidence:.2f})")
+
+
+def resonance_cli():
+    """T7 Cognitive Resonance CLI."""
+    from cee.engine.t7_resonance import CognitiveResonanceEngine
+
+    engine = CognitiveResonanceEngine()
+    text = _read_text_or_stdin()
+    if text:
+        result = engine.detect_resonance_pattern(text)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def entanglement_cli():
+    """T8 Semantic Entanglement CLI."""
+    from cee.engine.t8_entanglement import SemanticEntanglementEngine
+
+    engine = SemanticEntanglementEngine()
+    text = _read_text_or_stdin()
+    if text:
+        profile = engine.analyze(text)
+        print(json.dumps(profile.to_dict(), ensure_ascii=False, indent=2))
+
+
+def emergence_cli():
+    """T9 Emergence Dynamics CLI."""
+    from cee.engine.t9_emergence import EmergenceDynamicsEngine
+
+    engine = EmergenceDynamicsEngine()
+    text = _read_text_or_stdin()
+    if text:
+        timeline = engine.emergence_timeline(text)
+        print(json.dumps(timeline, ensure_ascii=False, indent=2))
+
+
+def vectorstore_cli():
+    """Vector Store CLI."""
+    from cee.vectorstore import VectorStore, IndexType, DistanceMetric
+
+    vs = VectorStore(dim=128, index_type=IndexType.FLAT, metric=DistanceMetric.COSINE)
+    if len(sys.argv) < 2 or sys.argv[1] == "stats":
+        print(json.dumps(vs.stats(), ensure_ascii=False, indent=2))
+    elif sys.argv[1] == "add":
+        import numpy as np
+        text = " ".join(sys.argv[2:]) or "test document"
+        vec = np.random.randn(128).astype(np.float32)
+        vec = vec / np.linalg.norm(vec)
+        ids = vs.add([vec], [text])
+        print(f"已添加: {ids}")
+
+
+def workflow_cli():
+    """Workflow Engine CLI."""
+    from cee.workflow import WorkflowEngine, WorkflowConfig, NodeConfig, RetryPolicy
+
+    engine = WorkflowEngine()
+
+    def sample_handler(ctx):
+        return {"result": "ok"}
+
+    config = WorkflowConfig(
+        name="cli_demo",
+        nodes=[
+            NodeConfig("step1", sample_handler, "Step 1"),
+            NodeConfig("step2", sample_handler, "Step 2", depends_on=["step1"]),
+        ],
+    )
+    engine.register_workflow(config)
+
+    if len(sys.argv) < 2 or sys.argv[1] == "status":
+        print(f"已注册工作流: {config.workflow_id}")
+        import asyncio
+        result = asyncio.run(engine.execute(config.workflow_id))
+        print(json.dumps({
+            "status": result.status.value,
+            "total_duration": round(result.total_duration, 4),
+            "metrics": result.metrics,
+        }, ensure_ascii=False, indent=2))
+
+
+def ethics_cli():
+    """Ethics Evaluation CLI."""
+    from cee.ethics import EthicsEngine
+
+    engine = EthicsEngine()
+    text = _read_text_or_stdin()
+    if text:
+        report = engine.evaluate(text)
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+
+
+def factcheck_cli():
+    """Fact Check CLI."""
+    from cee.app.engine.fact_checker import FactChecker
+
+    checker = FactChecker()
+    text = _read_text_or_stdin()
+    if text:
+        results = checker.verify(text)
+        summary = checker.summary(results)
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+
+
+def curriculum_cli():
+    """Curriculum Learning CLI."""
+    from cee.app.engine.curriculum import (
+        CurriculumLearningEngine, Concept, DifficultyLevel,
+    )
+
+    engine = CurriculumLearningEngine()
+    profile = engine.create_learner("demo")
+
+    engine.add_concept(Concept(
+        id="python_basics", name="Python基础",
+        difficulty=DifficultyLevel.BEGINNER,
+    ))
+    engine.add_concept(Concept(
+        id="data_structures", name="数据结构",
+        difficulty=DifficultyLevel.INTERMEDIATE,
+        prerequisites=["python_basics"],
+    ))
+
+    plan = engine.plan_for_learner("demo", ["data_structures"])
+    print(f"学习路径: {len(plan)} 个步骤")
+    for item in plan:
+        print(f"  {item.get('concept_name', '')} [{item.get('difficulty', '')}]")
+
+
+def analogy_cli():
+    """Analogy Engine CLI."""
+    from cee.app.engine.analogy import AnalogyEngine
+
+    engine = AnalogyEngine()
+    target = " ".join(sys.argv[2:]) if len(sys.argv) > 2 else "神经网络"
+    result = engine.quick_analogy(target)
+    if result:
+        print(f"类比: {result.source} → {result.target}")
+        print(f"评分: {result.overall_score:.4f}")
+        print(f"洞见: {result.key_insight}")
+    else:
+        print("未找到合适的类比")
+
+
+def explain_cli():
+    """Explainability CLI."""
+    from cee.app.engine.explainability import ExplainabilityEngine
+
+    engine = ExplainabilityEngine()
+    text = _read_text_or_stdin()
+    if text:
+        result = engine.explain(text, text[:200])
+        print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+
+
+def _read_text_or_stdin() -> str:
+    """Read text from CLI args or stdin."""
+    text = ""
+    args = sys.argv[2:] if len(sys.argv) > 2 else sys.argv[1:]
+
+    for arg in args:
+        if arg.startswith("--file="):
+            path = Path(arg.split("=", 1)[1])
+            if path.exists():
+                return path.read_text()
+        elif arg.startswith("--text="):
+            return arg.split("=", 1)[1]
+        elif arg in ("-h", "--help"):
+            return ""
+
+    text = " ".join(args)
+    if not text:
+        try:
+            text = sys.stdin.read()
+        except Exception:
+            pass
+    return text

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cognitive-emergence-engine"
-version = "4.0.0"
-description = "Cognitive Emergence Engine (CEE) v4.0 — 认知涌现引擎：移动端完整交互界面 + 六项原创技术(T1-T6) + 四大认知几何不变量闭环 + 多智能体框架 + 治理传承体系"
+version = "4.1.0"
+description = "Cognitive Emergence Engine (CEE) v4.1 — 认知涌现引擎：九项认知几何引擎(T1-T9) + 向量存储 + 工作流编排 + 伦理对齐 + 基准框架 + 多智能体 + 治理体系"
 authors = [
     {name = "Qingluan Studio & AI Collaborators"}
 ]
@@ -76,6 +76,16 @@ cee-mortem = "cee.core.cli:mortem_cli"
 cee-debate = "cee.core.cli:debate_cli"
 cee-shadow = "cee.core.cli:shadow_cli"
 cee-mobile = "cee.app.mobile_server:main"
+cee-resonance = "cee.core.cli:resonance_cli"
+cee-entanglement = "cee.core.cli:entanglement_cli"
+cee-emergence = "cee.core.cli:emergence_cli"
+cee-vectorstore = "cee.core.cli:vectorstore_cli"
+cee-workflow = "cee.core.cli:workflow_cli"
+cee-ethics = "cee.core.cli:ethics_cli"
+cee-factcheck = "cee.core.cli:factcheck_cli"
+cee-curriculum = "cee.core.cli:curriculum_cli"
+cee-analogy = "cee.core.cli:analogy_cli"
+cee-explain = "cee.core.cli:explain_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]

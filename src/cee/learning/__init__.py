@@ -5,6 +5,11 @@ Provides:
 - AutoLearner: Pattern discovery and insight generation from historical data
 - HyperOptimizer: Grid search and simulated annealing for parameter tuning
 - ModelSnapshot: Parameter versioning for rollback
+- MetaLearner: Learning-to-learn strategy optimization
+- ReinforcementTuner: RL-based parameter tuning
+- AnomalyDetector: Statistical anomaly detection
+- KnowledgeDistiller: Teacher-to-student knowledge compression
+- TransferAdapter: Domain adaptation for knowledge transfer
 """
 
 from .auto_learner import (
@@ -18,6 +23,16 @@ from .auto_learner import (
     ModelSnapshot,
 )
 
+from .advanced import (
+    AnomalyDetector,
+    KnowledgeDistiller,
+    LearningStrategy,
+    MetaLearner,
+    MetaLearningProfile,
+    ReinforcementTuner,
+    TransferAdapter,
+)
+
 __all__ = [
     "AutoLearner",
     "FeedbackStore",
@@ -27,4 +42,11 @@ __all__ = [
     "HyperOptimizer",
     "LearningInsight",
     "ModelSnapshot",
+    "MetaLearner",
+    "MetaLearningProfile",
+    "LearningStrategy",
+    "ReinforcementTuner",
+    "AnomalyDetector",
+    "KnowledgeDistiller",
+    "TransferAdapter",
 ]

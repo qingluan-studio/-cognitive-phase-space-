@@ -9,109 +9,107 @@ CEE 认知引擎核心模块
   - creative: 创意合成引擎，跨领域知识融合
   - bias: 认知偏差检测器，推理偏差识别
   - memory: 持久记忆系统，跨会话记忆管理
+  - debate: 辩论引擎，多角色辩证推理
+  - fact_checker: 事实核查引擎，声明验证
+  - curriculum: 课程学习引擎，自适应难度排序
+  - analogy: 类比推理引擎，跨域映射
+  - explainability: 可解释性引擎，AI推理透明度
 """
 
 from cee.app.engine.search import (
-    WebSearchEngine,
-    SearchProvider,
-    SearchResult,
-    DuckDuckGoProvider,
-    BingProvider,
-    GoogleProvider,
-    SearchConfig,
+    WebSearchEngine, SearchProvider, SearchResult,
+    DuckDuckGoProvider, BingProvider, GoogleProvider, SearchConfig,
 )
 
 from cee.app.engine.rag import (
-    RAGEngine,
-    TextChunker,
-    SimpleVectorStore,
-    TFIDFVectorizer,
-    BM25Ranker,
-    RAGConfig,
-    ChunkInfo,
+    RAGEngine, TextChunker, SimpleVectorStore,
+    TFIDFVectorizer, BM25Ranker, RAGConfig, ChunkInfo,
 )
 
 from cee.app.engine.files import (
-    FileProcessor,
-    FileParseResult,
-    PDFParser,
-    DocxParser,
-    ImageParser,
-    CodeParser,
-    CSVParser,
-    ExcelParser,
-    FileBatchResult,
+    FileProcessor, FileParseResult, PDFParser, DocxParser,
+    ImageParser, CodeParser, CSVParser, ExcelParser, FileBatchResult,
 )
 
 from cee.app.engine.think import (
-    DeepThinkEngine,
-    SubQuestion,
-    ThinkingChain,
-    Hypothesis,
-    MultiAngleAnalysis,
-    ThinkingResult,
-    ThinkConfig,
+    DeepThinkEngine, SubQuestion, ThinkingChain,
+    Hypothesis, MultiAngleAnalysis, ThinkingResult, ThinkConfig,
 )
 
 from cee.app.engine.creative import (
-    CreativeSynthesisEngine,
-    ConceptNode,
-    ConceptGraph,
-    AnalogyResult,
-    SCAMPERResult,
-    CreativeIdea,
-    SynthesisResult,
-    CreativeConfig,
+    CreativeSynthesisEngine, ConceptNode, ConceptGraph,
+    AnalogyResult, SCAMPERResult, CreativeIdea,
+    SynthesisResult, CreativeConfig,
 )
 
 from cee.app.engine.bias import (
-    BiasDetector,
-    BiasReport,
-    BiasItem,
-    BiasType,
-    BiasSeverity,
-    CorrectionAdvice,
+    BiasDetector, BiasReport, BiasItem,
+    BiasType, BiasSeverity, CorrectionAdvice,
 )
 
 from cee.app.engine.memory import (
-    MemorySystem,
-    MemoryEntry,
-    MemoryType,
-    ShortTermMemory,
-    LongTermMemory,
-    UserProfile,
-    MemoryConfig,
+    MemorySystem, MemoryEntry, MemoryType,
+    ShortTermMemory, LongTermMemory, UserProfile, MemoryConfig,
 )
 
 from cee.app.engine.context_memory import (
-    ContextAwareMemory,
-    ContextMemoryConfig,
-    get_global_context,
+    ContextAwareMemory, ContextMemoryConfig, get_global_context,
+)
+
+from cee.app.engine.debate import (
+    DebateEngine, ArgumentAnalyzer, StanceDetector,
+    DebateArgument, DebateResult, ArgumentQuality, ArgumentType, Stance,
+)
+
+from cee.app.engine.fact_checker import (
+    FactChecker, ClaimExtractor, CredibilityScorer, CrossValidator,
+    FactClaim, VerificationResult, Verdict, CredibilityLevel, SourceEvidence,
+)
+
+from cee.app.engine.curriculum import (
+    CurriculumLearningEngine, CurriculumPlanner, DifficultyEstimator,
+    SpacedRepetition, Concept, LearningMaterial, LearnerProfile,
+    DifficultyLevel, MasteryState,
+)
+
+from cee.app.engine.analogy import (
+    AnalogyEngine, StructureMapper,
+    AnalogyMapping, AnalogyResult, AnalogyType, MappingQuality, Domain,
+)
+
+from cee.app.engine.explainability import (
+    ExplainabilityEngine, FeatureAttributor, DecisionPathTracer,
+    ExplanationResult, FeatureAttribution, DecisionNode,
+    CounterfactualExplanation, ExplanationType, AttributionMethod,
 )
 
 __all__ = [
-    # search
     "WebSearchEngine", "SearchProvider", "SearchResult",
     "DuckDuckGoProvider", "BingProvider", "GoogleProvider", "SearchConfig",
-    # rag
     "RAGEngine", "TextChunker", "SimpleVectorStore",
     "TFIDFVectorizer", "BM25Ranker", "RAGConfig", "ChunkInfo",
-    # files
     "FileProcessor", "FileParseResult", "PDFParser", "DocxParser",
     "ImageParser", "CodeParser", "CSVParser", "ExcelParser", "FileBatchResult",
-    # think
     "DeepThinkEngine", "SubQuestion", "ThinkingChain",
     "Hypothesis", "MultiAngleAnalysis", "ThinkingResult", "ThinkConfig",
-    # creative
     "CreativeSynthesisEngine", "ConceptNode", "ConceptGraph",
     "AnalogyResult", "SCAMPERResult", "CreativeIdea",
     "SynthesisResult", "CreativeConfig",
-    # bias
     "BiasDetector", "BiasReport", "BiasItem",
     "BiasType", "BiasSeverity", "CorrectionAdvice",
-    # memory
     "MemorySystem", "MemoryEntry", "MemoryType",
     "ShortTermMemory", "LongTermMemory", "UserProfile", "MemoryConfig",
-    # context_memory
     "ContextAwareMemory", "ContextMemoryConfig", "get_global_context",
+    "DebateEngine", "ArgumentAnalyzer", "StanceDetector",
+    "DebateArgument", "DebateResult", "ArgumentQuality", "ArgumentType", "Stance",
+    "FactChecker", "ClaimExtractor", "CredibilityScorer", "CrossValidator",
+    "FactClaim", "VerificationResult", "Verdict", "CredibilityLevel", "SourceEvidence",
+    "CurriculumLearningEngine", "CurriculumPlanner", "DifficultyEstimator",
+    "SpacedRepetition", "Concept", "LearningMaterial", "LearnerProfile",
+    "DifficultyLevel", "MasteryState",
+    "AnalogyEngine", "StructureMapper",
+    "AnalogyMapping", "AnalogyResult", "AnalogyType", "MappingQuality", "Domain",
+    "ExplainabilityEngine", "FeatureAttributor", "DecisionPathTracer",
+    "ExplanationResult", "FeatureAttribution", "DecisionNode",
+    "CounterfactualExplanation", "ExplanationType", "AttributionMethod",
 ]

@@ -8,6 +8,15 @@ from cee.knowledge.engine import (
     MassiveBrain,
 )
 
+from cee.knowledge.enhanced import (
+    Concept,
+    KnowledgeGraph as AdvancedKnowledgeGraph,
+    OntologyBuilder,
+    SemanticIndex,
+    CrossLingualMapper,
+    Relation as AdvancedRelation,
+)
+
 __all__ = [
     "RelationType",
     "KnowledgeNode",
@@ -16,4 +25,10 @@ __all__ = [
     "KnowledgeSynthesizer",
     "SynthesisResult",
     "MassiveBrain",
+    "Concept",
+    "AdvancedKnowledgeGraph",
+    "OntologyBuilder",
+    "SemanticIndex",
+    "CrossLingualMapper",
+    "AdvancedRelation",
 ]

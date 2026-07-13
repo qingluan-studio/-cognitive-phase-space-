@@ -27,6 +27,10 @@ class OptimizationPath(Enum):
     T3_GEODESIC_NAVIGATION = "t3_geodesic"
     T4_CRYSTALLIZATION = "t4_crystal"
     T5_COUNTERFACTUAL_GROWTH = "t5_genesis"
+    T6_INVARIANT_EVALUATION = "t6_invariant"
+    T7_COGNITIVE_RESONANCE = "t7_resonance"
+    T8_SEMANTIC_ENTANGLEMENT = "t8_entanglement"
+    T9_EMERGENCE_DYNAMICS = "t9_emergence"
 
 
 class QualityTier(Enum):

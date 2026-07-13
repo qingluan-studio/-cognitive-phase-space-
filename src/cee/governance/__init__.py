@@ -29,6 +29,18 @@ from cee.governance.adversarial import (
     RotationRecord,
 )
 
+from cee.governance.enhanced import (
+    AuditTrail,
+    AuditAction,
+    AuditEntry,
+    ComplianceChecker,
+    ComplianceRule,
+    ComplianceStatus,
+    GovernanceMetrics,
+    RiskAssessor,
+    RiskLevel,
+)
+
 __all__ = [
     "Constitution",
     "DecisionLogger",
@@ -55,4 +67,13 @@ __all__ = [
     "PrecedentCase",
     "GameRound",
     "RotationRecord",
+    "AuditTrail",
+    "AuditAction",
+    "AuditEntry",
+    "ComplianceChecker",
+    "ComplianceRule",
+    "ComplianceStatus",
+    "GovernanceMetrics",
+    "RiskAssessor",
+    "RiskLevel",
 ]

@@ -7,6 +7,11 @@ Provides:
 - OutputFormatter: Multi-format output generation (plain, markdown, JSON, table, CSV, etc.)
 - TextTransformer: Built-in text transformation utilities
 - JsonProcessor: JSON data processing utilities
+- StreamProcessor: Streaming data processing
+- DataCleaner: Intelligent data cleaning
+- FeatureEngineer: Automatic feature engineering
+- SchemaValidator: JSON/YAML schema validation
+- Normalizer: Multilingual text normalization
 """
 
 from .data_pipeline import (
@@ -32,6 +37,16 @@ from .long_text import (
     TextChunk,
 )
 
+from .advanced import (
+    DataCleaner,
+    FeatureEngineer,
+    Normalizer,
+    ProcessingRecord,
+    ProcessingStage,
+    SchemaValidator,
+    StreamProcessor,
+)
+
 __all__ = [
     "LongTextProcessor",
     "LongTextReport",
@@ -49,4 +64,11 @@ __all__ = [
     "DocumentFormat",
     "OutputFormatter",
     "OutputFormat",
+    "StreamProcessor",
+    "ProcessingRecord",
+    "ProcessingStage",
+    "DataCleaner",
+    "FeatureEngineer",
+    "SchemaValidator",
+    "Normalizer",
 ]

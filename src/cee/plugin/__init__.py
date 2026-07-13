@@ -17,6 +17,13 @@ from .plugin_manager import (
     PluginState,
 )
 
+from .builtin_plugins import (
+    CachingPlugin,
+    ResponseValidatorPlugin,
+    SentimentPlugin,
+    TextPreprocessorPlugin,
+)
+
 __all__ = [
     "BasePlugin",
     "PluginManager",
@@ -24,4 +31,8 @@ __all__ = [
     "PluginCategory",
     "PluginState",
     "PluginMetadata",
+    "TextPreprocessorPlugin",
+    "ResponseValidatorPlugin",
+    "SentimentPlugin",
+    "CachingPlugin",
 ]
