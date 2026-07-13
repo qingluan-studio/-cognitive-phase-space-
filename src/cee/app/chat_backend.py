@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,7 +18,7 @@ import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -118,6 +120,52 @@ async def call_llm(messages: list[dict], api_key: str, base_url: str,
             )
         data = resp.json()
         return data["choices"][0]["message"]["content"]
+
+
+async def call_llm_stream(messages: list[dict], api_key: str, base_url: str,
+                          model: str, temperature: float, max_tokens: int,
+                          system_prompt: str = ""):
+    """调用 OpenAI 兼容 API (流式)."""
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload_messages = []
+    if system_prompt:
+        payload_messages.append({"role": "system", "content": system_prompt})
+    payload_messages.extend(messages)
+
+    payload = {
+        "model": model,
+        "messages": payload_messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream("POST", url, headers=headers, json=payload) as resp:
+            if resp.status_code != 200:
+                detail = (await resp.aread()).decode()[:500]
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"LLM API error [{resp.status_code}]: {detail}",
+                )
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if line.startswith("data: "):
+                    data = line[6:]
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                        delta = obj.get("choices", [{}])[0].get("delta", {})
+                        content = delta.get("content", "")
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        pass
 
 
 # ── 质量评估反馈 ──────────────────────────────────────────────────
@@ -295,6 +343,115 @@ async def chat(req: ChatRequest):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "cee-chat"}
+
+
+# ── 会话管理 ──────────────────────────────────────────────────────
+
+_sessions: dict[str, dict] = {}
+
+
+def _sess_summary(sid: str, s: dict) -> dict:
+    msgs = s.get("messages", [])
+    title = "新对话"
+    for m in msgs:
+        if m["role"] == "user":
+            title = m["content"][:30]
+            break
+    return {
+        "session_id": sid,
+        "title": title,
+        "created_at": s["created_at"],
+        "updated_at": s["updated_at"],
+        "message_count": len(msgs),
+    }
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    items = [_sess_summary(sid, s) for sid, s in _sessions.items()]
+    items.sort(key=lambda x: x["updated_at"], reverse=True)
+    return {"sessions": items}
+
+
+@app.post("/api/sessions/new")
+async def new_session():
+    sid = uuid.uuid4().hex[:12]
+    t = time.time()
+    _sessions[sid] = {"created_at": t, "updated_at": t, "messages": []}
+    return {"session_id": sid}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    s = _sessions.get(session_id)
+    if not s:
+        raise HTTPException(404, "会话不存在")
+    return {"session_id": session_id, "history": s["messages"]}
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    _sessions.pop(session_id, None)
+    return {"ok": True}
+
+
+# ── 流式聊天 ──────────────────────────────────────────────────────
+
+@app.post("/api/chat/stream")
+async def chat_stream(req: ChatRequest):
+    async def generate():
+        try:
+            user_text = ""
+            for m in req.messages:
+                if m.role == "user":
+                    user_text = m.content
+
+            yield f"data: {json.dumps({'type': 'step', 'step': '推理', 'status': 'thinking'})}\n\n"
+            await asyncio.sleep(0.1)
+            yield f"data: {json.dumps({'type': 'step', 'step': '推理', 'status': 'running'})}\n\n"
+
+            full = ""
+            async for chunk in call_llm_stream(
+                messages=[{"role": m.role, "content": m.content} for m in req.messages],
+                api_key=req.api_key,
+                base_url=req.base_url,
+                model=req.model,
+                temperature=req.temperature,
+                max_tokens=req.max_tokens,
+            ):
+                full += chunk
+                yield f"data: {json.dumps({'type': 'delta', 'content': chunk})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'step', 'step': '推理', 'status': 'done'})}\n\n"
+
+            if user_text:
+                yield f"data: {json.dumps({'type': 'step', 'step': 'T6评估', 'status': 'running'})}\n\n"
+                await asyncio.sleep(0.1)
+                scores = invariant_engine.evaluate(full)
+                yield f"data: {json.dumps({'type': 'step', 'step': 'T6评估', 'status': 'done'})}\n\n"
+                yield f"data: {json.dumps({'type': 'cee', 'scores': scores.to_dict(), 'tier': scores.tier.value})}\n\n"
+
+            yield "data: [DONE]\n\n"
+            _save_session_message(req.session_id, user_text, full)
+
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+def _save_session_message(session_id: str, user_text: str, ai_content: str):
+    if not user_text:
+        return
+    now = time.time()
+    s = _sessions.get(session_id)
+    if not s:
+        s = {"created_at": now, "updated_at": now, "messages": []}
+        _sessions[session_id] = s
+    s["messages"].append({"role": "user", "content": user_text})
+    s["messages"].append({"role": "assistant", "content": ai_content})
+    s["updated_at"] = now
 
 
 # ── 自动学习控制端点 ──────────────────────────────────────────────
