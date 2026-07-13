@@ -50,6 +50,11 @@ from .dream_consolidator import DreamConsolidator
 from .counterfactual import CounterfactualReasoning
 from .salience_network import SalienceNetwork
 from .dictionary_assembler import DictionaryAssembler
+from .composited_dict import CompositedDictionaryEngine
+from .inference_pipeline import DictionaryInferencePipeline
+from .self_dialogue import SelfDialogueSimulator
+from .learning_daemon import BackgroundLearningDaemon
+from .data_tracker import RealtimeDataTracker
 
 
 class LocalInferenceEngine:
@@ -89,6 +94,14 @@ class LocalInferenceEngine:
                                           self._kgraph, self._blender)
         self._counterfactual = CounterfactualReasoning(self._kgraph, self._auto_learner)
         self._assembler = DictionaryAssembler(self)
+        self._composited = CompositedDictionaryEngine(legacy_da=self._assembler)
+        self._dict_pipeline = DictionaryInferencePipeline(self._composited, self._t6)
+        self._simulator = SelfDialogueSimulator(
+            self._composited, self._dict_pipeline, self.store)
+        self._learning_daemon = BackgroundLearningDaemon(
+            self._composited, self._dict_pipeline, self._simulator,
+            self.store, None)
+        self._data_tracker = RealtimeDataTracker(self._composited)
 
         self._last_reply: dict[str, Any] = {}
 
@@ -556,6 +569,11 @@ class LocalInferenceEngine:
         s["counterfactual"] = self._counterfactual.stats()
         s["salience"] = self._salience.stats()
         s["assembler"] = self._assembler.stats()
+        s["composited"] = self._composited.stats()
+        s["dict_pipeline"] = self._dict_pipeline.stats()
+        s["simulator"] = self._simulator.stats()
+        s["learning_daemon"] = self._learning_daemon.stats()
+        s["data_tracker"] = self._data_tracker.stats()
         return s
 
     def export_training_data(self) -> list[dict]:

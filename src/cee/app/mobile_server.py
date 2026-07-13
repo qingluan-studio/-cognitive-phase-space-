@@ -41,7 +41,7 @@ from ..core.controller import ClosedLoopController
 from cee.app.engine.pipeline import PipelineOrchestrator
 from cee.app.engine.synthesis import SynthesisEngine
 from cee.app.engine.agent import AgentEngine
-from cee.app.local_llm import LocalInferenceEngine, AutoTrainer
+from cee.app.local_llm import LocalInferenceEngine, AutoTrainer, BackgroundLearningDaemon
 from cee.app.local_llm.knowledge_store import STORAGE_DIR
 
 STATIC_DIR = Path(__file__).parent / "frontend"
@@ -318,7 +318,10 @@ def engine_chat(user_text: str, history: list[dict], deep_think: bool = False) -
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     auto_trainer.start()
+    local_inference._learning_daemon.start()
+    local_inference._data_tracker.create_daily_snapshot()
     yield
+    local_inference._learning_daemon.stop()
     auto_trainer.stop()
 
 

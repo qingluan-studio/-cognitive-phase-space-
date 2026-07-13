@@ -40,6 +40,11 @@ from .dream_consolidator import DreamConsolidator
 from .counterfactual import CounterfactualReasoning
 from .salience_network import SalienceNetwork
 from .dictionary_assembler import DictionaryAssembler
+from .composited_dict import CompositedDictionaryEngine, FragmentRanker
+from .inference_pipeline import DictionaryInferencePipeline
+from .self_dialogue import SelfDialogueSimulator
+from .learning_daemon import BackgroundLearningDaemon
+from .data_tracker import RealtimeDataTracker
 
 __all__ = [
     "LocalInferenceEngine",
@@ -67,4 +72,10 @@ __all__ = [
     "CounterfactualReasoning",
     "SalienceNetwork",
     "DictionaryAssembler",
+    "CompositedDictionaryEngine",
+    "FragmentRanker",
+    "DictionaryInferencePipeline",
+    "SelfDialogueSimulator",
+    "BackgroundLearningDaemon",
+    "RealtimeDataTracker",
 ]
