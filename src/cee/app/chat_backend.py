@@ -410,6 +410,19 @@ async def chat_stream(req: ChatRequest):
             await asyncio.sleep(0.1)
             yield f"data: {json.dumps({'type': 'step', 'step': '推理', 'status': 'running'})}\n\n"
 
+            if not req.api_key:
+                from .local_llm import LocalInferenceEngine
+                engine = LocalInferenceEngine(session_id=req.session_id)
+                result = engine.chat(user_text)
+                full = result.get("content", "")
+                yield f"data: {json.dumps({'type': 'token', 'content': full})}\n\n"
+                yield f"data: {json.dumps({'type': 'step', 'step': '推理', 'status': 'done'})}\n\n"
+                if result.get("cee_scores"):
+                    yield f"data: {json.dumps({'type': 'cee', 'scores': result['cee_scores'], 'tier': result.get('cee_tier', 'B')})}\n\n"
+                yield "data: [DONE]\n\n"
+                _save_session_message(req.session_id, user_text, full)
+                return
+
             full = ""
             async for chunk in call_llm_stream(
                 messages=[{"role": m.role, "content": m.content} for m in req.messages],
@@ -420,7 +433,7 @@ async def chat_stream(req: ChatRequest):
                 max_tokens=req.max_tokens,
             ):
                 full += chunk
-                yield f"data: {json.dumps({'type': 'delta', 'content': chunk})}\n\n"
+                yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
 
             yield f"data: {json.dumps({'type': 'step', 'step': '推理', 'status': 'done'})}\n\n"
 

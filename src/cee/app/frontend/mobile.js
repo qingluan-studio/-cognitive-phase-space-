@@ -1617,6 +1617,167 @@
     });
 
     NotificationSystem.toast('空间已就绪', 'success');
+    StarfieldBackground.init();
   });
+
+  /* ═══════════════════════════════════════════════════════════════════
+     Module: StarfieldBackground
+     ═══════════════════════════════════════════════════════════════════ */
+  const StarfieldBackground = {
+    canvas: null,
+    ctx: null,
+    stars: [],
+    meteors: [],
+    w: 0,
+    h: 0,
+    active: false,
+    animId: null,
+
+    init() {
+      this.canvas = $('#starCanvas');
+      if (!this.canvas) return;
+      this.ctx = this.canvas.getContext('2d');
+      this.resize();
+      window.addEventListener('resize', () => this.resize());
+      this.createStars();
+      this.loop();
+    },
+
+    resize() {
+      this.w = this.canvas.width = window.innerWidth;
+      this.h = this.canvas.height = window.innerHeight;
+    },
+
+    createStars() {
+      this.stars = [];
+      for (let i = 0; i < 120; i++) {
+        this.stars.push({
+          x: Math.random() * this.w,
+          y: Math.random() * this.h,
+          r: Math.random() * 1.8 + 0.3,
+          opacity: Math.random() * 0.7 + 0.3,
+          speed: Math.random() * 0.015 + 0.005,
+          phase: Math.random() * Math.PI * 2,
+        });
+      }
+    },
+
+    spawnMeteor() {
+      if (!this.active || this.meteors.length > 3) return;
+      if (Math.random() > 0.008) return;
+      const angle = (Math.random() - 0.3) * 0.6;
+      this.meteors.push({
+        x: Math.random() * this.w,
+        y: -10,
+        vx: angle * 3,
+        vy: 2 + Math.random() * 3,
+        life: 0,
+        maxLife: 80 + Math.random() * 60,
+        trail: [],
+      });
+    },
+
+    drawStar(s) {
+      const ctx = this.ctx;
+      const flicker = Math.sin(s.phase + performance.now() * s.speed) * 0.3 + 0.7;
+      const alpha = s.opacity * flicker;
+      ctx.beginPath();
+      const grd = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 3);
+      grd.addColorStop(0, `rgba(200,220,255,${alpha})`);
+      grd.addColorStop(0.4, `rgba(150,180,255,${alpha * 0.5})`);
+      grd.addColorStop(1, 'rgba(150,180,255,0)');
+      ctx.fillStyle = grd;
+      ctx.arc(s.x, s.y, s.r * 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(220,235,255,${alpha})`;
+      ctx.fill();
+    },
+
+    updateMeteor(m) {
+      m.life++;
+      m.x += m.vx;
+      m.y += m.vy;
+      m.trail.unshift({ x: m.x, y: m.y });
+      if (m.trail.length > 20) m.trail.pop();
+
+      const ctx = this.ctx;
+      const lifeRatio = 1 - m.life / m.maxLife;
+      const fadeIn = Math.min(m.life / 15, 1);
+
+      if (m.trail.length > 1) {
+        for (let i = 0; i < m.trail.length - 1; i++) {
+          const t = 1 - i / m.trail.length;
+          ctx.beginPath();
+          ctx.moveTo(m.trail[i].x, m.trail[i].y);
+          ctx.lineTo(m.trail[i + 1].x, m.trail[i + 1].y);
+          ctx.strokeStyle = `rgba(180,210,255,${t * lifeRatio * fadeIn * 0.6})`;
+          ctx.lineWidth = t * 2.5;
+          ctx.stroke();
+        }
+      }
+
+      ctx.beginPath();
+      ctx.arc(m.x, m.y, 1.5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(220,240,255,${lifeRatio * fadeIn})`;
+      ctx.fill();
+
+      return m.life >= m.maxLife || m.y > this.h + 20;
+    },
+
+    draw() {
+      const ctx = this.ctx;
+      ctx.clearRect(0, 0, this.w, this.h);
+
+      for (const s of this.stars) this.drawStar(s);
+
+      for (let i = this.meteors.length - 1; i >= 0; i--) {
+        if (this.updateMeteor(this.meteors[i])) {
+          this.meteors.splice(i, 1);
+        }
+      }
+
+      this.spawnMeteor();
+    },
+
+    loop() {
+      if (this.active) this.draw();
+      this.animId = requestAnimationFrame(() => this.loop());
+    },
+
+    activate() {
+      if (this.active) return;
+      this.active = true;
+      this.createStars();
+      if (this.canvas) this.canvas.classList.add('active');
+    },
+
+    deactivate() {
+      if (!this.active) return;
+      this.active = false;
+      this.meteors = [];
+      if (this.canvas) this.canvas.classList.remove('active');
+    },
+
+    syncVisibility() {
+      const hasMessages = STATE.messages && STATE.messages.length > 0;
+      if (hasMessages) this.activate();
+      else this.deactivate();
+    },
+  };
+
+  /* Hook visibility into ChatEngine.sendMessage */
+  const _origSendMessage = ChatEngine.sendMessage;
+  ChatEngine.sendMessage = function() {
+    StarfieldBackground.activate();
+    return _origSendMessage.call(this);
+  };
+
+  const _origNewConv = window.CeeApp.newConversation;
+  window.CeeApp.newConversation = function() {
+    StarfieldBackground.deactivate();
+    return _origNewConv.call(this);
+  };
 
 })();

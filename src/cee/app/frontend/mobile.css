@@ -426,6 +426,13 @@ body{
 
 /* ── Main / Pages ──────────────────────────────────────────────── */
 main{flex:1;overflow-y:auto;position:relative;z-index:1;padding-bottom:calc(var(--input-height) + 32px + var(--safe-bottom));display:flex;flex-direction:column}
+#starCanvas{
+  position:fixed;top:0;left:0;width:100%;height:100%;
+  pointer-events:none;z-index:0;
+  opacity:0;
+  transition:opacity 2s ease;
+}
+#starCanvas.active{opacity:1}
 .page{position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;display:none}
 .page.active{display:flex;flex-direction:column}
 
@@ -569,20 +576,70 @@ main{flex:1;overflow-y:auto;position:relative;z-index:1;padding-bottom:calc(var(
 .msg.user{flex-direction:row-reverse}
 
 .msg-avatar{
-  width:34px;height:34px;border-radius:50%;
-  flex-shrink:0;overflow:hidden;
+  width:36px;height:36px;border-radius:50%;
+  flex-shrink:0;overflow:visible;
   display:flex;align-items:center;justify-content:center;
-  font-size:13px;font-weight:650;
+  font-size:14px;font-weight:700;
+  position:relative;
+  transition:transform var(--transition);
 }
-.msg-avatar img{width:100%;height:100%;display:block}
-.msg-avatar span{display:block}
+.msg.user .msg-avatar:hover,
+.msg.ai .msg-avatar:hover{transform:scale(1.08)}
+.msg-avatar img{width:100%;height:100%;display:block;border-radius:50%}
+.msg-avatar span{display:block;z-index:1}
 .msg.user .msg-avatar{
-  background:linear-gradient(135deg,var(--accent),#7c3aed);
+  background:linear-gradient(135deg,#4f46e5,#7c3aed,#a855f7);
   color:#fff;
+  box-shadow:
+    0 0 12px rgba(124,58,237,0.4),
+    0 2px 8px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.15),
+    inset 0 -1px 0 rgba(0,0,0,0.2);
+  border:1.5px solid rgba(168,85,247,0.3);
+}
+.msg.user .msg-avatar::after{
+  content:'';
+  position:absolute;
+  top:-2px;left:-2px;right:-2px;bottom:-2px;
+  border-radius:50%;
+  background:conic-gradient(from 0deg,transparent,rgba(168,85,247,0.2),transparent,rgba(99,102,241,0.2),transparent);
+  animation:avatar-orbit 3s linear infinite;
+  pointer-events:none;
 }
 .msg.ai .msg-avatar{
-  background:transparent;
-  border:1px solid var(--border);
+  background:radial-gradient(circle at 35% 35%,#1e3a5f,#0f172a);
+  border:1.5px solid rgba(56,189,248,0.25);
+  box-shadow:
+    0 0 16px rgba(56,189,248,0.3),
+    0 0 24px rgba(56,189,248,0.08),
+    0 2px 8px rgba(0,0,0,0.3),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    inset 0 -1px 0 rgba(0,0,0,0.2);
+}
+.msg.ai .msg-avatar::before{
+  content:'';
+  position:absolute;
+  inset:3px;
+  border-radius:50%;
+  background:radial-gradient(circle at 40% 35%,rgba(56,189,248,0.2),transparent 60%);
+  pointer-events:none;
+  animation:avatar-pulse 2s ease-in-out infinite;
+}
+.msg.ai .msg-avatar::after{
+  content:'';
+  position:absolute;
+  top:-3px;left:-3px;right:-3px;bottom:-3px;
+  border-radius:50%;
+  background:conic-gradient(from 0deg,transparent,rgba(56,189,248,0.15),transparent,rgba(147,197,253,0.1),transparent);
+  animation:avatar-orbit 4s linear infinite reverse;
+  pointer-events:none;
+}
+@keyframes avatar-orbit{
+  to{transform:rotate(360deg)}
+}
+@keyframes avatar-pulse{
+  0%,100%{opacity:0.4}
+  50%{opacity:0.8}
 }
 .msg-content{max-width:80%;min-width:0}
 
