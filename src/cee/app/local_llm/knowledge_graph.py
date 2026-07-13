@@ -258,8 +258,11 @@ class KnowledgeGraph:
                 else:
                     _, old_w = self._graph[a][b]
                     self._graph[a][b] = ("共现关联", min(1.0, old_w + weight * 0.5))
-                    _, old_w = self._graph[b][a]
-                    self._graph[b][a] = ("共现关联", min(1.0, old_w + weight * 0.5))
+                    if a in self._graph[b]:
+                        _, old_w2 = self._graph[b][a]
+                        self._graph[b][a] = ("共现关联", min(1.0, old_w2 + weight * 0.5))
+                    else:
+                        self._graph[b][a] = ("共现关联", weight)
         if keywords:
             self._save()
 

@@ -245,11 +245,19 @@ class LocalInferenceEngine:
             source = "knowledge_base"
         else:
             self._stats["fallback_uses"] += 1
-            content = self._assembler.assemble(
-                user_text, affect=affect,
-                conversation_depth=flow["depth"],
-                profile=self._profile.get_profile_dict(),
+
+            dict_result = self._dict_pipeline.infer(user_text)
+            content = dict_result.content
+
+            if content == self._assembler.assemble(user_text):
+                content = dict_result.content
+
+            self._data_tracker.record(
+                "assemble", "pipeline", user_text[:30],
+                old_weight=None,
+                new_weight=dict_result.composite,
             )
+            self._data_tracker.record_assembly()
 
             if flow["depth"] >= 3:
                 followup = self._conversation.suggest_followup()
@@ -258,7 +266,7 @@ class LocalInferenceEngine:
             if cf_result:
                 content += f"\n\n【反事实视角】{cf_result.insight[:300]}"
 
-            source = "fallback_rules"
+            source = "dictionary_pipeline"
 
         # ── 第X层：概念融合 ──
         blend_result = None

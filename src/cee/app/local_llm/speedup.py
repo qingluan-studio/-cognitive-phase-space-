@@ -91,7 +91,7 @@ class InferenceSpeedup:
     # ── L2: 语义相似缓存 ────────────────────────────────────────
 
     def l2_lookup(self, query: str, vectorizer, threshold: float = 0.90) -> Optional[CachedResponse]:
-        if not self._l2_vectors or vectorizer is None:
+        if self._l2_vectors is None or vectorizer is None:
             return None
         try:
             qv = vectorizer.transform([query]).toarray()
