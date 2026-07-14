@@ -1,8 +1,3 @@
-/**
- * 表型可塑性模块：同一套核心代码根据所处环境信号呈现不同的处理形态，
- * 在不修改底层逻辑的前提下，通过激活/抑制表型实现运行时形态切换。
- */
-
 export type EnvironmentKind =
   | 'hostile'
   | 'benign'
@@ -23,12 +18,15 @@ export interface PhenotypeConfig {
   triggers: EnvironmentKind[];
   handler: (payload: Record<string, unknown>) => Record<string, unknown>;
   cost: number;
+  priors: Partial<Record<EnvironmentKind, number>>;
 }
 
 export interface PhenotypeState {
   active: boolean;
   activations: number;
   lastActivatedAt: number | null;
+  successRate: number;
+  trials: number;
 }
 
 export interface AdaptationRecord {
@@ -36,6 +34,7 @@ export interface AdaptationRecord {
   environment: EnvironmentKind;
   phenotype: string;
   success: boolean;
+  confidence: number;
 }
 
 export class PhenotypicPlasticity {
@@ -45,6 +44,9 @@ export class PhenotypicPlasticity {
   private _activePhenotype: string | null = null;
   private _history: AdaptationRecord[] = [];
   private _morphCost = 0;
+  private _environmentCounts: Record<EnvironmentKind, number> = {
+    hostile: 0, benign: 0, 'resource-scarce': 0, 'resource-rich': 0, stealth: 0, diagnostic: 0,
+  };
 
   registerPhenotype(config: PhenotypeConfig): void {
     this._phenotypes.set(config.name, config);
@@ -52,22 +54,67 @@ export class PhenotypicPlasticity {
       active: false,
       activations: 0,
       lastActivatedAt: null,
+      successRate: 0,
+      trials: 0,
     });
   }
 
   detectEnvironment(env: Environment): void {
     this._currentEnvironment = env;
-    const candidate = this._pickPhenotype(env.kind);
+    this._environmentCounts[env.kind]++;
+    const posterior = this._computePosterior(env);
+    const candidate = this._selectPhenotype(posterior);
     if (candidate && candidate !== this._activePhenotype) {
-      this.morphTo(candidate);
+      const confidence = posterior[candidate] ?? 0;
+      this.morphTo(candidate, confidence);
     }
   }
 
-  private _pickPhenotype(kind: EnvironmentKind): string | null {
+  private _computePosterior(env: Environment): Record<string, number> {
+    const posterior: Record<string, number> = {};
+    const totalEnv = Object.values(this._environmentCounts).reduce((a, b) => a + b, 0) || 1;
+    
     for (const [name, config] of this._phenotypes) {
-      if (config.triggers.includes(kind)) return name;
+      let likelihood = 0;
+      for (const trigger of config.triggers) {
+        const prior = config.priors[trigger] ?? 0.2;
+        const baseRate = this._environmentCounts[trigger] / totalEnv;
+        const cueMatch = this._matchCues(config, env.cues);
+        likelihood += prior * baseRate * (0.5 + 0.5 * cueMatch);
+      }
+      posterior[name] = likelihood;
     }
-    return null;
+    
+    const sum = Object.values(posterior).reduce((a, b) => a + b, 0) || 1;
+    for (const name of Object.keys(posterior)) {
+      posterior[name] /= sum;
+    }
+    return posterior;
+  }
+
+  private _matchCues(config: PhenotypeConfig, cues: Record<string, unknown>): number {
+    if (Object.keys(cues).length === 0) return 0.5;
+    let matches = 0;
+    for (const trigger of config.triggers) {
+      const triggerKey = trigger.replace('-', '_');
+      if (cues[triggerKey] !== undefined) matches++;
+    }
+    return matches / config.triggers.length;
+  }
+
+  private _selectPhenotype(posterior: Record<string, number>): string | null {
+    let bestName: string | null = null;
+    let bestScore = -Infinity;
+    
+    for (const [name, prob] of Object.entries(posterior)) {
+      const state = this._states.get(name);
+      const adjusted = prob * (0.7 + 0.3 * (state?.successRate ?? 0.5));
+      if (adjusted > bestScore) {
+        bestScore = adjusted;
+        bestName = name;
+      }
+    }
+    return bestName;
   }
 
   activatePhenotype(name: string, payload: Record<string, unknown> = {}): Record<string, unknown> {
@@ -85,7 +132,7 @@ export class PhenotypicPlasticity {
     return config.handler(payload);
   }
 
-  morphTo(name: string): boolean {
+  morphTo(name: string, confidence: number = 0): boolean {
     if (!this._phenotypes.has(name)) return false;
     this.activatePhenotype(name);
     this._history.push({
@@ -93,8 +140,16 @@ export class PhenotypicPlasticity {
       environment: this._currentEnvironment?.kind ?? 'benign',
       phenotype: name,
       success: true,
+      confidence,
     });
     return true;
+  }
+
+  recordOutcome(phenotypeName: string, success: boolean): void {
+    const state = this._states.get(phenotypeName);
+    if (!state) return;
+    state.trials++;
+    state.successRate = ((state.successRate * (state.trials - 1)) + (success ? 1 : 0)) / state.trials;
   }
 
   private _deactivateAll(): void {
@@ -118,11 +173,22 @@ export class PhenotypicPlasticity {
     return [...this._history];
   }
 
+  getPhenotypeConfidence(name: string): number {
+    if (!this._currentEnvironment) return 0;
+    const posterior = this._computePosterior(this._currentEnvironment);
+    return posterior[name] ?? 0;
+  }
+
   get totalMorphCost(): number {
     return this._morphCost;
   }
 
   get phenotypeCount(): number {
     return this._phenotypes.size;
+  }
+
+  get adaptationSuccessRate(): number {
+    if (this._history.length === 0) return 0;
+    return this._history.filter(h => h.success).length / this._history.length;
   }
 }

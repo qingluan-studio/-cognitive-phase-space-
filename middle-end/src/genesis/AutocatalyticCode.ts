@@ -1,9 +1,3 @@
-/**
- * 自催化代码：写代码的代码，递归产出自身变体。
- * 以当前源码为模板，通过受控突变递归生成可执行变体，
- * 变体再作为下一轮模板，形成自催化链。
- */
-
 export interface CodeVariant {
   id: string;
   source: string;
@@ -18,11 +12,22 @@ export interface MutationProfile {
   deletions: number;
 }
 
+interface GrammarRule {
+  symbol: string;
+  expansions: string[];
+}
+
 export class AutocatalyticCode {
   private _variants: Map<string, CodeVariant> = new Map();
   private _template: string = '';
   private _generation: number = 0;
   private _mutation: MutationProfile = { rate: 0.1, insertions: 0, deletions: 0 };
+  private _grammar: GrammarRule[] = [];
+  private _selectionPressure: number = 0.7;
+
+  constructor() {
+    this._initGrammar();
+  }
 
   seed(source: string): CodeVariant {
     this._template = source;
@@ -37,7 +42,6 @@ export class AutocatalyticCode {
     return variant;
   }
 
-  /** 以指定变体为模板生成一代新变体。 */
   generate(parentId: string): CodeVariant | null {
     const parent = this._variants.get(parentId);
     if (!parent) return null;
@@ -54,7 +58,6 @@ export class AutocatalyticCode {
     return variant;
   }
 
-  /** 递归自复制：以自身为模板连续产出 N 代。 */
   selfReplicate(rootId: string, depth: number): CodeVariant[] {
     const chain: CodeVariant[] = [];
     let current = this._variants.get(rootId);
@@ -72,14 +75,10 @@ export class AutocatalyticCode {
     if (v) v.fitness = fitness;
   }
 
-  /** 按适应度选出最优模板。 */
   select(): CodeVariant | null {
-    let best: CodeVariant | null = null;
-    for (const v of this._variants.values()) {
-      if (!best || v.fitness > best.fitness) best = v;
-    }
-    if (best) this._template = best.source;
-    return best;
+    const selected = this._rouletteWheelSelect();
+    if (selected) this._template = selected.source;
+    return selected;
   }
 
   setMutationRate(rate: number): void {
@@ -94,20 +93,149 @@ export class AutocatalyticCode {
     return [...this._variants.values()];
   }
 
+  get template(): string {
+    return this._template;
+  }
+
+  get mutationProfile(): MutationProfile {
+    return { ...this._mutation };
+  }
+
+  setSelectionPressure(pressure: number): void {
+    this._selectionPressure = Math.max(0, Math.min(1, pressure));
+  }
+
+  evolve(populationSize: number, generations: number): CodeVariant[] {
+    const elite: CodeVariant[] = [];
+    for (let g = 0; g < generations; g++) {
+      const best = this.select();
+      if (best) elite.push(best);
+      const survivors = this._tournamentSelect(Math.ceil(populationSize * 0.3));
+      for (let i = 0; i < populationSize; i++) {
+        const parent = survivors[Math.floor(Math.random() * survivors.length)];
+        if (parent) this.generate(parent.id);
+      }
+    }
+    return elite;
+  }
+
+  crossover(idA: string, idB: string): CodeVariant | null {
+    const a = this._variants.get(idA);
+    const b = this._variants.get(idB);
+    if (!a || !b) return null;
+    this._generation++;
+    const childSource = this._singlePointCrossover(a.source, b.source);
+    const child: CodeVariant = {
+      id: `v${this._generation}-${Date.now()}`,
+      source: childSource,
+      generation: this._generation,
+      fitness: 0,
+      parentId: `${idA}|${idB}`,
+    };
+    this._variants.set(child.id, child);
+    return child;
+  }
+
+  private _initGrammar(): void {
+    this._grammar = [
+      { symbol: 'EXPR', expansions: ['IDENT', 'LITERAL', 'BINOP', 'CALL'] },
+      { symbol: 'BINOP', expansions: ['+', '-', '*', '/', '===', '!==', '&&', '||'] },
+      { symbol: 'IDENT', expansions: ['x', 'y', 'z', 'result', 'temp', 'value'] },
+      { symbol: 'LITERAL', expansions: ['0', '1', '42', 'true', 'false', 'null'] },
+    ];
+  }
+
   private _mutate(source: string): string {
     const chars = source.split('');
     const rate = this._mutation.rate;
-    for (let i = 0; i < chars.length; i++) {
-      if (Math.random() < rate) {
-        if (Math.random() < 0.5) {
-          chars[i] = String.fromCharCode(chars[i].charCodeAt(0) + 1);
-          this._mutation.insertions++;
-        } else {
-          chars[i] = '';
-          this._mutation.deletions++;
-        }
+    const tokens = this._tokenize(source);
+    const mutatedTokens: string[] = [];
+    for (const token of tokens) {
+      if (Math.random() < rate * 0.3) {
+        mutatedTokens.push(this._grammarMutate(token));
+        this._mutation.insertions++;
+      } else if (Math.random() < rate * 0.1) {
+        this._mutation.deletions++;
+      } else {
+        mutatedTokens.push(token);
       }
     }
-    return chars.join('');
+    return this._tokensToString(mutatedTokens);
+  }
+
+  private _tokenize(source: string): string[] {
+    const tokens: string[] = [];
+    let current = '';
+    for (let i = 0; i < source.length; i++) {
+      const c = source[i];
+      if (/\s/.test(c)) {
+        if (current) { tokens.push(current); current = ''; }
+        tokens.push(c);
+      } else if (/[{}()\[\];,.]/.test(c)) {
+        if (current) { tokens.push(current); current = ''; }
+        tokens.push(c);
+      } else {
+        current += c;
+      }
+    }
+    if (current) tokens.push(current);
+    return tokens;
+  }
+
+  private _tokensToString(tokens: string[]): string {
+    return tokens.join('');
+  }
+
+  private _grammarMutate(token: string): string {
+    for (const rule of this._grammar) {
+      if (rule.expansions.includes(token)) {
+        return rule.expansions[Math.floor(Math.random() * rule.expansions.length)];
+      }
+    }
+    return token;
+  }
+
+  private _rouletteWheelSelect(): CodeVariant | null {
+    const variants = [...this._variants.values()];
+    if (variants.length === 0) return null;
+    const minFitness = Math.min(...variants.map(v => v.fitness));
+    const offset = minFitness < 0 ? -minFitness + 0.01 : 0;
+    const totalFitness = variants.reduce((sum, v) => sum + v.fitness + offset, 0);
+    if (totalFitness === 0) return variants[Math.floor(Math.random() * variants.length)];
+    const scaled = variants.map(v => ({
+      variant: v,
+      probability: Math.pow((v.fitness + offset) / totalFitness, 1 / (1 - this._selectionPressure + 0.01)),
+    }));
+    const scaledTotal = scaled.reduce((sum, s) => sum + s.probability, 0);
+    let pick = Math.random() * scaledTotal;
+    for (const s of scaled) {
+      pick -= s.probability;
+      if (pick <= 0) return s.variant;
+    }
+    return scaled[scaled.length - 1].variant;
+  }
+
+  private _tournamentSelect(count: number): CodeVariant[] {
+    const variants = [...this._variants.values()];
+    const winners: CodeVariant[] = [];
+    const tournamentSize = Math.min(3, variants.length);
+    for (let i = 0; i < count && variants.length > 0; i++) {
+      const tournament: CodeVariant[] = [];
+      const shuffled = [...variants].sort(() => Math.random() - 0.5);
+      for (let j = 0; j < tournamentSize && j < shuffled.length; j++) {
+        tournament.push(shuffled[j]);
+      }
+      tournament.sort((a, b) => b.fitness - a.fitness);
+      if (tournament.length > 0) {
+        winners.push(tournament[0]);
+      }
+    }
+    return winners;
+  }
+
+  private _singlePointCrossover(a: string, b: string): string {
+    const len = Math.min(a.length, b.length);
+    const point = Math.floor(Math.random() * len);
+    return a.slice(0, point) + b.slice(point);
   }
 }
