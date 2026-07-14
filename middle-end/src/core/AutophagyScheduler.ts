@@ -19,7 +19,30 @@ export interface RecombinedModule {
   fragments: ASTFragment[];
   sourceCode: string;
   timestamp: number;
+  compressionRatio: number;
 }
+
+export interface SpaceMetric {
+  timestamp: number;
+  totalModules: number;
+  activeModules: number;
+  deadModules: number;
+  utilization: number;
+  compressionTriggered: boolean;
+}
+
+export interface CompressionRecord {
+  id: string;
+  timestamp: number;
+  beforeUtilization: number;
+  afterUtilization: number;
+  fragmentsReleased: number;
+  modulesCreated: number;
+  compressionRatio: number;
+  energyCost: number;
+}
+
+export type CompressionMode = 'dormant' | 'light' | 'medium' | 'aggressive';
 
 interface Individual {
   order: number[];
@@ -35,6 +58,55 @@ export class AutophagyScheduler {
   private _generations = 30;
   private _mutationRate = 0.1;
 
+  private _totalCapacity = 1000;
+  private _activeModules = new Set<string>();
+  private _deadModules = new Set<string>();
+  private _spaceHistory: SpaceMetric[] = [];
+  private _compressionHistory: CompressionRecord[] = [];
+  private _compressionMode: CompressionMode = 'dormant';
+  private _lightThreshold = 0.55;
+  private _mediumThreshold = 0.70;
+  private _aggressiveThreshold = 0.85;
+  private _compressionCooldown = 3000;
+  private _lastCompressionTime = 0;
+  private _entropyDecayRate = 0.015;
+  private _totalEnergyConsumed = 0;
+  private _compressionIdCounter = 0;
+  private _pendingFragments: ASTFragment[] = [];
+
+  registerModule(moduleId: string, active: boolean = true): void {
+    if (active) {
+      this._deadModules.delete(moduleId);
+      this._activeModules.add(moduleId);
+    } else {
+      this._activeModules.delete(moduleId);
+      this._deadModules.add(moduleId);
+    }
+    this._checkSpacePressure();
+  }
+
+  unregisterModule(moduleId: string): void {
+    this._activeModules.delete(moduleId);
+    this._deadModules.delete(moduleId);
+  }
+
+  markDead(moduleId: string): void {
+    if (this._activeModules.has(moduleId)) {
+      this._activeModules.delete(moduleId);
+      this._deadModules.add(moduleId);
+      this._entropyDecayRate = Math.min(0.05, this._entropyDecayRate + 0.001);
+      this._checkSpacePressure();
+    }
+  }
+
+  resurrect(moduleId: string): void {
+    if (this._deadModules.has(moduleId)) {
+      this._deadModules.delete(moduleId);
+      this._activeModules.add(moduleId);
+      this._entropyDecayRate = Math.max(0.005, this._entropyDecayRate - 0.002);
+    }
+  }
+
   scanForDeadCode(files: string[]): DeadCodeReport[] {
     const reports: DeadCodeReport[] = [];
     for (const file of files) {
@@ -48,6 +120,8 @@ export class AutophagyScheduler {
         this._extractFragments(file, lines, decayScore);
       }
     }
+    this._recordSpaceMetric(false);
+    this._checkSpacePressure();
     return reports;
   }
 
@@ -70,9 +144,14 @@ export class AutophagyScheduler {
       .map(id => this._fragments.find(f => f.id === id))
       .filter((f): f is ASTFragment => !!f);
 
+    const inputSize = fragments.length;
+
     if (fragments.length <= 1) {
       const sourceCode = fragments.map(f => f.content).join('\n');
-      const module: RecombinedModule = { id: moduleId, fragments, sourceCode, timestamp: Date.now() };
+      const module: RecombinedModule = {
+        id: moduleId, fragments, sourceCode, timestamp: Date.now(),
+        compressionRatio: inputSize > 0 ? 1 / inputSize : 1,
+      };
       this._recombinedModules.set(moduleId, module);
       this._deleteConsumedFragments(fragmentIds);
       return module;
@@ -80,8 +159,12 @@ export class AutophagyScheduler {
 
     const bestOrder = this._geneticReorder(fragments);
     const orderedFragments = bestOrder.map(i => fragments[i]);
-    const sourceCode = orderedFragments.map(f => f.content).join('\n');
-    const module: RecombinedModule = { id: moduleId, fragments: orderedFragments, sourceCode, timestamp: Date.now() };
+    const compactedFragments = this._semanticallyCompact(orderedFragments);
+    const sourceCode = compactedFragments.map(f => f.content).join('\n');
+    const module: RecombinedModule = {
+      id: moduleId, fragments: compactedFragments, sourceCode, timestamp: Date.now(),
+      compressionRatio: inputSize > 0 ? compactedFragments.length / inputSize : 1,
+    };
     this._recombinedModules.set(moduleId, module);
     this._deleteConsumedFragments(fragmentIds);
     return module;
@@ -89,7 +172,11 @@ export class AutophagyScheduler {
 
   startAutophagyCycle(intervalMs: number = 60000): void {
     if (this._scanInterval) return;
-    this._scanInterval = setInterval(() => this._performAutophagy(), intervalMs);
+    this._scanInterval = setInterval(() => {
+      this._performAutophagy();
+      this._recordSpaceMetric(false);
+      this._checkSpacePressure();
+    }, intervalMs);
   }
 
   stopAutophagyCycle(): void {
@@ -97,6 +184,220 @@ export class AutophagyScheduler {
   }
 
   getRecombinedModule(id: string): RecombinedModule | undefined { return this._recombinedModules.get(id); }
+
+  get utilization(): number {
+    const total = this._activeModules.size + this._deadModules.size + this._fragments.length;
+    return total === 0 ? 0 : (this._activeModules.size + this._fragments.length) / this._totalCapacity;
+  }
+
+  get compressionMode(): CompressionMode { return this._compressionMode; }
+
+  get spaceSnapshot(): SpaceMetric | null {
+    return this._spaceHistory.length > 0 ? { ...this._spaceHistory[this._spaceHistory.length - 1] } : null;
+  }
+
+  get compressionRecords(): CompressionRecord[] { return [...this._compressionHistory]; }
+
+  get totalEnergyConsumed(): number { return this._totalEnergyConsumed; }
+
+  setCapacity(capacity: number): void {
+    if (capacity <= 0) throw new Error('Capacity must be positive');
+    this._totalCapacity = capacity;
+    this._checkSpacePressure();
+  }
+
+  setThresholds(light: number, medium: number, aggressive: number): void {
+    if (light <= 0 || medium <= light || aggressive <= medium || aggressive >= 1) {
+      throw new Error('Thresholds must satisfy: 0 < light < medium < aggressive < 1');
+    }
+    this._lightThreshold = light;
+    this._mediumThreshold = medium;
+    this._aggressiveThreshold = aggressive;
+    this._checkSpacePressure();
+  }
+
+  setCompressionCooldown(ms: number): void {
+    this._compressionCooldown = Math.max(0, ms);
+  }
+
+  forceCompression(): CompressionRecord | null {
+    return this._executeCompression();
+  }
+
+  getSpaceHistory(since: number = 0): SpaceMetric[] {
+    return this._spaceHistory.filter(m => m.timestamp >= since).map(m => ({ ...m }));
+  }
+
+  getFragmentPoolSize(): number { return this._fragments.length + this._pendingFragments.length; }
+
+  private _recordSpaceMetric(compressionTriggered: boolean): void {
+    const metric: SpaceMetric = {
+      timestamp: Date.now(),
+      totalModules: this._activeModules.size + this._deadModules.size + this._fragments.length,
+      activeModules: this._activeModules.size,
+      deadModules: this._deadModules.size + this._fragments.length,
+      utilization: this.utilization,
+      compressionTriggered,
+    };
+    this._spaceHistory.push(metric);
+    if (this._spaceHistory.length > 200) this._spaceHistory.shift();
+  }
+
+  private _checkSpacePressure(): void {
+    const util = this.utilization;
+    const prevMode = this._compressionMode;
+
+    if (util >= this._aggressiveThreshold) {
+      this._compressionMode = 'aggressive';
+    } else if (util >= this._mediumThreshold) {
+      this._compressionMode = 'medium';
+    } else if (util >= this._lightThreshold) {
+      this._compressionMode = 'light';
+    } else {
+      this._compressionMode = 'dormant';
+      return;
+    }
+
+    if (this._compressionMode !== 'dormant') {
+      const now = Date.now();
+      if (now - this._lastCompressionTime >= this._compressionCooldown) {
+        this._executeCompression();
+      }
+    }
+  }
+
+  private _executeCompression(): CompressionRecord | null {
+    const beforeUtil = this.utilization;
+    if (this._fragments.length === 0 && this._deadModules.size === 0) return null;
+
+    let releasedCount = 0;
+    let modulesCreated = 0;
+
+    const compressionMultiplier = this._compressionMode === 'aggressive' ? 0.7 :
+      this._compressionMode === 'medium' ? 0.5 : 0.3;
+
+    const targetRelease = Math.floor(this._fragments.length * compressionMultiplier);
+
+    if (this._fragments.length >= 2) {
+      const sortedFrags = this._fragments
+        .map((f, idx) => ({ fragment: f, originalIndex: idx }))
+        .sort((a, b) => {
+          const scoreA = this._compressionPriority(a.fragment);
+          const scoreB = this._compressionPriority(b.fragment);
+          return scoreB - scoreA;
+        });
+
+      const batchSize = this._compressionMode === 'aggressive' ? 32 :
+        this._compressionMode === 'medium' ? 16 : 8;
+      const maxBatches = this._compressionMode === 'aggressive' ? 5 :
+        this._compressionMode === 'medium' ? 3 : 1;
+
+      for (let b = 0; b < maxBatches && modulesCreated < batchSize * maxBatches; b++) {
+        const batch = sortedFrags.slice(b * batchSize, (b + 1) * batchSize);
+        if (batch.length < 2) break;
+
+        const batchFragments = batch.map(f => f.fragment);
+        const moduleId = `compressed-${++this._compressionIdCounter}-${Date.now().toString(36)}`;
+        const bestOrder = this._geneticReorder(batchFragments);
+        const orderedFrags = bestOrder.map(i => batchFragments[i]);
+        const compacted = this._semanticallyCompact(orderedFrags);
+
+        const sourceCode = compacted.map(f => f.content).join('\n');
+        const module: RecombinedModule = {
+          id: moduleId, fragments: compacted, sourceCode, timestamp: Date.now(),
+          compressionRatio: batchFragments.length > 0 ? compacted.length / batchFragments.length : 1,
+        };
+        this._recombinedModules.set(moduleId, module);
+
+        const consumedIds = new Set(batchFragments.map(f => f.id));
+        this._fragments = this._fragments.filter(f => !consumedIds.has(f.id));
+        releasedCount += batchFragments.length;
+        modulesCreated++;
+      }
+    }
+
+    const afterUtil = this.utilization;
+    const deadPurged = this._purgeDeadModules(compressionMultiplier);
+    releasedCount += deadPurged;
+
+    const energyCost = this._computeEnergyCost(releasedCount, modulesCreated);
+
+    const record: CompressionRecord = {
+      id: `compress-${++this._compressionIdCounter}-${Date.now().toString(36)}`,
+      timestamp: Date.now(),
+      beforeUtilization: beforeUtil,
+      afterUtilization: afterUtil,
+      fragmentsReleased: releasedCount,
+      modulesCreated,
+      compressionRatio: releasedCount > 0 ? modulesCreated / releasedCount : 1,
+      energyCost,
+    };
+
+    this._compressionHistory.push(record);
+    if (this._compressionHistory.length > 100) this._compressionHistory.shift();
+
+    this._lastCompressionTime = Date.now();
+    this._totalEnergyConsumed += energyCost;
+
+    this._recordSpaceMetric(true);
+    return record;
+  }
+
+  private _purgeDeadModules(multiplier: number): number {
+    let purged = 0;
+    const maxPurge = Math.floor(this._deadModules.size * multiplier);
+
+    for (const modId of this._deadModules) {
+      if (purged >= maxPurge) break;
+      this._deadModules.delete(modId);
+      purged++;
+    }
+
+    return purged;
+  }
+
+  private _compressionPriority(fragment: ASTFragment): number {
+    const decayScore = (fragment.metadata.decayScore as number) || 0.5;
+    const contentLength = fragment.content.length;
+    const timestamp = Date.now();
+    const age = fragment.id.includes('-') ?
+      parseInt(fragment.id.split('-')[fragment.id.split('-').length - 2] || '0', 36) : 0;
+    const ageScore = 1 - Math.exp(-(timestamp - age) * 0.0001);
+
+    return decayScore * 0.4 + (Math.min(1, contentLength / 500)) * 0.2 + ageScore * 0.4;
+  }
+
+  private _semanticallyCompact(fragments: ASTFragment[]): ASTFragment[] {
+    if (fragments.length <= 1) return fragments;
+
+    const compacted: ASTFragment[] = [];
+    let current = { ...fragments[0] };
+
+    for (let i = 1; i < fragments.length; i++) {
+      const next = fragments[i];
+      const similarity = this._levenshteinSim(current.content, next.content);
+
+      if (similarity > 0.6 && current.type === next.type) {
+        current.content = `${current.content}\n  // + merged ${next.originalFile}:${next.lineNumber}`;
+        current.metadata = {
+          ...current.metadata,
+          mergedCount: ((current.metadata.mergedCount as number) || 0) + 1,
+        };
+      } else {
+        compacted.push(current);
+        current = { ...next };
+      }
+    }
+    compacted.push(current);
+    return compacted;
+  }
+
+  private _computeEnergyCost(released: number, created: number): number {
+    const scanEnergy = released * 0.01;
+    const recombineEnergy = created * this._generations * this._populationSize * 0.001;
+    const entropyBonus = released * this._entropyDecayRate * 0.5;
+    return scanEnergy + recombineEnergy + entropyBonus;
+  }
 
   private _stringHash(s: string): number {
     let h = 0;
@@ -115,8 +416,9 @@ export class AutophagyScheduler {
     const maxEnt = Math.log2(Math.min(freq.size, file.length) || 1);
     const pathEntropy = maxEnt > 0 ? entropy / maxEnt : 0;
     const base = (this._stringHash(file) % 1000) / 1000 * 0.6;
-    return Math.min(0.95, Math.max(0.05, base + pathEntropy * 0.3));
+    return Math.min(0.95, Math.max(0.05, base + pathEntropy * 0.3 + this._entropyDecayRate));
   }
+
   private _genDeadLines(file: string, decayScore: number): number[] {
     const lines: number[] = [];
     const baseCount = Math.floor(decayScore * 25) + 1;
@@ -131,13 +433,14 @@ export class AutophagyScheduler {
   private _extractFragments(file: string, lines: number[], decayScore: number): void {
     for (const line of lines) this._fragments.push({
       id: `${file}-${line}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      type: 'statement', content: '', originalFile: file, lineNumber: line, metadata: { decayScore },
+      type: 'statement', content: `// dead-code:${file}:${line}`, originalFile: file, lineNumber: line, metadata: { decayScore },
     });
   }
 
   private _deleteConsumedFragments(ids: string[]): void {
     const idSet = new Set(ids);
     this._fragments = this._fragments.filter(f => !idSet.has(f.id));
+    this._pendingFragments = this._pendingFragments.filter(f => !idSet.has(f.id));
   }
 
   private _levenshteinDist(a: string, b: string): number {
@@ -190,6 +493,7 @@ export class AutophagyScheduler {
     }
     return best;
   }
+
   private _crossover(a: number[], b: number[]): number[] {
     const n = a.length;
     const s = Math.floor(Math.random() * n);
@@ -245,4 +549,6 @@ export class AutophagyScheduler {
   get deadCodeReportCount(): number { return this._deadCodeReports.length; }
   get fragmentCount(): number { return this._fragments.length; }
   get recombinedModuleCount(): number { return this._recombinedModules.size; }
+  get activeModuleCount(): number { return this._activeModules.size; }
+  get deadModuleCount(): number { return this._deadModules.size; }
 }

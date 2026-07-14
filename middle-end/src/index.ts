@@ -26,6 +26,8 @@
  *   - hysteresis_extended / resonance / dissonance / overtones / undertone：滞后与声学
  *   - echo_extended / shadow_extended / light / darkness / twilight：回声、光影与暮色
  *   - umbra / penumbra / corona：本影、半影与日冕
+ *   - CosmicHorizon / QuantumFoamEngine / WormholeBridge：宇宙级视界、量子泡沫与虫洞
+ *   - DarkEnergyAccelerator / ThermodynamicArrow / HolographicBound：暗能量、时间箭头与全息界
  */
 
 // ============================================================================
@@ -46,6 +48,13 @@ export * from './core/KenosisCore';
 export * from './core/SolipsismBreaker';
 export * from './core/AsymptoticConverger';
 export * from './core/CatachresisModule';
+export * from './core/PhaseSpaceEngine';
+export * from './core/CosmicHorizon';
+export * from './core/QuantumFoamEngine';
+export * from './core/WormholeBridge';
+export * from './core/DarkEnergyAccelerator';
+export * from './core/ThermodynamicArrow';
+export * from './core/HolographicBound';
 
 // ============================================================================
 // Processing modules（处理模块）
