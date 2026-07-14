@@ -163,9 +163,24 @@ from cee.middle_end import (
     MiddleEndOrchestrator, IndependentAlarmSystem, HumanHands,
     UserProfilingSystem, DualEngineRouter,
     WaterLogicMachine, TriangleTopologyEngine,
+    CognitionPipeline, PipelineBuilder,
+    ConfigManager, ConfigHistory,
+    MemoryManager, ConversationSession, MemoryRetriever,
+    DataPipelineOrchestrator, DataRecord, Extractor,
+    ValueAlignment, EthicalAnalyzer, ConstitutionalAI,
+    EventBus, DeadLetterQueue,
+    FeedbackLoop, FeedbackCollector, ABTestFramework,
+    KnowledgeGraph as MiddleEndKG, EntityExtractor, GraphReasoner,
+    ModelRouter, ModelEnsemble, ModelPool,
+    ReasoningEngine, ChainOfThoughtEngine, TreeOfThoughtEngine,
+    SecurityGuardEngine, ContentSanitizer, InputGuard, OutputGuard,
+    SemanticCache, TieredCache,
+    StreamPipeline, StreamHandler,
+    TaskDecomposer as MiddleTaskDecomposer, TaskScheduler, AgentRegistry,
+    ToolRegistry, ToolExecutor, ToolChain,
 )
 
-__version__ = "4.2.0"
+__version__ = "4.3.0"
 __all__ = [
     # T1-T6 Engines
     "InvariantEngine", "InvariantTheoretical",
@@ -253,8 +268,23 @@ __all__ = [
     # ShadowOps
     "ShadowRunner", "ShadowConfig", "ShadowTrial",
     "OptimizationAdvice", "OptimizationDimension",
-    # Middle-End v4.2
+    # Middle-End v4.3
     "MiddleEndOrchestrator", "IndependentAlarmSystem", "HumanHands",
     "UserProfilingSystem", "DualEngineRouter",
     "WaterLogicMachine", "TriangleTopologyEngine",
+    "CognitionPipeline", "PipelineBuilder",
+    "ConfigManager", "ConfigHistory",
+    "MemoryManager", "ConversationSession", "MemoryRetriever",
+    "DataPipelineOrchestrator", "DataRecord", "Extractor",
+    "ValueAlignment", "EthicalAnalyzer", "ConstitutionalAI",
+    "EventBus", "DeadLetterQueue",
+    "FeedbackLoop", "FeedbackCollector", "ABTestFramework",
+    "MiddleEndKG", "EntityExtractor", "GraphReasoner",
+    "ModelRouter", "ModelEnsemble", "ModelPool",
+    "ReasoningEngine", "ChainOfThoughtEngine", "TreeOfThoughtEngine",
+    "SecurityGuardEngine", "ContentSanitizer", "InputGuard", "OutputGuard",
+    "SemanticCache", "TieredCache",
+    "StreamPipeline", "StreamHandler",
+    "MiddleTaskDecomposer", "TaskScheduler", "AgentRegistry",
+    "ToolRegistry", "ToolExecutor", "ToolChain",
 ]

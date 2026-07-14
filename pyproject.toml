@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cognitive-emergence-engine"
-version = "4.2.0"
-description = "Cognitive Emergence Engine (CEE) v4.2 — 认知涌现引擎：九项认知几何引擎(T1-T9) + 中端核心架构(闹钟/人手/画像/路由/水逻辑/三角形/编排器) + 向量存储 + 工作流编排 + 伦理对齐 + 基准框架 + 多智能体 + 治理体系"
+version = "4.3.0"
+description = "Cognitive Emergence Engine (CEE) v4.3 — 认知涌现引擎：九项认知几何引擎(T1-T9) + 中端十五层架构(认知管线/推理引擎/知识图谱/多模型/安全守卫/伦理框架/事件总线/流式/反馈/缓存/委派/配置/管线/工具注册/对话记忆 + 七层原架构)"
 authors = [
     {name = "Qingluan Studio & AI Collaborators"}
 ]
