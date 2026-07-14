@@ -1,141 +1,170 @@
-/**
- * 幽灵协议模块：不可见的通信方式，消息不留痕迹，
- * 通信双方通过预先约定的隐写规则进行秘密信息交换。
- */
+export type ProtocolPhase = 'propose' | 'prepare' | 'promise' | 'accept' | 'commit' | 'abort';
 
-export type ProtocolCipher = 'steganographic' | 'null' | 'timing' | 'sideband';
-
-export interface GhostMessage {
+export interface ProtocolMessage {
   id: string;
-  carrier: string;
-  hiddenPayload: string;
-  cipher: ProtocolCipher;
-  sentAt: number;
-  received: boolean;
+  from: string;
+  to: string;
+  phase: ProtocolPhase;
+  proposalNumber: number;
+  value: string;
+  timestamp: number;
 }
 
-export interface ProtocolHandshake {
-  id: string;
-  parties: [string, string];
-  agreedKey: string;
-  cipher: ProtocolCipher;
-  establishedAt: number;
+export interface ConsensusRound {
+  roundId: number;
+  proposalNumber: number;
+  phase: ProtocolPhase;
+  quorumSize: number;
+  messages: ProtocolMessage[];
+  decided: boolean;
+  decisionValue: string | null;
 }
 
 export class GhostProtocol {
-  private _messages: GhostMessage[] = [];
-  private _handshakes: Map<string, ProtocolHandshake> = new Map();
-  private _carriers: Map<string, string> = new Map();
-  private _invisibleMode = true;
-  private _maxCarrierLength = 1000;
+  private _rounds: ConsensusRound[] = [];
+  private _messages: ProtocolMessage[] = [];
+  private _nextRoundId: number = 0;
+  private _nodes: Set<string> = new Set();
+  private _state: Record<string, unknown> = {};
+  private _byzantineNodes: Set<string> = new Set();
+  private _faultTolerance: number = 0;
+  private _commitLatencyHistory: number[] = [];
 
-  registerCarrier(carrierId: string, content: string): void {
-    if (content.length > this._maxCarrierLength) {
-      content = content.slice(0, this._maxCarrierLength);
-    }
-    this._carriers.set(carrierId, content);
+  get roundCount(): number {
+    return this._rounds.length;
   }
 
-  handshake(partyA: string, partyB: string, cipher: ProtocolCipher): ProtocolHandshake {
-    const handshake: ProtocolHandshake = {
-      id: `hs-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      parties: [partyA, partyB],
-      agreedKey: this._generateKey(),
-      cipher,
-      establishedAt: Date.now(),
+  get faultTolerance(): number {
+    return this._faultTolerance;
+  }
+
+  registerNode(nodeId: string, isByzantine: boolean = false): void {
+    this._nodes.add(nodeId);
+    if (isByzantine) this._byzantineNodes.add(nodeId);
+    this._faultTolerance = Math.floor((this._nodes.size - 1) / 3);
+  }
+
+  startRound(proposalNumber: number, proposer: string, value: string): ConsensusRound | null {
+    if (!this._nodes.has(proposer)) return null;
+    const quorumSize = Math.floor((2 * this._nodes.size) / 3) + 1;
+    const round: ConsensusRound = {
+      roundId: this._nextRoundId++,
+      proposalNumber,
+      phase: 'propose',
+      quorumSize,
+      messages: [],
+      decided: false,
+      decisionValue: null,
     };
-    this._handshakes.set(handshake.id, handshake);
-    return handshake;
+    this._rounds.push(round);
+    this._broadcast(round, proposer, 'propose', proposalNumber, value);
+    return round;
   }
 
-  private _generateKey(): string {
-    return Math.random().toString(36).slice(2, 12);
-  }
-
-  private _encode(payload: string, cipher: ProtocolCipher, carrier: string): string {
-    switch (cipher) {
-      case 'steganographic':
-        return carrier.split('').map((c, i) => i % 3 === 0 && payload[i / 3] ? payload[i / 3] : c).join('');
-      case 'null':
-        return `${carrier} [null:${payload.length}]`;
-      case 'timing':
-        return `${carrier}|t=${payload.length}`;
-      case 'sideband':
-        return `${carrier}#${btoa(payload)}`;
-      default:
-        return carrier;
+  private _broadcast(round: ConsensusRound, from: string, phase: ProtocolPhase, proposalNumber: number, value: string): void {
+    for (const node of this._nodes) {
+      if (node === from) continue;
+      const message: ProtocolMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        from,
+        to: node,
+        phase,
+        proposalNumber,
+        value,
+        timestamp: Date.now(),
+      };
+      this._messages.push(message);
+      round.messages.push(message);
+      if (this._messages.length > 300) this._messages.shift();
     }
   }
 
-  private _decode(encoded: string, cipher: ProtocolCipher): string {
-    switch (cipher) {
-      case 'sideband': {
-        const parts = encoded.split('#');
-        if (parts.length < 2) return '';
-        try { return atob(parts[parts.length - 1]); } catch { return ''; }
-      }
-      case 'null': {
-        const match = encoded.match(/\[null:(\d+)\]/);
-        return match ? `null-payload-${match[1]}` : '';
-      }
-      case 'timing': {
-        const match = encoded.match(/t=(\d+)/);
-        return match ? `timing-${match[1]}` : '';
-      }
-      default:
-        return '';
+  handlePromise(roundId: number, nodeId: string): boolean {
+    const round = this._rounds.find(r => r.roundId === roundId);
+    if (!round) return false;
+    const promises = round.messages.filter(m => m.phase === 'promise' && m.to === nodeId);
+    if (promises.length + 1 >= round.quorumSize) {
+      round.phase = 'accept';
+      this._broadcast(round, nodeId, 'accept', round.proposalNumber, round.messages[0]?.value ?? '');
     }
+    return true;
   }
 
-  send(handshakeId: string, payload: string): GhostMessage | null {
-    const handshake = this._handshakes.get(handshakeId);
-    if (!handshake) return null;
-    const carrierId = `carrier-${handshake.cipher}-${Date.now()}`;
-    const baseCarrier = this._carriers.get(carrierId) ?? `default-carrier-${Date.now()}`;
-    const encoded = this._encode(payload, handshake.cipher, baseCarrier);
-    const message: GhostMessage = {
-      id: `ghost-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      carrier: encoded,
-      hiddenPayload: payload,
-      cipher: handshake.cipher,
-      sentAt: Date.now(),
-      received: false,
-    };
-    this._messages.push(message);
-    if (this._messages.length > 300) this._messages.shift();
-    return message;
+  handleAccepted(roundId: number, nodeId: string): boolean {
+    const round = this._rounds.find(r => r.roundId === roundId);
+    if (!round) return false;
+    const accepts = round.messages.filter(m => m.phase === 'accept');
+    if (accepts.length >= round.quorumSize && !round.decided) {
+      round.decided = true;
+      round.decisionValue = round.messages[0]?.value ?? null;
+      round.phase = 'commit';
+      const startTime = round.messages[0]?.timestamp ?? Date.now();
+      this._commitLatencyHistory.push(Date.now() - startTime);
+      if (this._commitLatencyHistory.length > 50) this._commitLatencyHistory.shift();
+    }
+    return true;
   }
 
-  receive(messageId: string): string | null {
-    const message = this._messages.find(m => m.id === messageId);
-    if (!message) return null;
-    message.received = true;
-    return this._decode(message.carrier, message.cipher);
+  getRound(roundId: number): ConsensusRound | null {
+    return this._rounds.find(r => r.roundId === roundId) ?? null;
   }
 
-  setInvisibleMode(enabled: boolean): void {
-    this._invisibleMode = enabled;
+  getMessagesForRound(roundId: number): ProtocolMessage[] {
+    const round = this._rounds.find(r => r.roundId === roundId);
+    return round ? round.messages : [];
   }
 
-  purgeTraces(): number {
-    const before = this._messages.length;
-    this._messages = this._messages.filter(m => !m.received);
-    return before - this._messages.length;
+  decidedRounds(): ConsensusRound[] {
+    return this._rounds.filter(r => r.decided);
   }
 
-  getMessagesByCipher(cipher: ProtocolCipher): GhostMessage[] {
-    return this._messages.filter(m => m.cipher === cipher);
+  averageCommitLatency(): number {
+    if (this._commitLatencyHistory.length === 0) return 0;
+    return this._commitLatencyHistory.reduce((a, b) => a + b, 0) / this._commitLatencyHistory.length;
   }
 
-  listHandshakes(): ProtocolHandshake[] {
-    return Array.from(this._handshakes.values());
-  }
-
-  get messageCount(): number {
+  messageCount(): number {
     return this._messages.length;
   }
 
-  get isInvisible(): boolean {
-    return this._invisibleMode;
+  messagesByPhase(phase: ProtocolPhase): ProtocolMessage[] {
+    return this._messages.filter(m => m.phase === phase);
+  }
+
+  isQuorumPossible(): boolean {
+    const honestNodes = this._nodes.size - this._byzantineNodes.size;
+    return honestNodes > (2 * this._nodes.size) / 3;
+  }
+
+  computeNetworkLoad(): number {
+    return this._messages.length / (this._nodes.size + 1);
+  }
+
+  getConsensusRate(): number {
+    if (this._rounds.length === 0) return 0;
+    return this.decidedRounds().length / this._rounds.length;
+  }
+
+  reset(): void {
+    this._rounds = [];
+    this._messages = [];
+    this._nextRoundId = 0;
+    this._commitLatencyHistory = [];
+  }
+
+  protocolReport(): Record<string, unknown> {
+    return {
+      nodeCount: this._nodes.size,
+      byzantineCount: this._byzantineNodes.size,
+      roundCount: this._rounds.length,
+      decidedCount: this.decidedRounds().length,
+      messageCount: this._messages.length,
+      faultTolerance: this._faultTolerance,
+      averageCommitLatency: this.averageCommitLatency().toFixed(2),
+      consensusRate: this.getConsensusRate().toFixed(4),
+      quorumPossible: this.isQuorumPossible(),
+      networkLoad: this.computeNetworkLoad().toFixed(2),
+      state: this._state,
+    };
   }
 }

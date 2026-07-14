@@ -1,97 +1,155 @@
-/**
- * 混沌容器：温养尚未成型的原型思想，直到自发结晶。
- * 仿照柏拉图的 Chora（容器/接收体），温养尚未成形的
- * 原型思想，等待其在合适条件下自发结晶为成型产物。
- */
-
-export interface PrototypeThought {
+export interface ReceptacleSeed {
   id: string;
-  rawIdea: Record<string, unknown>;
-  warmth: number;
-  crystallized: boolean;
-  nurturedAt: number;
+  form: string;
+  potential: number;
+  nucleated: boolean;
 }
 
-export interface CrystallizedForm {
-  id: string;
-  from: string;
-  form: Record<string, unknown>;
-  crystallizedAt: number;
+export interface ReceptacleState {
+  supersaturation: number;
+  temperature: number;
+  volume: number;
 }
 
 export class ChoraReceptacle {
-  private _prototypes: PrototypeThought[] = [];
-  private _crystallized: CrystallizedForm[] = [];
-  private _ambientWarmth: number = 0.3;
-  private _crystallizationThreshold: number = 0.8;
+  private _seeds: Map<string, ReceptacleSeed> = new Map();
+  private _state: ReceptacleState;
+  private _nucleationCount: number = 0;
+  private _dissolvedEnergy: number = 0;
+  private _surfaceTension: number = 0.072;
+  private _criticalRadius: number = 0;
+  private _diffusionCoefficient: number = 1e-9;
 
-  /** 把一个未成型的原型思想放入容器温养。 */
-  nurture(idea: Record<string, unknown>): PrototypeThought {
-    const p: PrototypeThought = {
-      id: `proto-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      rawIdea: idea,
-      warmth: this._ambientWarmth,
-      crystallized: false,
-      nurturedAt: Date.now(),
+  constructor(initial: ReceptacleState) {
+    this._state = { ...initial };
+    this._computeCriticalRadius();
+  }
+
+  get seedCount(): number {
+    return this._seeds.size;
+  }
+
+  get nucleationCount(): number {
+    return this._nucleationCount;
+  }
+
+  get supersaturation(): number {
+    return this._state.supersaturation;
+  }
+
+  private _computeCriticalRadius(): void {
+    const Vm = 1.8e-5;
+    const R = 8.314;
+    const S = this._state.supersaturation;
+    if (S <= 1) {
+      this._criticalRadius = Infinity;
+      return;
+    }
+    this._criticalRadius = 2 * this._surfaceTension * Vm / (R * this._state.temperature * Math.log(S));
+  }
+
+  deposit(form: string, potential: number): ReceptacleSeed {
+    const seed: ReceptacleSeed = {
+      id: `seed-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      form,
+      potential,
+      nucleated: false,
     };
-    this._prototypes.push(p);
-    return p;
+    this._seeds.set(seed.id, seed);
+    this._dissolvedEnergy += potential;
+    this._attemptNucleation(seed);
+    return seed;
   }
 
-  /** 孵化：给容器加温，加速原型成熟。 */
-  incubate(heat: number): number {
-    this._ambientWarmth = Math.min(1, this._ambientWarmth + heat * 0.1);
-    for (const p of this._prototypes) {
-      if (!p.crystallized) {
-        p.warmth = Math.min(1, p.warmth + heat * 0.05);
+  private _attemptNucleation(seed: ReceptacleSeed): void {
+    const radius = Math.pow(3 * seed.potential / (4 * Math.PI), 1 / 3);
+    this._computeCriticalRadius();
+    if (radius >= this._criticalRadius && this._state.supersaturation > 1.1) {
+      seed.nucleated = true;
+      this._nucleationCount++;
+      this._dissolvedEnergy -= seed.potential;
+      this._state.supersaturation *= 0.95;
+    }
+  }
+
+  incubate(time: number): void {
+    const diffusionLength = Math.sqrt(4 * this._diffusionCoefficient * time);
+    for (const seed of this._seeds.values()) {
+      if (!seed.nucleated) {
+        const growthProbability = 1 - Math.exp(-diffusionLength * this._state.supersaturation);
+        if (growthProbability > 0.5) {
+          seed.potential *= 1 + growthProbability * 0.1;
+          this._attemptNucleation(seed);
+        }
       }
     }
-    return this._ambientWarmth;
+    this._state.temperature *= 0.999;
+    this._computeCriticalRadius();
   }
 
-  /** 尝试结晶：达到临界温度的原型自发结晶。 */
-  crystallize(): CrystallizedForm[] {
-    const newly: CrystallizedForm[] = [];
-    for (const p of this._prototypes) {
-      if (!p.crystallized && p.warmth >= this._crystallizationThreshold) {
-        p.crystallized = true;
-        const form: CrystallizedForm = {
-          id: `form-${p.id}`,
-          from: p.id,
-          form: { ...p.rawIdea, _crystallized: true },
-          crystallizedAt: Date.now(),
-        };
-        this._crystallized.push(form);
-        newly.push(form);
-      }
-    }
-    return newly;
+  retrieve(id: string): ReceptacleSeed | null {
+    return this._seeds.get(id) ?? null;
   }
 
-  /** 收割已结晶的成型产物。 */
-  harvest(): CrystallizedForm[] {
-    const out = [...this._crystallized];
-    this._crystallized = [];
-    return out;
+  withdraw(id: string): ReceptacleSeed | null {
+    const seed = this._seeds.get(id);
+    if (!seed) return null;
+    this._seeds.delete(id);
+    if (seed.nucleated) this._nucleationCount--;
+    return seed;
   }
 
-  /** 评估容器内原型成熟度。 */
-  evaluate(): { total: number; mature: number; averageWarmth: number } {
-    const total = this._prototypes.length;
-    const mature = this._prototypes.filter(p => p.warmth >= this._crystallizationThreshold).length;
-    const avg = total === 0 ? 0 : this._prototypes.reduce((s, p) => s + p.warmth, 0) / total;
-    return { total, mature, averageWarmth: avg };
+  purge(): void {
+    this._seeds.clear();
+    this._nucleationCount = 0;
+    this._dissolvedEnergy = 0;
   }
 
-  getPrototypes(): PrototypeThought[] {
-    return [...this._prototypes];
+  getNucleatedSeeds(): ReceptacleSeed[] {
+    return Array.from(this._seeds.values()).filter(s => s.nucleated);
   }
 
-  get ambientWarmth(): number {
-    return this._ambientWarmth;
+  getDissolvedEnergy(): number {
+    return this._dissolvedEnergy;
   }
 
-  get crystallizedCount(): number {
-    return this._crystallized.length;
+  getCriticalRadius(): number {
+    return this._criticalRadius;
+  }
+
+  setSupersaturation(S: number): void {
+    this._state.supersaturation = Math.max(1, S);
+    this._computeCriticalRadius();
+  }
+
+  getState(): ReceptacleState {
+    return { ...this._state };
+  }
+
+  computeNucleationRate(): number {
+    const Z = 0.1;
+    const k = 1.38e-23;
+    const exponent = -4 * Math.pow(this._surfaceTension, 3) * Math.pow(1.8e-5, 2) /
+      (3 * Math.pow(k * this._state.temperature, 3) * Math.pow(Math.log(this._state.supersaturation), 2));
+    return Z * Math.exp(exponent);
+  }
+
+  setSurfaceTension(gamma: number): void {
+    this._surfaceTension = Math.max(0.001, gamma);
+    this._computeCriticalRadius();
+  }
+
+  computeGibbsFreeEnergy(seedRadius: number): number {
+    const Vm = 1.8e-5;
+    const R = 8.314;
+    const S = this._state.supersaturation;
+    const surfaceTerm = 4 * Math.PI * seedRadius * seedRadius * this._surfaceTension;
+    const volumeTerm = (4 / 3) * Math.PI * Math.pow(seedRadius, 3) * R * this._state.temperature * Math.log(S) / Vm;
+    return surfaceTerm - volumeTerm;
+  }
+
+  getNucleationEfficiency(): number {
+    const total = this._seeds.size;
+    return total > 0 ? this._nucleationCount / total : 0;
   }
 }

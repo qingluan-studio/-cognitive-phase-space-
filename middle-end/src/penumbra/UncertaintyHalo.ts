@@ -1,12 +1,8 @@
-/**
- * 不确定光晕模块：围绕确定性核心的模糊光环。
- * 用于刻画围绕明确信息分布的不确定性范围。
- */
-
 export interface HaloRing {
   radius: number;
   intensity: number;
   uncertainty: number;
+  gaussianWeight: number;
 }
 
 export type HaloSpread = {
@@ -14,6 +10,7 @@ export type HaloSpread = {
   coreIntensity: number;
   totalUncertainty: number;
   averageRadius: number;
+  kernelEntropy: number;
 };
 
 export interface UncertaintyHaloConfig {
@@ -27,6 +24,7 @@ export class UncertaintyHalo {
   private _rings: HaloRing[] = [];
   private _spread: HaloSpread | null = null;
   private _state: Record<string, unknown> = {};
+  private _kernelSigma: number = 1;
 
   constructor(config: UncertaintyHaloConfig) {
     this._config = config;
@@ -47,21 +45,24 @@ export class UncertaintyHalo {
       const radius = (i + 1) * this._config.spreadFactor;
       const intensity = this._config.coreIntensity * Math.exp(-radius * 0.3);
       const uncertainty = 1 - intensity / this._config.coreIntensity;
-      this._rings.push({ radius, intensity, uncertainty });
+      const gaussianWeight = Math.exp(-(radius * radius) / (2 * this._kernelSigma * this._kernelSigma));
+      this._rings.push({ radius, intensity, uncertainty, gaussianWeight });
     }
   }
 
   computeSpread(): HaloSpread {
     const totalUncertainty = this._rings.reduce((acc, r) => acc + r.uncertainty, 0);
-    const averageRadius =
-      this._rings.length > 0
-        ? this._rings.reduce((acc, r) => acc + r.radius, 0) / this._rings.length
-        : 0;
+    const averageRadius = this._rings.length > 0 ? this._rings.reduce((acc, r) => acc + r.radius, 0) / this._rings.length : 0;
+    const kernelEntropy = -this._rings.reduce((s, r) => {
+      const p = r.gaussianWeight;
+      return p > 0 ? s + p * Math.log2(p) : s;
+    }, 0);
     this._spread = {
       rings: this._rings.length,
       coreIntensity: this._config.coreIntensity,
       totalUncertainty,
       averageRadius,
+      kernelEntropy,
     };
     return this._spread;
   }
@@ -94,11 +95,29 @@ export class UncertaintyHalo {
     this._state.coreUpdated = intensity;
   }
 
+  convolutionAt(x: number): number {
+    let sum = 0;
+    for (const r of this._rings) {
+      sum += r.gaussianWeight * Math.exp(-Math.pow(x - r.radius, 2) / (2 * this._kernelSigma * this._kernelSigma));
+    }
+    return sum;
+  }
+
+  radialBasisFunction(center: number, x: number): number {
+    return Math.exp(-Math.pow(x - center, 2) / (2 * this._kernelSigma * this._kernelSigma));
+  }
+
+  kernelBandwidth(): number {
+    const variances = this._rings.map((r) => Math.pow(r.radius - this.computeSpread().averageRadius, 2));
+    return Math.sqrt(variances.reduce((s, v) => s + v, 0) / (variances.length || 1));
+  }
+
   report(): Record<string, unknown> {
     return {
       ringCount: this._rings.length,
       spread: this._spread,
       state: this._state,
+      kernelSigma: this._kernelSigma,
     };
   }
 }

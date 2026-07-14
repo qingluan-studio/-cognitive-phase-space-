@@ -1,105 +1,158 @@
-/**
- * 集体本影模块：所有模块共同投射形成的完全阴影区域。
- * 用于刻画系统中全局共享的黑暗底层。
- */
-
-export interface UmbraContribution {
-  moduleId: string;
-  contribution: number;
-  timestamp: number;
+export interface UmbraAgent {
+  id: string;
+  shadowIntensity: number;
+  influenceRadius: number;
+  position: { x: number; y: number };
 }
 
-export type UmbraDensity = {
-  total: number;
-  average: number;
-  peak: number;
-};
-
-export interface CollectiveUmbraConfig {
-  maxContributors: number;
-  densityThreshold: number;
-  decayRate: number;
+export interface DarkField {
+  position: { x: number; y: number };
+  intensity: number;
+  divergence: number;
+  laplacian: number;
 }
 
 export class CollectiveUmbra {
-  private _config: CollectiveUmbraConfig;
-  private _contributions: UmbraContribution[] = [];
-  private _density: UmbraDensity | null = null;
+  private _agents: Map<string, UmbraAgent> = new Map();
+  private _field: DarkField[][] = [];
   private _state: Record<string, unknown> = {};
+  private _resolution: number = 30;
+  private _diffusionCoefficient: number = 0.05;
+  private _collectiveUnconscious: number = 0;
 
-  constructor(config: CollectiveUmbraConfig) {
-    this._config = config;
-  }
-
-  get contributorCount(): number {
-    return this._contributions.length;
-  }
-
-  get totalContribution(): number {
-    return this._contributions.reduce((acc, c) => acc + c.contribution, 0);
-  }
-
-  contribute(moduleId: string, contribution: number): UmbraContribution {
-    const entry: UmbraContribution = {
-      moduleId,
-      contribution,
-      timestamp: Date.now(),
-    };
-    this._contributions.push(entry);
-    if (this._contributions.length > this._config.maxContributors) {
-      this._contributions.shift();
-    }
-    this._state.lastContributor = moduleId;
-    return entry;
-  }
-
-  computeDensity(): UmbraDensity {
-    const total = this.totalContribution;
-    const average = this._contributions.length > 0 ? total / this._contributions.length : 0;
-    const peak =
-      this._contributions.length > 0
-        ? Math.max(...this._contributions.map((c) => c.contribution))
-        : 0;
-    this._density = { total, average, peak };
-    return this._density;
-  }
-
-  isDense(): boolean {
-    return this.computeDensity().average >= this._config.densityThreshold;
-  }
-
-  topContributor(): UmbraContribution | null {
-    if (this._contributions.length === 0) return null;
-    return this._contributions.reduce((best, c) =>
-      c.contribution > best.contribution ? c : best
+  constructor(resolution: number = 30) {
+    this._resolution = resolution;
+    this._field = Array.from({ length: resolution }, (_, i) =>
+      Array.from({ length: resolution }, (_, j) => ({
+        position: { x: j, y: i },
+        intensity: 0,
+        divergence: 0,
+        laplacian: 0,
+      }))
     );
   }
 
-  applyDecay(): void {
-    for (const c of this._contributions) {
-      c.contribution *= 1 - this._config.decayRate;
+  get agentCount(): number {
+    return this._agents.size;
+  }
+
+  get fieldResolution(): number {
+    return this._resolution;
+  }
+
+  addAgent(id: string, intensity: number, radius: number, x: number, y: number): void {
+    this._agents.set(id, { id, shadowIntensity: intensity, influenceRadius: radius, position: { x, y } });
+    this._projectShadow(id);
+  }
+
+  private _projectShadow(id: string): void {
+    const agent = this._agents.get(id);
+    if (!agent) return;
+    const cx = Math.floor(agent.position.x);
+    const cy = Math.floor(agent.position.y);
+    for (let i = 0; i < this._resolution; i++) {
+      for (let j = 0; j < this._resolution; j++) {
+        const dx = j - cx;
+        const dy = i - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < agent.influenceRadius) {
+          const contribution = agent.shadowIntensity * Math.exp(-dist / agent.influenceRadius);
+          this._field[i][j].intensity = Math.min(1, this._field[i][j].intensity + contribution);
+        }
+      }
     }
-    this._state.decayAppliedAt = Date.now();
   }
 
-  filterByModule(moduleId: string): UmbraContribution[] {
-    return this._contributions.filter((c) => c.moduleId === moduleId);
+  diffuse(steps: number): void {
+    for (let s = 0; s < steps; s++) {
+      const newField = this._field.map((row) => row.map((f) => ({ ...f })));
+      for (let i = 1; i < this._resolution - 1; i++) {
+        for (let j = 1; j < this._resolution - 1; j++) {
+          const laplacian =
+            this._field[i + 1][j].intensity +
+            this._field[i - 1][j].intensity +
+            this._field[i][j + 1].intensity +
+            this._field[i][j - 1].intensity -
+            4 * this._field[i][j].intensity;
+          newField[i][j].intensity = Math.max(0, Math.min(1, this._field[i][j].intensity + this._diffusionCoefficient * laplacian));
+          newField[i][j].laplacian = laplacian;
+        }
+      }
+      this._field = newField;
+    }
+    this._computeDivergence();
+    this._updateCollectiveUnconscious();
   }
 
-  redistribute(source: string, target: string, fraction: number): boolean {
-    const src = this._contributions.find((c) => c.moduleId === source);
-    if (!src) return false;
-    const amount = src.contribution * fraction;
-    src.contribution -= amount;
-    this.contribute(target, amount);
-    return true;
+  private _computeDivergence(): void {
+    for (let i = 1; i < this._resolution - 1; i++) {
+      for (let j = 1; j < this._resolution - 1; j++) {
+        const dFx = this._field[i][j + 1].intensity - this._field[i][j - 1].intensity;
+        const dFy = this._field[i + 1][j].intensity - this._field[i - 1][j].intensity;
+        this._field[i][j].divergence = dFx + dFy;
+      }
+    }
+  }
+
+  private _updateCollectiveUnconscious(): void {
+    let sum = 0;
+    for (const row of this._field) {
+      for (const f of row) sum += f.intensity;
+    }
+    this._collectiveUnconscious = sum / (this._resolution * this._resolution);
+  }
+
+  accumulateAt(x: number, y: number): number {
+    const i = Math.floor(y);
+    const j = Math.floor(x);
+    if (i < 0 || i >= this._resolution || j < 0 || j >= this._resolution) return 0;
+    return this._field[i][j].intensity;
+  }
+
+  convolveWithShadow(kernel: number[][]): number[][] {
+    const kh = Math.floor(kernel.length / 2);
+    const kw = Math.floor(kernel[0].length / 2);
+    const result: number[][] = Array.from({ length: this._resolution }, () => Array(this._resolution).fill(0));
+    for (let i = kh; i < this._resolution - kh; i++) {
+      for (let j = kw; j < this._resolution - kw; j++) {
+        let sum = 0;
+        for (let ki = 0; ki < kernel.length; ki++) {
+          for (let kj = 0; kj < kernel[0].length; kj++) {
+            sum += this._field[i + ki - kh][j + kj - kw].intensity * kernel[ki][kj];
+          }
+        }
+        result[i][j] = sum;
+      }
+    }
+    return result;
+  }
+
+  darkestPoint(): { x: number; y: number; intensity: number } {
+    let darkest = { x: 0, y: 0, intensity: 0 };
+    for (let i = 0; i < this._resolution; i++) {
+      for (let j = 0; j < this._resolution; j++) {
+        if (this._field[i][j].intensity > darkest.intensity) {
+          darkest = { x: j, y: i, intensity: this._field[i][j].intensity };
+        }
+      }
+    }
+    return darkest;
+  }
+
+  totalDarkness(): number {
+    let sum = 0;
+    for (const row of this._field) {
+      for (const f of row) sum += f.intensity;
+    }
+    return sum;
   }
 
   report(): Record<string, unknown> {
     return {
-      contributors: this._contributions.length,
-      total: this.totalContribution,
-      density: this._density,
+      agents: this._agents.size,
+      resolution: this._resolution,
+      totalDarkness: this.totalDarkness(),
+      collectiveUnconscious: this._collectiveUnconscious,
       state: this._state,
     };
   }

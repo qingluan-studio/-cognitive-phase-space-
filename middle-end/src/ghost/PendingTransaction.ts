@@ -1,142 +1,203 @@
-/**
- * 待定事务模块：未提交的事务像鬼魂一样缠着系统，
- * 占用资源并可能干扰后续操作，必须最终化或驱除。
- */
+export type TransactionStatus = 'pending' | 'prepared' | 'committed' | 'aborted' | 'orphan';
 
-export type TransactionState = 'pending' | 'haunting' | 'committed' | 'rolled_back' | 'exorcised';
-
-export interface GhostTransaction {
+export interface Transaction {
   id: string;
-  startedAt: number;
-  state: TransactionState;
-  operations: string[];
-  resourceLocks: string[];
-  hauntingIntensity: number;
+  status: TransactionStatus;
+  resources: string[];
+  dependsOn: string[];
+  startTime: number;
+  endTime: number | null;
 }
 
-export interface ExorcismResult {
-  transactionId: string;
-  exorcised: boolean;
-  releasedLocks: string[];
-  message: string;
+export interface DependencyEdge {
+  from: string;
+  to: string;
+  weight: number;
 }
 
 export class PendingTransaction {
-  private _transactions: Map<string, GhostTransaction> = new Map();
-  private _exorcisms: ExorcismResult[] = [];
-  private _hauntingThresholdMs = 5000;
-  private _maxHauntingIntensity = 1.0;
+  private _transactions: Map<string, Transaction> = new Map();
+  private _edges: DependencyEdge[] = [];
+  private _state: Record<string, unknown> = {};
+  private _waitForGraph: Map<string, Set<string>> = new Map();
+  private _commitOrder: string[] = [];
+  private _isolationLevel: string = 'serializable';
 
-  begin(transactionId: string): GhostTransaction {
-    const transaction: GhostTransaction = {
-      id: transactionId,
-      startedAt: Date.now(),
-      state: 'pending',
-      operations: [],
-      resourceLocks: [],
-      hauntingIntensity: 0,
+  begin(id: string, resources: string[]): Transaction {
+    const tx: Transaction = {
+      id,
+      status: 'pending',
+      resources,
+      dependsOn: [],
+      startTime: Date.now(),
+      endTime: null,
     };
-    this._transactions.set(transactionId, transaction);
-    return transaction;
+    this._transactions.set(id, tx);
+    return tx;
   }
 
-  addOperation(transactionId: string, operation: string): boolean {
-    const transaction = this._transactions.get(transactionId);
-    if (!transaction) return false;
-    transaction.operations.push(operation);
-    return true;
+  addDependency(from: string, to: string): void {
+    const tx = this._transactions.get(from);
+    if (tx) tx.dependsOn.push(to);
+    this._edges.push({ from, to, weight: 1 });
+    const set = this._waitForGraph.get(from) ?? new Set();
+    set.add(to);
+    this._waitForGraph.set(from, set);
   }
 
-  acquireLock(transactionId: string, resource: string): boolean {
-    const transaction = this._transactions.get(transactionId);
-    if (!transaction) return false;
-    if (!transaction.resourceLocks.includes(resource)) {
-      transaction.resourceLocks.push(resource);
+  prepare(id: string): boolean {
+    const tx = this._transactions.get(id);
+    if (!tx || tx.status !== 'pending') return false;
+    for (const dep of tx.dependsOn) {
+      const depTx = this._transactions.get(dep);
+      if (!depTx || depTx.status !== 'committed') return false;
     }
+    tx.status = 'prepared';
     return true;
   }
 
-  commit(transactionId: string): boolean {
-    const transaction = this._transactions.get(transactionId);
-    if (!transaction || transaction.state !== 'pending') return false;
-    transaction.state = 'committed';
-    transaction.resourceLocks = [];
+  commit(id: string): boolean {
+    const tx = this._transactions.get(id);
+    if (!tx || tx.status !== 'prepared') return false;
+    tx.status = 'committed';
+    tx.endTime = Date.now();
+    this._commitOrder.push(id);
+    this._releaseResources(id);
     return true;
   }
 
-  rollback(transactionId: string): boolean {
-    const transaction = this._transactions.get(transactionId);
-    if (!transaction) return false;
-    transaction.state = 'rolled_back';
-    transaction.resourceLocks = [];
+  abort(id: string): boolean {
+    const tx = this._transactions.get(id);
+    if (!tx) return false;
+    tx.status = 'aborted';
+    tx.endTime = Date.now();
+    this._releaseResources(id);
     return true;
   }
 
-  updateHaunting(): number {
-    const now = Date.now();
-    let haunted = 0;
-    for (const transaction of this._transactions.values()) {
-      if (transaction.state === 'pending') {
-        const elapsed = now - transaction.startedAt;
-        if (elapsed > this._hauntingThresholdMs) {
-          transaction.state = 'haunting';
-          transaction.hauntingIntensity = Math.min(
-            this._maxHauntingIntensity,
-            (elapsed - this._hauntingThresholdMs) / 10000
-          );
-          haunted++;
+  private _releaseResources(id: string): void {
+    const tx = this._transactions.get(id);
+    if (!tx) return;
+    for (const [otherId, otherTx] of this._transactions) {
+      if (otherId === id) continue;
+      const idx = otherTx.dependsOn.indexOf(id);
+      if (idx >= 0) otherTx.dependsOn.splice(idx, 1);
+    }
+  }
+
+  detectDeadlock(): string[][] {
+    const cycles: string[][] = [];
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+    const path: string[] = [];
+    const dfs = (node: string) => {
+      visited.add(node);
+      stack.add(node);
+      path.push(node);
+      for (const neighbor of this._waitForGraph.get(node) ?? []) {
+        if (!visited.has(neighbor)) {
+          dfs(neighbor);
+        } else if (stack.has(neighbor)) {
+          const start = path.indexOf(neighbor);
+          cycles.push(path.slice(start));
         }
       }
+      path.pop();
+      stack.delete(node);
+    };
+    for (const node of this._waitForGraph.keys()) {
+      if (!visited.has(node)) dfs(node);
     }
-    return haunted;
+    return cycles;
   }
 
-  exorcise(transactionId: string): ExorcismResult {
-    const transaction = this._transactions.get(transactionId);
-    const releasedLocks = transaction ? [...transaction.resourceLocks] : [];
-    if (!transaction) {
-      return { transactionId, exorcised: false, releasedLocks: [], message: 'Transaction not found' };
+  getTransaction(id: string): Transaction | null {
+    return this._transactions.get(id) ?? null;
+  }
+
+  listByStatus(status: TransactionStatus): Transaction[] {
+    return Array.from(this._transactions.values()).filter(t => t.status === status);
+  }
+
+  topologicalCommitOrder(): string[] {
+    const inDegree = new Map<string, number>();
+    const adj = new Map<string, string[]>();
+    for (const tx of this._transactions.values()) {
+      inDegree.set(tx.id, 0);
+      adj.set(tx.id, []);
     }
-    transaction.state = 'exorcised';
-    transaction.resourceLocks = [];
-    const result: ExorcismResult = {
-      transactionId,
-      exorcised: true,
-      releasedLocks,
-      message: 'Ghost transaction exorcised',
-    };
-    this._exorcisms.push(result);
-    if (this._exorcisms.length > 200) this._exorcisms.shift();
+    for (const edge of this._edges) {
+      const list = adj.get(edge.from) ?? [];
+      list.push(edge.to);
+      adj.set(edge.from, list);
+      inDegree.set(edge.to, (inDegree.get(edge.to) ?? 0) + 1);
+    }
+    const queue: string[] = [];
+    for (const [id, degree] of inDegree) {
+      if (degree === 0) queue.push(id);
+    }
+    const result: string[] = [];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      result.push(current);
+      for (const neighbor of adj.get(current) ?? []) {
+        const newDegree = (inDegree.get(neighbor) ?? 0) - 1;
+        inDegree.set(neighbor, newDegree);
+        if (newDegree === 0) queue.push(neighbor);
+      }
+    }
     return result;
   }
 
-  exorciseAllHaunting(): ExorcismResult[] {
-    const results: ExorcismResult[] = [];
-    for (const transaction of this._transactions.values()) {
-      if (transaction.state === 'haunting') {
-        results.push(this.exorcise(transaction.id));
-      }
-    }
-    return results;
+  averageDuration(): number {
+    const completed = Array.from(this._transactions.values()).filter(t => t.endTime !== null);
+    if (completed.length === 0) return 0;
+    return completed.reduce((s, t) => s + (t.endTime! - t.startTime), 0) / completed.length;
   }
 
-  getHauntingTransactions(): GhostTransaction[] {
-    return Array.from(this._transactions.values()).filter(t => t.state === 'haunting');
+  maxDuration(): number {
+    const completed = Array.from(this._transactions.values()).filter(t => t.endTime !== null);
+    if (completed.length === 0) return 0;
+    return Math.max(...completed.map(t => t.endTime! - t.startTime));
   }
 
-  setHauntingThreshold(ms: number): void {
-    this._hauntingThresholdMs = Math.max(100, ms);
+  orphanTransactions(): Transaction[] {
+    const now = Date.now();
+    return Array.from(this._transactions.values()).filter(t => {
+      return t.status === 'pending' && now - t.startTime > 30000;
+    });
   }
 
-  getExorcismHistory(limit: number = 50): ExorcismResult[] {
-    return this._exorcisms.slice(-limit);
+  get throughput(): number {
+    const committed = this.listByStatus('committed').length;
+    const totalTime = Array.from(this._transactions.values()).reduce((s, t) => {
+      return s + (t.endTime ?? Date.now()) - t.startTime;
+    }, 0);
+    return totalTime > 0 ? (committed * 1000) / totalTime : 0;
   }
 
-  get transactionCount(): number {
-    return this._transactions.size;
+  setIsolationLevel(level: string): void {
+    this._isolationLevel = level;
   }
 
-  get hauntingCount(): number {
-    return this.getHauntingTransactions().length;
+  get dependencyCount(): number {
+    return this._edges.length;
+  }
+
+  transactionReport(): Record<string, unknown> {
+    return {
+      transactionCount: this._transactions.size,
+      pendingCount: this.listByStatus('pending').length,
+      committedCount: this.listByStatus('committed').length,
+      abortedCount: this.listByStatus('aborted').length,
+      orphanCount: this.orphanTransactions().length,
+      deadlockCycles: this.detectDeadlock().length,
+      averageDuration: this.averageDuration().toFixed(2),
+      maxDuration: this.maxDuration(),
+      throughput: this.throughput.toFixed(4),
+      dependencyCount: this._edges.length,
+      isolationLevel: this._isolationLevel,
+      state: this._state,
+    };
   }
 }

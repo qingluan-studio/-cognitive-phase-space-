@@ -1,106 +1,124 @@
-/**
- * 半影逻辑模块：在清晰与完全黑暗之间的模糊区间进行推理。
- * 用于处理边界不明确、部分确定性的判断过程。
- */
-
-export interface PenumbraAssertion {
-  claim: string;
-  confidence: number;
-  evidence: number;
+export interface ThreeValue {
+  truth: number;
+  falsity: number;
+  indeterminacy: number;
 }
 
-export type PenumbraVerdict = {
-  claim: string;
-  verdict: 'likely' | 'uncertain' | 'unlikely';
-  score: number;
-};
-
-export interface PenumbraConfig {
-  thresholdHigh: number;
-  thresholdLow: number;
-  evidenceWeight: number;
+export interface FuzzyInference {
+  premise: string;
+  conclusion: string;
+  confidence: number;
+  belief: number;
+  plausibility: number;
 }
 
 export class PenumbraLogic {
-  private _config: PenumbraConfig;
-  private _assertions: PenumbraAssertion[] = [];
-  private _verdicts: PenumbraVerdict[] = [];
-  private _meta: Record<string, unknown> = {};
+  private _values: Map<string, ThreeValue> = new Map();
+  private _inferences: FuzzyInference[] = [];
+  private _state: Record<string, unknown> = {};
+  private _kleeneOperations: number = 0;
 
-  constructor(config: PenumbraConfig) {
-    this._config = config;
+  constructor() {}
+
+  get valueCount(): number {
+    return this._values.size;
   }
 
-  get assertionCount(): number {
-    return this._assertions.length;
+  get inferenceCount(): number {
+    return this._inferences.length;
   }
 
-  get verdictCount(): number {
-    return this._verdicts.length;
+  setValue(name: string, truth: number, falsity: number, indeterminacy: number): void {
+    this._values.set(name, { truth, falsity, indeterminacy });
   }
 
-  assert(claim: string, confidence: number, evidence: number): PenumbraAssertion {
-    const a: PenumbraAssertion = { claim, confidence, evidence };
-    this._assertions.push(a);
-    if (this._assertions.length > 50) this._assertions.shift();
-    return a;
+  kleeneAnd(a: string, b: string): ThreeValue {
+    const va = this._values.get(a);
+    const vb = this._values.get(b);
+    if (!va || !vb) return { truth: 0, falsity: 1, indeterminacy: 0 };
+    const truth = Math.min(va.truth, vb.truth);
+    const falsity = Math.max(va.falsity, vb.falsity);
+    const indeterminacy = 1 - truth - falsity;
+    this._kleeneOperations++;
+    return { truth, falsity, indeterminacy };
   }
 
-  evaluate(claim: string): PenumbraVerdict {
-    const a = this._assertions.find((x) => x.claim === claim);
-    const score = a
-      ? a.confidence * (1 - this._config.evidenceWeight) +
-        a.evidence * this._config.evidenceWeight
-      : 0;
-    const verdict: PenumbraVerdict['verdict'] =
-      score >= this._config.thresholdHigh
-        ? 'likely'
-        : score <= this._config.thresholdLow
-        ? 'unlikely'
-        : 'uncertain';
-    const result: PenumbraVerdict = { claim, verdict, score };
-    this._verdicts.push(result);
-    if (this._verdicts.length > 50) this._verdicts.shift();
-    return result;
+  kleeneOr(a: string, b: string): ThreeValue {
+    const va = this._values.get(a);
+    const vb = this._values.get(b);
+    if (!va || !vb) return { truth: 0, falsity: 1, indeterminacy: 0 };
+    const truth = Math.max(va.truth, vb.truth);
+    const falsity = Math.min(va.falsity, vb.falsity);
+    const indeterminacy = 1 - truth - falsity;
+    this._kleeneOperations++;
+    return { truth, falsity, indeterminacy };
   }
 
-  evaluateAll(): PenumbraVerdict[] {
-    return this._assertions.map((a) => this.evaluate(a.claim));
+  kleeneNot(a: string): ThreeValue {
+    const va = this._values.get(a);
+    if (!va) return { truth: 0, falsity: 1, indeterminacy: 0 };
+    this._kleeneOperations++;
+    return { truth: va.falsity, falsity: va.truth, indeterminacy: va.indeterminacy };
   }
 
-  borderlineClaims(): PenumbraAssertion[] {
-    return this._assertions.filter((a) => {
-      const score =
-        a.confidence * (1 - this._config.evidenceWeight) +
-        a.evidence * this._config.evidenceWeight;
-      return (
-        score > this._config.thresholdLow && score < this._config.thresholdHigh
-      );
-    });
+  fuzzyImplication(a: string, b: string): number {
+    const va = this._values.get(a);
+    const vb = this._values.get(b);
+    if (!va || !vb) return 0;
+    return Math.min(1, 1 - va.truth + vb.truth);
   }
 
-  averageConfidence(): number {
-    if (this._assertions.length === 0) return 0;
-    return this._assertions.reduce((acc, a) => acc + a.confidence, 0) / this._assertions.length;
+  infer(premise: string, conclusion: string, confidence: number): FuzzyInference {
+    const v = this._values.get(premise);
+    const belief = v ? v.truth * confidence : 0;
+    const plausibility = v ? 1 - v.falsity : 0;
+    const inference: FuzzyInference = { premise, conclusion, confidence, belief, plausibility };
+    this._inferences.push(inference);
+    if (this._inferences.length > 100) this._inferences.shift();
+    return inference;
   }
 
-  strengthenEvidence(claim: string, amount: number): boolean {
-    const a = this._assertions.find((x) => x.claim === claim);
-    if (!a) return false;
-    a.evidence = Math.min(1, a.evidence + amount);
-    return true;
+  confidenceInterval(name: string): { lower: number; upper: number } {
+    const v = this._values.get(name);
+    if (!v) return { lower: 0, upper: 0 };
+    return { lower: v.truth, upper: 1 - v.falsity };
   }
 
-  isAmbiguous(): boolean {
-    return this.borderlineClaims().length > this._assertions.length / 2;
+  beliefFunction(subset: string[]): number {
+    let sum = 0;
+    for (const name of subset) {
+      const v = this._values.get(name);
+      if (v) sum += v.truth;
+    }
+    return sum;
+  }
+
+  plausibilityFunction(subset: string[]): number {
+    let sum = 0;
+    for (const name of subset) {
+      const v = this._values.get(name);
+      if (v) sum += 1 - v.falsity;
+    }
+    return sum;
+  }
+
+  uncertaintyEntropy(): number {
+    let sum = 0;
+    for (const v of this._values.values()) {
+      if (v.indeterminacy > 0) {
+        sum += -v.indeterminacy * Math.log2(v.indeterminacy);
+      }
+    }
+    return sum;
   }
 
   report(): Record<string, unknown> {
     return {
-      assertions: this._assertions.length,
-      verdicts: this._verdicts.length,
-      averageConfidence: this.averageConfidence(),
-      meta: this._meta,
+      values: this._values.size,
+      inferences: this._inferences.length,
+      kleeneOperations: this._kleeneOperations,
+      uncertainty: this.uncertaintyEntropy(),
+      state: this._state,
     };
   }
 }

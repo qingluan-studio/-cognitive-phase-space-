@@ -1,76 +1,117 @@
-/**
- * 自我迷失模块：故意陷入自身逻辑迷宫。
- * 通过反复自我引用制造困惑，进而测量系统的容错与定位能力。
- */
-
 export interface SelfLostData {
-  selfReferences: number;
-  confusionLevel: number;
-  anchorFound: boolean;
+  name: string;
+  coordinates: { x: number; y: number };
+  hope: number;
+  lostness: number;
 }
 
 export class SelfLost {
-  private _selfReferences: number;
-  private _confusionLevel: number;
-  private _path: string[];
-  private _anchor: string | null;
+  private _name: string;
+  private _x: number;
+  private _y: number;
+  private _hope: number;
+  private _lostness: number;
+  private _stepCount: number;
+  private _autocorrelation: number[];
+  private _randomWalkSeed: number;
 
-  constructor() {
-    this._selfReferences = 0;
-    this._confusionLevel = 0;
-    this._path = [];
-    this._anchor = null;
+  constructor(name: string, startX: number = 0, startY: number = 0) {
+    this._name = name;
+    this._x = startX;
+    this._y = startY;
+    this._hope = 0.5;
+    this._lostness = 0;
+    this._stepCount = 0;
+    this._autocorrelation = [];
+    this._randomWalkSeed = name.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
   }
 
-  get confusionLevel(): number {
-    return this._confusionLevel;
+  get name(): string {
+    return this._name;
   }
 
-  get path(): string[] {
-    return [...this._path];
+  get hope(): number {
+    return this._hope;
   }
 
-  public referToSelf(label: string): void {
-    this._selfReferences += 1;
-    this._confusionLevel = Math.min(100, this._confusionLevel + 10);
-    this._path.push(`self:${label}`);
+  get lostness(): number {
+    return this._lostness;
   }
 
-  public wander(steps: number): string[] {
-    const directions = ['north', 'east', 'south', 'west', 'inward', 'outward'];
-    for (let i = 0; i < steps; i += 1) {
-      const d = directions[Math.floor(Math.random() * directions.length)];
-      this._path.push(d);
-      this._confusionLevel = Math.min(100, this._confusionLevel + 1);
+  get stepCount(): number {
+    return this._stepCount;
+  }
+
+  public wander(steps: number): void {
+    for (let i = 0; i < steps; i++) {
+      const dx = Math.round((this._rand() - 0.5) * 2);
+      const dy = Math.round((this._rand() - 0.5) * 2);
+      this._x += dx;
+      this._y += dy;
+      this._stepCount++;
+      this._lostness = Math.min(1, this._lostness + 0.01 * Math.sqrt(dx * dx + dy * dy));
+      this._autocorrelation.push(this._x * this._x + this._y * this._y);
+      if (this._autocorrelation.length > 100) this._autocorrelation.shift();
     }
-    return [...this._path];
+    this._hope = Math.max(0, this._hope - this._lostness * 0.1);
   }
 
-  public dropAnchor(name: string): void {
-    this._anchor = name;
-    this._confusionLevel = Math.max(0, this._confusionLevel - 30);
+  public rest(): void {
+    this._hope = Math.min(1, this._hope + 0.05);
+    this._lostness = Math.max(0, this._lostness - 0.02);
   }
 
-  public locateSelf(): boolean {
-    return this._anchor !== null;
+  public shout(): void {
+    this._hope = Math.max(0, this._hope - 0.05);
+    this._lostness = Math.min(1, this._lostness + 0.1);
+  }
+
+  public findSignal(): void {
+    this._hope = Math.min(1, this._hope + 0.2);
+    this._lostness = Math.max(0, this._lostness - 0.15);
   }
 
   public report(): SelfLostData {
     return {
-      selfReferences: this._selfReferences,
-      confusionLevel: this._confusionLevel,
-      anchorFound: this._anchor !== null,
+      name: this._name,
+      coordinates: { x: this._x, y: this._y },
+      hope: this._hope,
+      lostness: this._lostness,
     };
   }
 
-  public compressPath(): string {
-    return this._path.join('->');
+  public computeMeanSquaredDisplacement(): number {
+    if (this._stepCount === 0) return 0;
+    return (this._x * this._x + this._y * this._y) / this._stepCount;
   }
 
-  public reset(): void {
-    this._selfReferences = 0;
-    this._confusionLevel = 0;
-    this._path = [];
-    this._anchor = null;
+  public computeAutocorrelation(lag: number): number {
+    if (this._autocorrelation.length <= lag) return 0;
+    const mean = this._autocorrelation.reduce((a, b) => a + b, 0) / this._autocorrelation.length;
+    let num = 0;
+    let den = 0;
+    for (let i = 0; i < this._autocorrelation.length - lag; i++) {
+      num += (this._autocorrelation[i] - mean) * (this._autocorrelation[i + lag] - mean);
+    }
+    for (let i = 0; i < this._autocorrelation.length; i++) {
+      den += (this._autocorrelation[i] - mean) ** 2;
+    }
+    return den > 0 ? num / den : 0;
+  }
+
+  public estimateFractalDimension(): number {
+    const r = Math.sqrt(Math.abs(this._x) + Math.abs(this._y) + 1);
+    return this._stepCount > 0 ? Math.log(this._stepCount) / Math.log(r + 1) : 0;
+  }
+
+  public computeReturnProbability(): number {
+    if (this._stepCount === 0) return 1;
+    const msd = this.computeMeanSquaredDisplacement();
+    return msd === 0 ? 1 : Math.exp(-1 / (2 * msd));
+  }
+
+  private _rand(): number {
+    this._randomWalkSeed = (this._randomWalkSeed * 16807 + 0) % 2147483647;
+    return this._randomWalkSeed / 2147483647;
   }
 }

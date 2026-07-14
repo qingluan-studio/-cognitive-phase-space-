@@ -1,8 +1,3 @@
-/**
- * 神谕悖论模块：预言本身会改变被预言者的行为，
- * 导致预言自我实现或自我否定，形成预言准确性的内在悖论。
- */
-
 export type ParadoxType = 'self_fulfilling' | 'self_defeating' | 'oscillating' | 'invariant';
 
 export interface ParadoxProphecy {
@@ -28,6 +23,8 @@ export class OracleParadox {
   private _shifts: BehaviorShift[] = [];
   private _maxInfluence = 0.5;
   private _oscillationPeriod = 4;
+  private _entropyHistory: number[] = [];
+  private _fixedPointTolerance = 0.001;
 
   emit(content: string, paradoxType: ParadoxType, baseAccuracy: number): ParadoxProphecy {
     const prophecy: ParadoxProphecy = {
@@ -57,6 +54,7 @@ export class OracleParadox {
     if (this._shifts.length > 300) this._shifts.shift();
     prophecy.influenceFactor += shift.shiftMagnitude * direction;
     this._recalculate(prophecy);
+    this._updateEntropy();
     return shift;
   }
 
@@ -101,6 +99,48 @@ export class OracleParadox {
     return result;
   }
 
+  computeSystemEntropy(): number {
+    const values = Array.from(this._prophecies.values()).map((p) => p.adjustedAccuracy);
+    if (values.length === 0) return 0;
+    const bins = 10;
+    const histogram = new Array(bins).fill(0);
+    for (const v of values) {
+      const idx = Math.min(bins - 1, Math.floor(v * bins));
+      histogram[idx]++;
+    }
+    const total = values.length;
+    let entropy = 0;
+    for (const count of histogram) {
+      if (count > 0) {
+        const p = count / total;
+        entropy -= p * Math.log2(p);
+      }
+    }
+    return entropy;
+  }
+
+  computeLyapunovExponent(prophecyId: string, perturbation: number = 1e-6): number {
+    const prophecy = this._prophecies.get(prophecyId);
+    if (!prophecy) return 0;
+    const original = prophecy.adjustedAccuracy;
+    prophecy.influenceFactor += perturbation;
+    this._recalculate(prophecy);
+    const diverged = prophecy.adjustedAccuracy;
+    prophecy.influenceFactor -= perturbation;
+    this._recalculate(prophecy);
+    return Math.log(Math.abs(diverged - original) / perturbation + 1e-12);
+  }
+
+  findFixedPoints(): string[] {
+    const fixed: string[] = [];
+    for (const [id, p] of this._prophecies) {
+      if (Math.abs(p.adjustedAccuracy - p.baseAccuracy) < this._fixedPointTolerance) {
+        fixed.push(id);
+      }
+    }
+    return fixed;
+  }
+
   resetInfluence(prophecyId: string): boolean {
     const prophecy = this._prophecies.get(prophecyId);
     if (!prophecy) return false;
@@ -114,7 +154,7 @@ export class OracleParadox {
   }
 
   getShiftsByProphecy(prophecyId: string): BehaviorShift[] {
-    return this._shifts.filter(s => s.prophecyId === prophecyId);
+    return this._shifts.filter((s) => s.prophecyId === prophecyId);
   }
 
   listProphecies(): ParadoxProphecy[] {
@@ -127,5 +167,14 @@ export class OracleParadox {
 
   get shiftCount(): number {
     return this._shifts.length;
+  }
+
+  get entropyTrend(): number[] {
+    return [...this._entropyHistory];
+  }
+
+  private _updateEntropy(): void {
+    this._entropyHistory.push(this.computeSystemEntropy());
+    if (this._entropyHistory.length > 100) this._entropyHistory.shift();
   }
 }

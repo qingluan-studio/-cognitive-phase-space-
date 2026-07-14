@@ -1,122 +1,167 @@
-/**
- * 通过仪式模块：新模块必须通过考验才能被系统接纳，
- * 考验包含功能测试、压力测试、伦理测试等多重关卡。
- */
-
-export type TrialOutcome = 'pending' | 'passed' | 'failed' | 'conditional';
-
-export interface TrialStep {
+export interface PassageState {
   id: string;
-  name: string;
-  description: string;
-  required: boolean;
-  passed: boolean;
-  score: number;
+  phase: number;
+  threshold: number;
+  entropy: number;
 }
 
-export interface PassageCandidate {
-  id: string;
-  moduleName: string;
-  steps: TrialStep[];
-  outcome: TrialOutcome;
-  initiatedAt: number;
-  completedAt: number | null;
+export interface Transition {
+  from: string;
+  to: string;
+  probability: number;
+  weight: number;
+}
+
+export interface PassageResult {
+  path: string[];
+  totalProbability: number;
+  totalEntropy: number;
+  convergence: number;
 }
 
 export class RiteOfPassage {
-  private _candidates: Map<string, PassageCandidate> = new Map();
-  private _template: TrialStep[] = [];
-  private _minPassScore = 0.7;
-  private _graduated: Set<string> = new Set();
+  private _states: Map<string, PassageState> = new Map();
+  private _transitions: Transition[] = [];
+  private _currentStateId: string = '';
+  private _history: PassageResult[] = [];
+  private _state: Record<string, unknown> = {};
+  private _transitionMatrix: Map<string, Map<string, number>> = new Map();
+  private _stationaryDistribution: Map<string, number> = new Map();
 
-  setTrialTemplate(steps: TrialStep[]): void {
-    this._template = steps.map(s => ({ ...s, passed: false, score: 0 }));
+  constructor() {}
+
+  get stateCount(): number {
+    return this._states.size;
   }
 
-  initiate(moduleName: string): PassageCandidate {
-    const candidate: PassageCandidate = {
-      id: `cand-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      moduleName,
-      steps: this._template.map(s => ({ ...s })),
-      outcome: 'pending',
-      initiatedAt: Date.now(),
-      completedAt: null,
+  get currentStateId(): string {
+    return this._currentStateId;
+  }
+
+  addState(id: string, phase: number, threshold: number): void {
+    const entropy = -threshold * Math.log2(threshold || 1) - (1 - threshold) * Math.log2(1 - threshold || 1);
+    this._states.set(id, { id, phase, threshold, entropy });
+    this._transitionMatrix.set(id, new Map());
+    if (this._currentStateId === '') {
+      this._currentStateId = id;
+    }
+  }
+
+  addTransition(from: string, to: string, weight: number): void {
+    this._transitions.push({ from, to, probability: 0, weight });
+    const fromMap = this._transitionMatrix.get(from);
+    if (fromMap) {
+      fromMap.set(to, weight);
+    }
+  }
+
+  computeProbabilities(): void {
+    const outWeights = new Map<string, number>();
+    for (const t of this._transitions) {
+      outWeights.set(t.from, (outWeights.get(t.from) ?? 0) + t.weight);
+    }
+    for (const t of this._transitions) {
+      t.probability = t.weight / (outWeights.get(t.from) || 1);
+    }
+  }
+
+  traverse(targetId: string): PassageResult | null {
+    const path: string[] = [this._currentStateId];
+    let totalProbability = 1;
+    let totalEntropy = 0;
+    let steps = 0;
+    const maxSteps = this._states.size * 2;
+    while (this._currentStateId !== targetId && steps < maxSteps) {
+      const transitions = this._transitions.filter((t) => t.from === this._currentStateId);
+      if (transitions.length === 0) break;
+      const chosen = transitions[Math.floor(Math.random() * transitions.length)];
+      totalProbability *= chosen.probability;
+      const state = this._states.get(chosen.to);
+      if (state) totalEntropy += state.entropy;
+      this._currentStateId = chosen.to;
+      path.push(chosen.to);
+      steps++;
+    }
+    const convergence = this._currentStateId === targetId ? 1 : 0;
+    const result: PassageResult = { path, totalProbability, totalEntropy, convergence };
+    this._history.push(result);
+    if (this._history.length > 50) this._history.shift();
+    return result;
+  }
+
+  computeStationaryDistribution(iterations: number = 100): Map<string, number> {
+    const ids = Array.from(this._states.keys());
+    const n = ids.length;
+    let dist = new Map<string, number>(ids.map((id) => [id, 1 / n]));
+    for (let iter = 0; iter < iterations; iter++) {
+      const newDist = new Map<string, number>(ids.map((id) => [id, 0]));
+      for (const id of ids) {
+        const fromMap = this._transitionMatrix.get(id) ?? new Map();
+        const totalWeight = Array.from(fromMap.values()).reduce((s, v) => s + v, 0);
+        for (const [to, weight] of fromMap) {
+          const prob = totalWeight > 0 ? weight / totalWeight : 0;
+          newDist.set(to, (newDist.get(to) ?? 0) + (dist.get(id) ?? 0) * prob);
+        }
+      }
+      dist = newDist;
+    }
+    this._stationaryDistribution = dist;
+    return dist;
+  }
+
+  isAbsorbing(id: string): boolean {
+    const out = this._transitions.filter((t) => t.from === id);
+    return out.length === 0;
+  }
+
+  meanFirstPassage(start: string, target: string): number {
+    const pathResult = this._bfsPath(start, target);
+    return pathResult.length;
+  }
+
+  private _bfsPath(start: string, target: string): string[] {
+    const visited = new Set<string>();
+    const parent = new Map<string, string | null>();
+    const queue: string[] = [start];
+    parent.set(start, null);
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      if (curr === target) break;
+      for (const t of this._transitions) {
+        if (t.from === curr && !visited.has(t.to)) {
+          visited.add(t.to);
+          parent.set(t.to, curr);
+          queue.push(t.to);
+        }
+      }
+    }
+    const path: string[] = [];
+    let curr: string | null = target;
+    while (curr) {
+      path.unshift(curr);
+      curr = parent.get(curr) ?? null;
+    }
+    return path;
+  }
+
+  passageEntropy(): number {
+    const total = Array.from(this._states.values()).reduce((s, st) => s + st.entropy, 0);
+    if (total === 0) return 0;
+    return -Array.from(this._states.values()).reduce((s, st) => {
+      const p = st.entropy / total;
+      return p > 0 ? s + p * Math.log2(p) : s;
+    }, 0);
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      states: this._states.size,
+      transitions: this._transitions.length,
+      currentState: this._currentStateId,
+      history: this._history.length,
+      entropy: this.passageEntropy(),
+      stationary: Object.fromEntries(this._stationaryDistribution),
+      state: this._state,
     };
-    this._candidates.set(candidate.id, candidate);
-    return candidate;
-  }
-
-  evaluateStep(candidateId: string, stepId: string, score: number): TrialStep | null {
-    const candidate = this._candidates.get(candidateId);
-    if (!candidate) return null;
-    const step = candidate.steps.find(s => s.id === stepId);
-    if (!step) return null;
-    step.score = Math.max(0, Math.min(1, score));
-    step.passed = step.score >= this._minPassScore;
-    return step;
-  }
-
-  private _computeOutcome(candidate: PassageCandidate): TrialOutcome {
-    const requiredSteps = candidate.steps.filter(s => s.required);
-    const allRequiredPassed = requiredSteps.every(s => s.passed);
-    if (!allRequiredPassed) return 'failed';
-    const totalScore = candidate.steps.reduce((sum, s) => sum + s.score, 0);
-    const averageScore = candidate.steps.length > 0 ? totalScore / candidate.steps.length : 0;
-    if (averageScore >= this._minPassScore) return 'passed';
-    return 'conditional';
-  }
-
-  conclude(candidateId: string): PassageCandidate | null {
-    const candidate = this._candidates.get(candidateId);
-    if (!candidate || candidate.outcome !== 'pending') return null;
-    candidate.outcome = this._computeOutcome(candidate);
-    candidate.completedAt = Date.now();
-    if (candidate.outcome === 'passed') {
-      this._graduated.add(candidate.moduleName);
-    }
-    return candidate;
-  }
-
-  hasGraduated(moduleName: string): boolean {
-    return this._graduated.has(moduleName);
-  }
-
-  setMinPassScore(value: number): void {
-    this._minPassScore = Math.max(0, Math.min(1, value));
-  }
-
-  getCandidate(candidateId: string): PassageCandidate | null {
-    return this._candidates.get(candidateId) ?? null;
-  }
-
-  getCandidateByModule(moduleName: string): PassageCandidate | null {
-    for (const c of this._candidates.values()) {
-      if (c.moduleName === moduleName) return c;
-    }
-    return null;
-  }
-
-  findPending(): PassageCandidate[] {
-    return Array.from(this._candidates.values()).filter(c => c.outcome === 'pending');
-  }
-
-  findByOutcome(outcome: TrialOutcome): PassageCandidate[] {
-    return Array.from(this._candidates.values()).filter(c => c.outcome === outcome);
-  }
-
-  listGraduates(): string[] {
-    return Array.from(this._graduated);
-  }
-
-  revokeGraduation(moduleName: string): boolean {
-    return this._graduated.delete(moduleName);
-  }
-
-  get candidateCount(): number {
-    return this._candidates.size;
-  }
-
-  get graduateCount(): number {
-    return this._graduated.size;
   }
 }

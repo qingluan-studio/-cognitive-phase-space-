@@ -1,8 +1,3 @@
-/**
- * 事件视界影子模块：黑洞事件视界投下的影子，即黑洞的首张影像。
- * 用于刻画不可直接观测对象通过其阴影被间接成像的过程。
- */
-
 export interface HorizonShadowPixel {
   x: number;
   y: number;
@@ -28,6 +23,8 @@ export class EventHorizonShadow {
   private _pixels: HorizonShadowPixel[] = [];
   private _image: ShadowImage | null = null;
   private _state: Record<string, unknown> = {};
+  private _gravitationalRedshift: number = 0.8;
+  private _spinParameter: number = 0.9;
 
   constructor(config: EventHorizonConfig) {
     this._config = config;
@@ -53,7 +50,10 @@ export class EventHorizonShadow {
         const dist = Math.sqrt(dx * dx + dy * dy);
         const inShadow = dist <= this._config.shadowRadius;
         const ringDist = Math.abs(dist - this._config.photonRingRadius);
-        const brightness = inShadow ? 0 : Math.exp(-ringDist * 0.5) + 0.1;
+        const dopplerFactor = 1 / Math.sqrt(1 - this._spinParameter * this._spinParameter);
+        const brightness = inShadow
+          ? 0
+          : Math.exp(-ringDist * 0.5 * dopplerFactor) * this._gravitationalRedshift + 0.1;
         this._pixels.push({ x, y, brightness, inShadow });
       }
     }
@@ -108,5 +108,24 @@ export class EventHorizonShadow {
       image: this._image,
       state: this._state,
     };
+  }
+
+  computePhotonRingFlux(): number {
+    const ringPixels = this._pixels.filter(p => {
+      const dx = p.x - (this._config.resolution - 1) / 2;
+      const dy = p.y - (this._config.resolution - 1) / 2;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      return Math.abs(dist - this._config.photonRingRadius) < 1.5;
+    });
+    return ringPixels.reduce((a, p) => a + p.brightness, 0);
+  }
+
+  setSpinParameter(a: number): void {
+    this._spinParameter = Math.max(0, Math.min(0.999, a));
+    this._render();
+  }
+
+  computeGravitationalRedshift(): number {
+    return this._gravitationalRedshift / Math.sqrt(1 - this._spinParameter);
   }
 }

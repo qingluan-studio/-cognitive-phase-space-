@@ -1,142 +1,152 @@
-/**
- * GradientDescentDream - 梯度下降之梦
- * 沿损失函数的负梯度方向迭代寻找最优解，模拟机器学习中
- * 梯度下降算法的寻优过程，包含学习率与动量调节。
- */
-
-export interface GradientDescentDreamData {
-  readonly dreamId: string;
-  initialPosition: number[];
-  learningRate: number;
-  momentum: number;
-  maxIterations: number;
-}
-
-export interface DescentStep {
-  iteration: number;
+export interface DreamIteration {
+  step: number;
   position: number[];
   loss: number;
-  gradient: number[];
+  gradientNorm: number;
+}
+
+export type ConvergenceReport = {
+  converged: boolean;
+  finalLoss: number;
+  iterations: number;
+};
+
+export interface DreamConfig {
+  learningRate: number;
+  momentum: number;
+  decay: number;
+  tolerance: number;
 }
 
 export class GradientDescentDream {
-  private _data: GradientDescentDreamData;
-  private _position: number[];
-  private _velocity: number[];
-  private _steps: DescentStep[] = [];
-  private _lossFunction: (pos: number[]) => number;
-  private _gradientFunction: (pos: number[]) => number[];
-  private _converged: boolean = false;
+  private _config: DreamConfig;
+  private _iterations: DreamIteration[] = [];
+  private _position: number[] = [];
+  private _velocity: number[] = [];
+  private _report: ConvergenceReport | null = null;
+  private _state: Record<string, unknown> = {};
+  private _hessianDiagonal: number[] = [];
+  private _conditionNumber: number = 1;
+  private _lossLandscape: number[] = [];
 
-  constructor(
-    data: GradientDescentDreamData,
-    lossFn: (pos: number[]) => number,
-    gradFn: (pos: number[]) => number[]
-  ) {
-    this._data = { ...data, initialPosition: [...data.initialPosition] };
-    this._position = [...data.initialPosition];
-    this._velocity = new Array(data.initialPosition.length).fill(0);
-    this._lossFunction = lossFn;
-    this._gradientFunction = gradFn;
+  constructor(config: DreamConfig) {
+    this._config = config;
   }
 
-  get dreamId(): string {
-    return this._data.dreamId;
+  get iterationCount(): number {
+    return this._iterations.length;
   }
 
   get currentPosition(): readonly number[] {
     return this._position;
   }
 
-  get converged(): boolean {
-    return this._converged;
+  get conditionNumber(): number {
+    return this._conditionNumber;
   }
 
-  get stepCount(): number {
-    return this._steps.length;
-  }
-
-  public step(): DescentStep {
-    const iteration = this._steps.length;
-    if (iteration >= this._data.maxIterations || this._converged) {
-      return this._steps[this._steps.length - 1];
-    }
-    const loss = this._lossFunction(this._position);
-    const gradient = this._gradientFunction(this._position);
+  private _computeHessianDiagonal(gradientFn: (pos: number[]) => number[]): void {
+    const eps = 1e-5;
+    const grad = gradientFn(this._position);
+    this._hessianDiagonal = [];
     for (let i = 0; i < this._position.length; i++) {
-      this._velocity[i] = this._data.momentum * this._velocity[i]
-        - this._data.learningRate * gradient[i];
+      const perturbed = [...this._position];
+      perturbed[i] += eps;
+      const gradPerturbed = gradientFn(perturbed);
+      this._hessianDiagonal.push((gradPerturbed[i] - grad[i]) / eps);
+    }
+    const eigenvalues = this._hessianDiagonal.filter((v) => !isNaN(v) && v !== 0);
+    const maxEig = eigenvalues.length > 0 ? Math.max(...eigenvalues.map(Math.abs)) : 1;
+    const minEig = eigenvalues.length > 0 ? Math.min(...eigenvalues.map(Math.abs)) : 1;
+    this._conditionNumber = maxEig / (minEig + 1e-8);
+  }
+
+  initialize(dimensions: number): void {
+    this._position = [];
+    this._velocity = [];
+    for (let i = 0; i < dimensions; i++) {
+      this._position.push(Math.random() * 2 - 1);
+      this._velocity.push(0);
+    }
+    this._state.initialized = dimensions;
+  }
+
+  step(lossFn: (pos: number[]) => number, gradientFn: (pos: number[]) => number[]): DreamIteration {
+    const loss = lossFn(this._position);
+    const gradient = gradientFn(this._position);
+    const gradientNorm = Math.sqrt(gradient.reduce((acc, g) => acc + g * g, 0));
+    for (let i = 0; i < this._position.length; i++) {
+      this._velocity[i] = this._config.momentum * this._velocity[i] - this._config.learningRate * gradient[i];
       this._position[i] += this._velocity[i];
     }
-    const step: DescentStep = {
-      iteration,
+    this._computeHessianDiagonal(gradientFn);
+    this._lossLandscape.push(loss);
+    if (this._lossLandscape.length > 50) this._lossLandscape.shift();
+    const iter: DreamIteration = {
+      step: this._iterations.length,
       position: [...this._position],
       loss,
-      gradient: [...gradient],
+      gradientNorm,
     };
-    this._steps.push(step);
-    this._checkConvergence(gradient, loss);
-    return step;
+    this._iterations.push(iter);
+    if (this._iterations.length > 100) this._iterations.shift();
+    return iter;
   }
 
-  private _checkConvergence(gradient: number[], loss: number): void {
-    const gradNorm = Math.sqrt(gradient.reduce((s, g) => s + g * g, 0));
-    if (gradNorm < 0.0001 || (this._steps.length > 5 && Math.abs(loss) < 0.001)) {
-      this._converged = true;
-    }
-  }
-
-  public run(maxSteps: number): DescentStep[] {
-    const limit = Math.min(maxSteps, this._data.maxIterations);
-    for (let i = 0; i < limit; i++) {
-      if (this._converged) {
-        break;
-      }
-      this.step();
-    }
-    return [...this._steps];
-  }
-
-  public setLearningRate(rate: number): void {
-    this._data.learningRate = Math.max(0, rate);
-  }
-
-  public setMomentum(momentum: number): void {
-    this._data.momentum = Math.max(0, Math.min(1, momentum));
-  }
-
-  public reset(): void {
-    this._position = [...this._data.initialPosition];
-    this._velocity = new Array(this._position.length).fill(0);
-    this._steps = [];
-    this._converged = false;
-  }
-
-  public bestPosition(): number[] {
-    if (this._steps.length === 0) {
-      return [...this._position];
-    }
-    let best = this._steps[0];
-    for (const s of this._steps) {
-      if (s.loss < best.loss) {
-        best = s;
+  optimize(lossFn: (pos: number[]) => number, gradientFn: (pos: number[]) => number[], maxSteps: number): ConvergenceReport {
+    for (let i = 0; i < maxSteps; i++) {
+      const iter = this.step(lossFn, gradientFn);
+      if (iter.gradientNorm < this._config.tolerance) {
+        this._report = { converged: true, finalLoss: iter.loss, iterations: i + 1 };
+        return this._report;
       }
     }
-    return best.position;
+    const last = this._iterations[this._iterations.length - 1];
+    this._report = { converged: false, finalLoss: last ? last.loss : Infinity, iterations: maxSteps };
+    return this._report;
   }
 
-  public dreamReport(): Record<string, unknown> {
-    const lastLoss = this._steps.length > 0 ? this._steps[this._steps.length - 1].loss : null;
+  currentLoss(): number {
+    return this._iterations.length > 0 ? this._iterations[this._iterations.length - 1].loss : Infinity;
+  }
+
+  isConverged(): boolean {
+    return this._report ? this._report.converged : false;
+  }
+
+  averageGradientNorm(): number {
+    if (this._iterations.length === 0) return 0;
+    return this._iterations.reduce((acc, i) => acc + i.gradientNorm, 0) / this._iterations.length;
+  }
+
+  computeLossCurvature(): number {
+    if (this._lossLandscape.length < 3) return 0;
+    const secondDerivatives: number[] = [];
+    for (let i = 1; i < this._lossLandscape.length - 1; i++) {
+      secondDerivatives.push(this._lossLandscape[i + 1] - 2 * this._lossLandscape[i] + this._lossLandscape[i - 1]);
+    }
+    return secondDerivatives.reduce((a, b) => a + b, 0) / secondDerivatives.length;
+  }
+
+  reset(): void {
+    this._iterations = [];
+    this._position = [];
+    this._velocity = [];
+    this._report = null;
+    this._hessianDiagonal = [];
+    this._conditionNumber = 1;
+    this._lossLandscape = [];
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
     return {
-      dreamId: this.dreamId,
-      dimensions: this._position.length,
-      learningRate: this._data.learningRate.toFixed(4),
-      momentum: this._data.momentum.toFixed(3),
-      stepCount: this.stepCount,
-      maxIterations: this._data.maxIterations,
-      converged: this._converged,
-      currentPosition: this._position.map((p) => p.toFixed(4)),
-      lastLoss: lastLoss !== null ? lastLoss.toFixed(6) : null,
+      iterations: this._iterations.length,
+      converged: this.isConverged(),
+      currentLoss: this.currentLoss(),
+      state: this._state,
+      conditionNumber: this._conditionNumber.toFixed(4),
+      lossCurvature: this.computeLossCurvature().toFixed(4),
     };
   }
 }

@@ -1,74 +1,110 @@
-/**
- * 否定之道模块：通过说"不是"来逼近真相。
- * 不直接描述对象，而是否定它不是什么，逐步收敛到不可言说的本质。
- */
+export interface ApophaticNegation {
+  id: string;
+  attribute: string;
+  negatedAt: number;
+  depth: number;
+}
 
-export interface ApophaticWayData {
-  negations: string[];
-  candidates: string[];
-  residue: string | null;
+export interface ApophaticTrace {
+  path: string[];
+  remainingAttributes: number;
+  convergence: number;
 }
 
 export class ApophaticWay {
-  private _negations: string[];
-  private _candidates: string[];
-  private _residue: string | null;
+  private _negations: Map<string, ApophaticNegation> = new Map();
+  private _trace: string[] = [];
+  private _maxDepth: number;
+  private _convergenceRate: number;
+  private _entropyField: number[];
 
-  constructor(candidates: string[] = []) {
-    this._negations = [];
-    this._candidates = candidates;
-    this._residue = null;
+  constructor(maxDepth: number = 100) {
+    this._maxDepth = maxDepth;
+    this._convergenceRate = 1.0;
+    this._entropyField = [];
   }
 
-  get negationCount(): number {
-    return this._negations.length;
+  get remainingAttributes(): number {
+    return this._maxDepth - this._negations.size;
   }
 
-  get candidateCount(): number {
-    return this._candidates.length;
+  get depth(): number {
+    return this._negations.size;
   }
 
-  public negate(property: string): void {
-    if (!this._negations.includes(property)) {
-      this._negations.push(property);
-    }
+  public negate(attribute: string): ApophaticNegation {
+    const id = `neg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const negation: ApophaticNegation = {
+      id,
+      attribute,
+      negatedAt: Date.now(),
+      depth: this._negations.size + 1,
+    };
+    this._negations.set(id, negation);
+    this._trace.push(attribute);
+    this._convergenceRate = Math.max(0, this._convergenceRate - 1 / this._maxDepth);
+    this._entropyField.push(this._computeNegationEntropy());
+    if (this._entropyField.length > 50) this._entropyField.shift();
+    return negation;
   }
 
-  public eliminate(candidate: string): void {
-    this._candidates = this._candidates.filter((c) => c !== candidate);
+  public trace(): ApophaticTrace {
+    return {
+      path: [...this._trace],
+      remainingAttributes: this.remainingAttributes,
+      convergence: this._convergenceRate,
+    };
   }
 
-  public converge(): string | null {
-    if (this._candidates.length === 1) {
-      this._residue = this._candidates[0];
-      return this._residue;
-    }
-    if (this._candidates.length === 0) {
-      this._residue = 'ineffable';
-      return this._residue;
-    }
+  public whatRemains(): string | null {
+    if (this._convergenceRate <= 0) return '不可言说之物';
     return null;
   }
 
-  public addCandidate(c: string): void {
-    if (!this._candidates.includes(c)) this._candidates.push(c);
-  }
-
-  public residueValue(): string | null {
-    return this._residue;
-  }
-
   public reset(): void {
-    this._negations = [];
-    this._candidates = [];
-    this._residue = null;
+    this._negations.clear();
+    this._trace = [];
+    this._convergenceRate = 1.0;
+    this._entropyField = [];
   }
 
-  public report(): ApophaticWayData {
-    return {
-      negations: [...this._negations],
-      candidates: [...this._candidates],
-      residue: this._residue,
-    };
+  public getNegation(id: string): ApophaticNegation | null {
+    return this._negations.get(id) ?? null;
+  }
+
+  public computeNegationEntropy(): number {
+    if (this._entropyField.length === 0) return 0;
+    const mean = this._entropyField.reduce((a, b) => a + b, 0) / this._entropyField.length;
+    const variance = this._entropyField.reduce((s, v) => s + (v - mean) ** 2, 0) / this._entropyField.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
+  }
+
+  public computeConvergenceTrajectory(): number[] {
+    const trajectory: number[] = [];
+    let rate = 1.0;
+    for (let i = 0; i < this._maxDepth; i++) {
+      rate = Math.max(0, rate - 1 / this._maxDepth);
+      trajectory.push(rate);
+    }
+    return trajectory;
+  }
+
+  public estimateRemnantDimension(): number {
+    const negated = this._negations.size;
+    return Math.max(0, 1 - negated / this._maxDepth);
+  }
+
+  private _computeNegationEntropy(): number {
+    const attrs = Array.from(this._negations.values()).map(n => n.attribute);
+    const freq = new Map<string, number>();
+    for (const attr of attrs) {
+      freq.set(attr, (freq.get(attr) ?? 0) + 1);
+    }
+    let entropy = 0;
+    for (const count of freq.values()) {
+      const p = count / attrs.length;
+      entropy -= p * Math.log2(p);
+    }
+    return entropy;
   }
 }

@@ -1,144 +1,194 @@
-/**
- * 未解决的承诺模块：未 resolve 的 Promise 永远等待，
- * 占用内存与回调资源，像幽灵般盘踞在事件循环中。
- */
+export type PromisePhase = 'pending' | 'resolved' | 'rejected' | 'forgotten';
 
-export type PromiseState = 'pending' | 'fulfilled' | 'rejected' | 'haunting' | 'released';
-
-export interface UnresolvedPromise {
+export interface PromiseRecord {
   id: string;
-  label: string;
+  phase: PromisePhase;
   createdAt: number;
-  state: PromiseState;
-  awaitingCallbacks: number;
-  memoryOccupied: number;
+  settledAt: number | null;
+  age: number;
+  dependencyCount: number;
 }
 
-export interface ReleaseReport {
-  promiseId: string;
-  freedCallbacks: number;
-  freedMemory: number;
-  releasedAt: number;
+export interface PromiseDependency {
+  from: string;
+  to: string;
+  type: 'then' | 'catch' | 'finally';
 }
 
 export class UnresolvedPromise {
-  private _promises: Map<string, UnresolvedPromise> = new Map();
-  private _releases: ReleaseReport[] = [];
-  private _hauntingThresholdMs = 10000;
-  private _memoryPerCallback = 1024;
-  private _maxPromises = 500;
+  private _promises: Map<string, PromiseRecord> = new Map();
+  private _dependencies: PromiseDependency[] = [];
+  private _history: PromiseRecord[] = [];
+  private _state: Record<string, unknown> = {};
+  private _ageDistribution: number[] = [];
+  private _resolutionProbability: number = 0;
+  private _forgottenThreshold: number = 10000;
 
-  create(id: string, label: string, callbackCount: number): UnresolvedPromise {
-    if (this._promises.size >= this._maxPromises) {
-      const oldest = Array.from(this._promises.values()).sort((a, b) => a.createdAt - b.createdAt)[0];
-      if (oldest) this._promises.delete(oldest.id);
-    }
-    const promise: UnresolvedPromise = {
+  create(id: string): PromiseRecord {
+    const record: PromiseRecord = {
       id,
-      label,
+      phase: 'pending',
       createdAt: Date.now(),
-      state: 'pending',
-      awaitingCallbacks: callbackCount,
-      memoryOccupied: callbackCount * this._memoryPerCallback,
+      settledAt: null,
+      age: 0,
+      dependencyCount: 0,
     };
-    this._promises.set(id, promise);
-    return promise;
+    this._promises.set(id, record);
+    this._history.push(record);
+    if (this._history.length > 200) this._history.shift();
+    this._updateResolutionProbability();
+    return record;
   }
 
-  attachCallback(promiseId: string, count: number = 1): boolean {
-    const promise = this._promises.get(promiseId);
-    if (!promise || promise.state !== 'pending') return false;
-    promise.awaitingCallbacks += count;
-    promise.memoryOccupied += count * this._memoryPerCallback;
+  resolve(id: string): boolean {
+    const record = this._promises.get(id);
+    if (!record || record.phase !== 'pending') return false;
+    record.phase = 'resolved';
+    record.settledAt = Date.now();
+    this._updateResolutionProbability();
     return true;
   }
 
-  resolve(promiseId: string, _value?: unknown): boolean {
-    const promise = this._promises.get(promiseId);
-    if (!promise || promise.state !== 'pending') return false;
-    promise.state = 'fulfilled';
-    promise.awaitingCallbacks = 0;
-    promise.memoryOccupied = 0;
+  reject(id: string): boolean {
+    const record = this._promises.get(id);
+    if (!record || record.phase !== 'pending') return false;
+    record.phase = 'rejected';
+    record.settledAt = Date.now();
+    this._updateResolutionProbability();
     return true;
   }
 
-  reject(promiseId: string, _reason?: unknown): boolean {
-    const promise = this._promises.get(promiseId);
-    if (!promise || promise.state !== 'pending') return false;
-    promise.state = 'rejected';
-    promise.awaitingCallbacks = 0;
-    promise.memoryOccupied = 0;
-    return true;
+  addDependency(from: string, to: string, type: 'then' | 'catch' | 'finally'): void {
+    this._dependencies.push({ from, to, type });
+    const record = this._promises.get(from);
+    if (record) record.dependencyCount++;
   }
 
-  scanForHaunting(): number {
-    const now = Date.now();
-    let haunted = 0;
-    for (const promise of this._promises.values()) {
-      if (promise.state === 'pending') {
-        const elapsed = now - promise.createdAt;
-        if (elapsed > this._hauntingThresholdMs) {
-          promise.state = 'haunting';
-          haunted++;
+  agePromises(dt: number = 1): void {
+    for (const record of this._promises.values()) {
+      if (record.phase === 'pending') {
+        record.age += dt;
+        if (record.age > this._forgottenThreshold) {
+          record.phase = 'forgotten';
         }
       }
     }
-    return haunted;
+    this._ageDistribution = Array.from(this._promises.values()).map(p => p.age);
+    this._updateResolutionProbability();
   }
 
-  release(promiseId: string): ReleaseReport | null {
-    const promise = this._promises.get(promiseId);
-    if (!promise) return null;
-    const freedCallbacks = promise.awaitingCallbacks;
-    const freedMemory = promise.memoryOccupied;
-    promise.state = 'released';
-    promise.awaitingCallbacks = 0;
-    promise.memoryOccupied = 0;
-    const report: ReleaseReport = {
-      promiseId,
-      freedCallbacks,
-      freedMemory,
-      releasedAt: Date.now(),
-    };
-    this._releases.push(report);
-    if (this._releases.length > 200) this._releases.shift();
-    return report;
+  private _updateResolutionProbability(): void {
+    const settled = Array.from(this._promises.values()).filter(p => p.phase === 'resolved' || p.phase === 'rejected').length;
+    const total = this._promises.size;
+    this._resolutionProbability = total > 0 ? settled / total : 0;
   }
 
-  releaseAllHaunting(): ReleaseReport[] {
-    const reports: ReleaseReport[] = [];
-    for (const promise of this._promises.values()) {
-      if (promise.state === 'haunting') {
-        const report = this.release(promise.id);
-        if (report) reports.push(report);
+  getPromise(id: string): PromiseRecord | null {
+    return this._promises.get(id) ?? null;
+  }
+
+  listByPhase(phase: PromisePhase): PromiseRecord[] {
+    return Array.from(this._promises.values()).filter(p => p.phase === phase);
+  }
+
+  getDependencyGraph(): Record<string, string[]> {
+    const graph: Record<string, string[]> = {};
+    for (const dep of this._dependencies) {
+      graph[dep.from] = graph[dep.from] ?? [];
+      graph[dep.from].push(dep.to);
+    }
+    return graph;
+  }
+
+  topologicalOrder(): string[] {
+    const inDegree = new Map<string, number>();
+    const adj = new Map<string, string[]>();
+    for (const dep of this._dependencies) {
+      inDegree.set(dep.to, (inDegree.get(dep.to) ?? 0) + 1);
+      const list = adj.get(dep.from) ?? [];
+      list.push(dep.to);
+      adj.set(dep.from, list);
+    }
+    const queue: string[] = [];
+    for (const id of this._promises.keys()) {
+      if ((inDegree.get(id) ?? 0) === 0) queue.push(id);
+    }
+    const result: string[] = [];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      result.push(current);
+      for (const neighbor of adj.get(current) ?? []) {
+        const newDegree = (inDegree.get(neighbor) ?? 0) - 1;
+        inDegree.set(neighbor, newDegree);
+        if (newDegree === 0) queue.push(neighbor);
       }
     }
-    return reports;
+    return result;
   }
 
-  computeTotalMemoryOccupied(): number {
-    let total = 0;
-    for (const promise of this._promises.values()) total += promise.memoryOccupied;
-    return total;
+  averageAge(): number {
+    if (this._promises.size === 0) return 0;
+    return Array.from(this._promises.values()).reduce((s, p) => s + p.age, 0) / this._promises.size;
   }
 
-  setHauntingThreshold(ms: number): void {
-    this._hauntingThresholdMs = Math.max(100, ms);
+  maxAge(): number {
+    if (this._promises.size === 0) return 0;
+    return Math.max(...Array.from(this._promises.values()).map(p => p.age));
   }
 
-  getHauntingPromises(): UnresolvedPromise[] {
-    return Array.from(this._promises.values()).filter(p => p.state === 'haunting');
+  ageEntropy(): number {
+    if (this._ageDistribution.length === 0) return 0;
+    const bins = 5;
+    const maxAge = Math.max(...this._ageDistribution, 1);
+    const counts = new Array(bins).fill(0);
+    for (const age of this._ageDistribution) {
+      const idx = Math.min(bins - 1, Math.floor((age / maxAge) * bins));
+      counts[idx]++;
+    }
+    const total = this._ageDistribution.length;
+    let entropy = 0;
+    for (const c of counts) {
+      if (c > 0) {
+        const p = c / total;
+        entropy -= p * Math.log2(p);
+      }
+    }
+    return entropy;
   }
 
-  getReleaseHistory(limit: number = 50): ReleaseReport[] {
-    return this._releases.slice(-limit);
+  forgetOld(threshold: number): number {
+    let forgotten = 0;
+    for (const record of this._promises.values()) {
+      if (record.phase === 'pending' && record.age > threshold) {
+        record.phase = 'forgotten';
+        forgotten++;
+      }
+    }
+    this._updateResolutionProbability();
+    return forgotten;
   }
 
-  get promiseCount(): number {
-    return this._promises.size;
+  get resolutionProbability(): number {
+    return this._resolutionProbability;
   }
 
-  get hauntingCount(): number {
-    return this.getHauntingPromises().length;
+  get pendingCount(): number {
+    return this.listByPhase('pending').length;
+  }
+
+  promiseReport(): Record<string, unknown> {
+    return {
+      totalPromises: this._promises.size,
+      pendingCount: this.pendingCount,
+      resolvedCount: this.listByPhase('resolved').length,
+      rejectedCount: this.listByPhase('rejected').length,
+      forgottenCount: this.listByPhase('forgotten').length,
+      resolutionProbability: this._resolutionProbability.toFixed(4),
+      averageAge: this.averageAge().toFixed(2),
+      maxAge: this.maxAge(),
+      ageEntropy: this.ageEntropy().toFixed(4),
+      dependencyCount: this._dependencies.length,
+      state: this._state,
+    };
   }
 }

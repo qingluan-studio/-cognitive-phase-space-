@@ -1,8 +1,3 @@
-/**
- * 掩星模块：一个天体被另一个天体遮掩的天文现象。
- * 用于刻画系统中对象被另一对象临时遮蔽的检测与跟踪。
- */
-
 export interface OccultationEvent {
   id: number;
   occulted: string;
@@ -29,6 +24,8 @@ export class Occultation {
   private _nextId: number = 0;
   private _track: OccultationTrack | null = null;
   private _state: Record<string, unknown> = {};
+  private _besselElements: Map<number, number[]> = new Map();
+  private _lightCurve: { time: number; flux: number }[] = [];
 
   constructor(config: OccultationConfig) {
     this._config = config;
@@ -40,6 +37,8 @@ export class Occultation {
 
   detect(occulted: string, occulting: string, duration: number, magnitude: number): OccultationEvent | null {
     if (magnitude < this._config.detectionThreshold) return null;
+    const geometricDepth = Math.min(1, magnitude / 10);
+    const fluxDrop = 1 - Math.pow(1 - geometricDepth, 2);
     const event: OccultationEvent = {
       id: this._nextId++,
       occulted,
@@ -52,6 +51,9 @@ export class Occultation {
     if (this._events.length > this._config.maxEvents) {
       this._events.shift();
     }
+    this._lightCurve.push({ time: event.startTime, flux: 1 - fluxDrop });
+    if (this._lightCurve.length > 100) this._lightCurve.shift();
+    this._besselElements.set(event.id, [duration, magnitude, geometricDepth]);
     this._state.lastDetection = event.id;
     return event;
   }
@@ -94,6 +96,8 @@ export class Occultation {
 
   reset(): void {
     this._events = [];
+    this._lightCurve = [];
+    this._besselElements.clear();
     this._state.resetAt = Date.now();
   }
 
@@ -103,5 +107,34 @@ export class Occultation {
       track: this._track,
       state: this._state,
     };
+  }
+
+  computeBesselianElements(eventId: number): number[] | null {
+    return this._besselElements.get(eventId) ?? null;
+  }
+
+  fitLightCurve(): { ingress: number; egress: number; depth: number } | null {
+    if (this._lightCurve.length < 3) return null;
+    const baseline = 1;
+    let ingress = 0;
+    let egress = 0;
+    let minFlux = baseline;
+    for (const point of this._lightCurve) {
+      if (point.flux < minFlux) minFlux = point.flux;
+    }
+    const depth = baseline - minFlux;
+    const halfDepth = baseline - depth / 2;
+    for (let i = 0; i < this._lightCurve.length; i++) {
+      if (this._lightCurve[i].flux <= halfDepth && ingress === 0) ingress = this._lightCurve[i].time;
+      if (this._lightCurve[i].flux <= halfDepth) egress = this._lightCurve[i].time;
+    }
+    return { ingress, egress, depth };
+  }
+
+  computeDutyCycle(): number {
+    const totalDuration = this._events.reduce((a, e) => a + e.duration, 0);
+    if (this._events.length === 0) return 0;
+    const span = Date.now() - Math.min(...this._events.map(e => e.startTime));
+    return span > 0 ? totalDuration / span : 0;
   }
 }

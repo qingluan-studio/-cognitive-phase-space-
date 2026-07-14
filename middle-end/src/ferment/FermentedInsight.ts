@@ -1,114 +1,215 @@
-/**
- * 发酵洞见：经过时间发酵的粗糙思想变为成熟洞察。
- * 粗糙的原始思想在时间作用下发酵，逐渐转化为成熟、连贯的洞察。
- */
-
-export type InsightMaturity = 'raw' | 'fermenting' | 'clarifying' | 'mature' | 'crystallized';
-
-export interface RawThought {
+export interface InsightNode {
   id: string;
   content: string;
-  maturity: InsightMaturity;
-  roughness: number;
-  coherence: number;
-  createdAt: number;
-  lastFermented: number;
-  transformations: string[];
+  concentration: number;
+  connections: string[];
 }
 
-export interface MaturedInsight {
-  thoughtId: string;
-  insight: string;
-  maturity: InsightMaturity;
-  coherence: number;
-  maturedAt: number;
+export interface InsightPattern {
+  nodes: string[];
+  averageConcentration: number;
+  patternType: 'stripe' | 'spot' | 'labyrinth';
 }
 
 export class FermentedInsight {
-  private _thoughts: Map<string, RawThought> = new Map();
-  private _insights: MaturedInsight[] = [];
-  private _fermentationTime = 1000;
-  private _coherenceGain = 0.1;
-  private _roughnessLoss = 0.15;
+  private _nodes: Map<string, InsightNode> = new Map();
+  private _patterns: InsightPattern[] = [];
+  private _diffusionRate: number = 0.1;
+  private _reactionRate: number = 0.5;
+  private _grid: number[][] = [];
+  private _gridSize: number = 30;
+  private _patternEntropy: number = 0;
+  private _state: Record<string, unknown> = {};
 
-  deposit(content: string): RawThought {
-    const thought: RawThought = {
-      id: `thought-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      content,
-      maturity: 'raw',
-      roughness: 1.0,
-      coherence: 0.1,
-      createdAt: Date.now(),
-      lastFermented: Date.now(),
-      transformations: [],
-    };
-    this._thoughts.set(thought.id, thought);
-    return thought;
+  constructor() {
+    this._initGrid();
+    this._state.initializedAt = Date.now();
   }
 
-  ferment(thoughtId: string, cycles: number = 1): RawThought | null {
-    const thought = this._thoughts.get(thoughtId);
-    if (!thought || thought.maturity === 'crystallized') return null;
-    const now = Date.now();
-    if (now - thought.lastFermented < this._fermentationTime) return thought;
+  get nodeCount(): number {
+    return this._nodes.size;
+  }
 
-    for (let i = 0; i < cycles; i++) {
-      thought.roughness = Math.max(0, thought.roughness - this._roughnessLoss);
-      thought.coherence = Math.min(1, thought.coherence + this._coherenceGain);
-      thought.maturity = this._advanceMaturity(thought);
-      thought.transformations.push(`cycle:${i} roughness:${thought.roughness.toFixed(2)}`);
+  get patternEntropy(): number {
+    return this._patternEntropy;
+  }
+
+  private _initGrid(): void {
+    this._grid = [];
+    for (let i = 0; i < this._gridSize; i++) {
+      this._grid[i] = [];
+      for (let j = 0; j < this._gridSize; j++) {
+        this._grid[i][j] = Math.random() * 0.1;
+      }
     }
-    thought.lastFermented = now;
-    return thought;
   }
 
-  private _advanceMaturity(thought: RawThought): InsightMaturity {
-    if (thought.coherence >= 0.95 && thought.roughness <= 0.05) return 'crystallized';
-    if (thought.coherence >= 0.8) return 'mature';
-    if (thought.coherence >= 0.5) return 'clarifying';
-    if (thought.coherence > 0.1) return 'fermenting';
-    return 'raw';
-  }
-
-  crystallize(thoughtId: string): MaturedInsight | null {
-    const thought = this._thoughts.get(thoughtId);
-    if (!thought || thought.maturity !== 'mature' && thought.maturity !== 'crystallized') return null;
-    thought.maturity = 'crystallized';
-    const insight: MaturedInsight = {
-      thoughtId,
-      insight: this._distill(thought),
-      maturity: 'crystallized',
-      coherence: thought.coherence,
-      maturedAt: Date.now(),
+  addNode(id: string, content: string, initialConcentration: number): InsightNode {
+    const node: InsightNode = {
+      id,
+      content,
+      concentration: initialConcentration,
+      connections: [],
     };
-    this._insights.push(insight);
-    if (this._insights.length > 100) this._insights.shift();
-    return insight;
+    this._nodes.set(id, node);
+    const i = Math.floor(Math.random() * this._gridSize);
+    const j = Math.floor(Math.random() * this._gridSize);
+    this._grid[i][j] = initialConcentration;
+    return node;
   }
 
-  private _distill(thought: RawThought): string {
-    const words = thought.content.split(' ');
-    const key = words.filter(w => w.length > 4).slice(0, 3).join(' ');
-    return `Insight: ${key} (coherence ${thought.coherence.toFixed(2)})`;
+  connect(fromId: string, toId: string): boolean {
+    const from = this._nodes.get(fromId);
+    const to = this._nodes.get(toId);
+    if (!from || !to) return false;
+    from.connections.push(toId);
+    to.connections.push(fromId);
+    return true;
   }
 
-  setFermentationTime(ms: number): void {
-    this._fermentationTime = Math.max(0, ms);
+  diffuse(steps: number): void {
+    for (let s = 0; s < steps; s++) {
+      const newGrid = this._grid.map(row => [...row]);
+      for (let i = 0; i < this._gridSize; i++) {
+        for (let j = 0; j < this._gridSize; j++) {
+          const laplacian =
+            this._get(i - 1, j) + this._get(i + 1, j) + this._get(i, j - 1) + this._get(i, j + 1) - 4 * this._grid[i][j];
+          const reaction = this._reactionRate * this._grid[i][j] * (1 - this._grid[i][j]);
+          newGrid[i][j] = this._grid[i][j] + this._diffusionRate * laplacian + reaction * 0.01;
+          newGrid[i][j] = Math.max(0, Math.min(1, newGrid[i][j]));
+        }
+      }
+      this._grid = newGrid;
+    }
+    this._updatePatternEntropy();
+    this._classifyPatterns();
   }
 
-  getMatureInsights(): MaturedInsight[] {
-    return [...this._insights];
+  private _get(i: number, j: number): number {
+    const ii = (i + this._gridSize) % this._gridSize;
+    const jj = (j + this._gridSize) % this._gridSize;
+    return this._grid[ii][jj];
   }
 
-  getThoughts(): RawThought[] {
-    return Array.from(this._thoughts.values());
+  private _updatePatternEntropy(): void {
+    const bins = 8;
+    const counts = new Array(bins).fill(0);
+    for (let i = 0; i < this._gridSize; i++) {
+      for (let j = 0; j < this._gridSize; j++) {
+        const idx = Math.min(bins - 1, Math.floor(this._grid[i][j] * bins));
+        counts[idx]++;
+      }
+    }
+    const total = this._gridSize * this._gridSize;
+    let entropy = 0;
+    for (const c of counts) {
+      if (c > 0) {
+        const p = c / total;
+        entropy -= p * Math.log2(p);
+      }
+    }
+    this._patternEntropy = entropy;
   }
 
-  get thoughtCount(): number {
-    return this._thoughts.size;
+  private _classifyPatterns(): void {
+    this._patterns = [];
+    const stripes = this._detectStripes();
+    const spots = this._detectSpots();
+    this._patterns.push(...stripes, ...spots);
   }
 
-  get insightCount(): number {
-    return this._insights.length;
+  private _detectStripes(): InsightPattern[] {
+    const nodes = Array.from(this._nodes.keys()).slice(0, 5);
+    return [{
+      nodes,
+      averageConcentration: nodes.reduce((s, id) => s + (this._nodes.get(id)?.concentration ?? 0), 0) / nodes.length,
+      patternType: 'stripe',
+    }];
+  }
+
+  private _detectSpots(): InsightPattern[] {
+    const nodes = Array.from(this._nodes.keys()).slice(0, 3);
+    return [{
+      nodes,
+      averageConcentration: nodes.reduce((s, id) => s + (this._nodes.get(id)?.concentration ?? 0), 0) / nodes.length,
+      patternType: 'spot',
+    }];
+  }
+
+  concentrationAt(x: number, y: number): number {
+    const i = Math.floor(x) % this._gridSize;
+    const j = Math.floor(y) % this._gridSize;
+    return this._grid[i][j];
+  }
+
+  strongestNode(): InsightNode | null {
+    let strongest: InsightNode | null = null;
+    for (const n of this._nodes.values()) {
+      if (!strongest || n.concentration > strongest.concentration) strongest = n;
+    }
+    return strongest;
+  }
+
+  averageConcentration(): number {
+    if (this._nodes.size === 0) return 0;
+    let sum = 0;
+    for (const n of this._nodes.values()) sum += n.concentration;
+    return sum / this._nodes.size;
+  }
+
+  setDiffusionRate(rate: number): void {
+    this._diffusionRate = Math.max(0, Math.min(1, rate));
+  }
+
+  setReactionRate(rate: number): void {
+    this._reactionRate = Math.max(0, Math.min(10, rate));
+  }
+
+  getPatterns(): InsightPattern[] {
+    return [...this._patterns];
+  }
+
+  connectedComponents(): string[][] {
+    const visited = new Set<string>();
+    const components: string[][] = [];
+    for (const [id, node] of this._nodes) {
+      if (visited.has(id)) continue;
+      const component: string[] = [];
+      const queue = [node];
+      visited.add(id);
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        component.push(current.id);
+        for (const neighborId of current.connections) {
+          if (!visited.has(neighborId)) {
+            visited.add(neighborId);
+            const neighbor = this._nodes.get(neighborId);
+            if (neighbor) queue.push(neighbor);
+          }
+        }
+      }
+      components.push(component);
+    }
+    return components;
+  }
+
+  clear(): void {
+    this._nodes.clear();
+    this._patterns = [];
+    this._initGrid();
+    this._patternEntropy = 0;
+  }
+
+  insightReport(): Record<string, unknown> {
+    return {
+      nodeCount: this._nodes.size,
+      patternCount: this._patterns.length,
+      patternEntropy: this._patternEntropy.toFixed(4),
+      averageConcentration: this.averageConcentration().toFixed(4),
+      diffusionRate: this._diffusionRate.toFixed(3),
+      reactionRate: this._reactionRate.toFixed(3),
+      connectedComponents: this.connectedComponents().length,
+      state: this._state,
+    };
   }
 }

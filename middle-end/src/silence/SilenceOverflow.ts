@@ -1,73 +1,113 @@
-/**
- * 沉默溢出模块：过度的沉默反而震耳欲聋。
- * 沉默累积超过承载极限后会反向爆发，把积压的压力一次性释放。
- */
-
-export interface SilenceOverflowData {
-  accumulated: number;
-  capacity: number;
-  overflowCount: number;
-  deafening: boolean;
+export interface OverflowThreshold {
+  id: string;
+  limit: number;
+  current: number;
+  breached: boolean;
 }
 
 export class SilenceOverflow {
-  private _accumulated: number;
-  private _capacity: number;
-  private _overflowCount: number;
-  private _deafening: boolean;
+  private _thresholds: Map<string, OverflowThreshold> = new Map();
+  private _overflowHistory: Array<{ id: string; amount: number; timestamp: number }> = [];
+  private _totalOverflow: number;
+  private _entropyLog: number[];
+  private _cascadeProbability: number;
 
-  constructor(capacity: number = 100) {
-    this._accumulated = 0;
-    this._capacity = capacity;
-    this._overflowCount = 0;
-    this._deafening = false;
+  constructor() {
+    this._totalOverflow = 0;
+    this._entropyLog = [];
+    this._cascadeProbability = 0;
   }
 
-  get accumulated(): number {
-    return this._accumulated;
+  get totalOverflow(): number {
+    return this._totalOverflow;
   }
 
-  get deafening(): boolean {
-    return this._deafening;
+  get cascadeProbability(): number {
+    return this._cascadeProbability;
   }
 
-  public accumulate(amount: number): void {
-    this._accumulated += amount;
-    if (this._accumulated >= this._capacity) {
-      this._erupt();
+  public registerThreshold(id: string, limit: number): void {
+    this._thresholds.set(id, { id, limit, current: 0, breached: false });
+  }
+
+  public accumulate(id: string, amount: number): OverflowThreshold | null {
+    const threshold = this._thresholds.get(id);
+    if (!threshold) return null;
+    threshold.current += amount;
+    if (threshold.current > threshold.limit) {
+      threshold.breached = true;
+      const overflow = threshold.current - threshold.limit;
+      this._totalOverflow += overflow;
+      this._overflowHistory.push({ id, amount: overflow, timestamp: Date.now() });
+      if (this._overflowHistory.length > 50) this._overflowHistory.shift();
+      this._updateEntropy();
+      this._updateCascadeProbability();
     }
+    return threshold;
   }
 
-  public absorb(amount: number): void {
-    this._accumulated = Math.max(0, this._accumulated - amount);
-    if (this._accumulated < this._capacity * 0.5) this._deafening = false;
+  public drain(id: string, amount: number): void {
+    const threshold = this._thresholds.get(id);
+    if (!threshold) return;
+    threshold.current = Math.max(0, threshold.current - amount);
+    threshold.breached = threshold.current > threshold.limit;
   }
 
-  private _erupt(): void {
-    this._overflowCount += 1;
-    this._deafening = true;
-    this._accumulated = Math.floor(this._capacity * 0.3);
+  public reset(id: string): void {
+    const threshold = this._thresholds.get(id);
+    if (!threshold) return;
+    threshold.current = 0;
+    threshold.breached = false;
   }
 
-  public expand(extra: number): void {
-    this._capacity += extra;
+  public getThreshold(id: string): OverflowThreshold | null {
+    return this._thresholds.get(id) ?? null;
   }
 
-  public measure(): number {
-    return this._deafening ? this._accumulated * 10 : this._accumulated;
+  public getBreached(): OverflowThreshold[] {
+    return Array.from(this._thresholds.values()).filter(t => t.breached);
   }
 
-  public reset(): void {
-    this._accumulated = 0;
-    this._deafening = false;
+  public computeOverflowEntropy(): number {
+    if (this._entropyLog.length === 0) return 0;
+    const mean = this._entropyLog.reduce((a, b) => a + b, 0) / this._entropyLog.length;
+    const variance = this._entropyLog.reduce((s, v) => s + (v - mean) ** 2, 0) / this._entropyLog.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
   }
 
-  public report(): SilenceOverflowData {
-    return {
-      accumulated: this._accumulated,
-      capacity: this._capacity,
-      overflowCount: this._overflowCount,
-      deafening: this._deafening,
-    };
+  public simulatePercolation(): Array<{ threshold: string; probability: number }> {
+    const results: Array<{ threshold: string; probability: number }> = [];
+    for (const [id, t] of this._thresholds) {
+      const p = t.limit > 0 ? t.current / t.limit : 0;
+      results.push({ threshold: id, probability: p > 0.592746 ? 1 : 0 });
+    }
+    return results;
+  }
+
+  public computeCriticalExponent(): number {
+    const breached = this.getBreached().length;
+    const total = this._thresholds.size;
+    if (total === 0) return 0;
+    const p = breached / total;
+    return p > 0 ? Math.log(p) / Math.log(Math.abs(p - 0.592746) + 1e-10) : 0;
+  }
+
+  private _updateEntropy(): void {
+    const amounts = this._overflowHistory.map(h => h.amount);
+    const total = amounts.reduce((a, b) => a + b, 0);
+    if (total === 0) return;
+    let entropy = 0;
+    for (const a of amounts) {
+      const p = a / total;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    this._entropyLog.push(entropy);
+    if (this._entropyLog.length > 50) this._entropyLog.shift();
+  }
+
+  private _updateCascadeProbability(): void {
+    const breached = this.getBreached().length;
+    const total = this._thresholds.size;
+    this._cascadeProbability = total > 0 ? 1 - Math.exp(-breached / total) : 0;
   }
 }

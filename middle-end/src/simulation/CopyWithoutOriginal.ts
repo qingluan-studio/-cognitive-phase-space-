@@ -1,88 +1,155 @@
-/**
- * 无原件的复制：拟像本身成为原件。
- * 复制品脱离原件独立存在，并反过来定义新的"原件"标准。
- */
-
-export interface CopyRecord {
+export interface SimulacrumCopy {
   id: string;
-  sourceId: string | null;
-  promotedToOriginal: boolean;
-  createdAt: number;
-  content: Record<string, unknown>;
+  generation: number;
+  fidelity: number;
+  mutations: number;
+}
+
+export type CopyLineage = {
+  rootId: string;
+  depth: number;
+  divergence: number;
+};
+
+export interface CopyConfig {
+  mutationRate: number;
+  maxGenerations: number;
+  fidelityThreshold: number;
 }
 
 export class CopyWithoutOriginal {
-  private _copies: Map<string, CopyRecord> = new Map();
-  private _originals: Set<string> = new Set();
-  private _promotionLog: string[] = [];
+  private _config: CopyConfig;
+  private _copies: SimulacrumCopy[] = [];
+  private _lineages: CopyLineage[] = [];
+  private _state: Record<string, unknown> = {};
+  private _hammingDistances: number[] = [];
+  private _phylogeneticTree: Map<string, string[]> = new Map();
+  private _informationEntropy: number = 0;
 
-  addCopy(id: string, sourceId: string | null, content: Record<string, unknown>): CopyRecord {
-    const record: CopyRecord = {
-      id,
-      sourceId,
-      promotedToOriginal: false,
-      createdAt: Date.now(),
-      content,
-    };
-    this._copies.set(id, record);
-    return record;
-  }
-
-  promoteToOriginal(id: string): CopyRecord | null {
-    const record = this._copies.get(id);
-    if (!record) return null;
-    record.promotedToOriginal = true;
-    record.sourceId = null;
-    this._originals.add(id);
-    this._promotionLog.push(`${id} promoted at ${Date.now()}`);
-    return record;
-  }
-
-  deriveOriginal(copyId: string, newId: string): CopyRecord | null {
-    const source = this._copies.get(copyId);
-    if (!source || !source.promotedToOriginal) return null;
-    return this.addCopy(newId, copyId, { ...source.content });
-  }
-
-  verifyOriginality(id: string): boolean {
-    return this._originals.has(id);
-  }
-
-  removeCopy(id: string): boolean {
-    if (!this._copies.delete(id)) return false;
-    this._originals.delete(id);
-    return true;
-  }
-
-  countDerivatives(originalId: string): number {
-    let count = 0;
-    for (const copy of this._copies.values()) {
-      if (copy.sourceId === originalId) count++;
-    }
-    return count;
-  }
-
-  listSelfMadeOriginals(): CopyRecord[] {
-    return Array.from(this._originals).map(id => this._copies.get(id)).filter((r): r is CopyRecord => !!r);
-  }
-
-  getPromotionLog(limit: number = 50): string[] {
-    return this._promotionLog.slice(-limit);
-  }
-
-  getCopy(id: string): CopyRecord | null {
-    return this._copies.get(id) ?? null;
-  }
-
-  getAllCopies(): CopyRecord[] {
-    return Array.from(this._copies.values());
+  constructor(config: CopyConfig) {
+    this._config = config;
   }
 
   get copyCount(): number {
-    return this._copies.size;
+    return this._copies.length;
   }
 
-  get originalCount(): number {
-    return this._originals.size;
+  get averageFidelity(): number {
+    if (this._copies.length === 0) return 0;
+    return this._copies.reduce((acc, c) => acc + c.fidelity, 0) / this._copies.length;
+  }
+
+  get informationEntropy(): number {
+    return this._informationEntropy;
+  }
+
+  private _computeHamming(a: SimulacrumCopy, b: SimulacrumCopy): number {
+    return Math.abs(a.generation - b.generation) + Math.abs(a.mutations - b.mutations);
+  }
+
+  private _updatePhylogeny(parentId: string, childId: string): void {
+    if (!this._phylogeneticTree.has(parentId)) {
+      this._phylogeneticTree.set(parentId, []);
+    }
+    this._phylogeneticTree.get(parentId)!.push(childId);
+  }
+
+  private _computeEntropy(): void {
+    const generationCounts: Record<number, number> = {};
+    for (const c of this._copies) {
+      generationCounts[c.generation] = (generationCounts[c.generation] || 0) + 1;
+    }
+    const total = this._copies.length;
+    let entropy = 0;
+    for (const key of Object.keys(generationCounts)) {
+      const p = generationCounts[parseInt(key)] / total;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    this._informationEntropy = entropy;
+  }
+
+  createOriginal(): SimulacrumCopy {
+    const copy: SimulacrumCopy = { id: `gen-0`, generation: 0, fidelity: 1, mutations: 0 };
+    this._copies.push(copy);
+    this._phylogeneticTree.set(copy.id, []);
+    this._computeEntropy();
+    return copy;
+  }
+
+  reproduce(parentId: string): SimulacrumCopy | null {
+    const parent = this._copies.find((c) => c.id === parentId);
+    if (!parent || parent.generation >= this._config.maxGenerations) return null;
+    const mutated = Math.random() < this._config.mutationRate;
+    const fidelity = mutated ? Math.max(0, parent.fidelity - 0.1) : parent.fidelity;
+    const mutations = mutated ? parent.mutations + 1 : parent.mutations;
+    const copy: SimulacrumCopy = {
+      id: `${parentId}-${this._copies.length}`,
+      generation: parent.generation + 1,
+      fidelity,
+      mutations,
+    };
+    this._copies.push(copy);
+    this._updatePhylogeny(parentId, copy.id);
+    if (this._copies.length > 40) this._copies.shift();
+    for (const other of this._copies) {
+      if (other.id !== copy.id) {
+        this._hammingDistances.push(this._computeHamming(copy, other));
+      }
+    }
+    if (this._hammingDistances.length > 100) this._hammingDistances.splice(0, this._hammingDistances.length - 100);
+    this._computeEntropy();
+    return copy;
+  }
+
+  computeLineage(copyId: string): CopyLineage {
+    const copy = this._copies.find((c) => c.id === copyId);
+    if (!copy) return { rootId: '', depth: 0, divergence: 0 };
+    const rootId = copy.id.split('-')[0];
+    const depth = copy.generation;
+    const avgHamming = this._hammingDistances.length > 0
+      ? this._hammingDistances.reduce((a, b) => a + b, 0) / this._hammingDistances.length
+      : 0;
+    const lineage: CopyLineage = { rootId, depth, divergence: avgHamming };
+    this._lineages.push(lineage);
+    if (this._lineages.length > 20) this._lineages.shift();
+    return lineage;
+  }
+
+  hasOriginal(): boolean {
+    return this._copies.some((c) => c.generation === 0 && c.mutations === 0);
+  }
+
+  pureCopies(): SimulacrumCopy[] {
+    return this._copies.filter((c) => c.mutations === 0);
+  }
+
+  averageDivergence(): number {
+    if (this._hammingDistances.length === 0) return 0;
+    return this._hammingDistances.reduce((a, b) => a + b, 0) / this._hammingDistances.length;
+  }
+
+  treeDepth(): number {
+    return this._copies.reduce((max, c) => (c.generation > max ? c.generation : max), 0);
+  }
+
+  reset(): void {
+    this._copies = [];
+    this._lineages = [];
+    this._hammingDistances = [];
+    this._phylogeneticTree.clear();
+    this._informationEntropy = 0;
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      copies: this._copies.length,
+      averageFidelity: this.averageFidelity.toFixed(4),
+      lineages: this._lineages.length,
+      hasOriginal: this.hasOriginal(),
+      state: this._state,
+      informationEntropy: this._informationEntropy.toFixed(4),
+      averageDivergence: this.averageDivergence().toFixed(4),
+    };
   }
 }

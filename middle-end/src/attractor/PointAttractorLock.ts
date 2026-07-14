@@ -1,9 +1,3 @@
-/**
- * PointAttractorLock - 点吸引子锁定
- * 系统状态最终落入单一固定点，所有轨迹无论起点如何
- * 都会收敛到同一个稳定不动点。
- */
-
 export interface PointAttractorLockData {
   readonly lockId: string;
   attractorPoint: number;
@@ -24,6 +18,10 @@ export class PointAttractorLock {
   private _steps: ConvergenceStep[] = [];
   private _locked: boolean = false;
   private _lockThreshold: number = 0.01;
+  private _lyapunovExponent: number = 0;
+  private _basinRadius: number = 10;
+  private _bifurcationHistory: { parameter: number; attractors: number }[] = [];
+  private _entropySeries: number[] = [];
 
   constructor(data: PointAttractorLockData, startPosition: number) {
     this._data = { ...data };
@@ -46,7 +44,12 @@ export class PointAttractorLock {
     return this._locked;
   }
 
+  get lyapunovExponent(): number {
+    return this._lyapunovExponent;
+  }
+
   public step(): ConvergenceStep {
+    const previous = this._currentPosition;
     const distance = this._data.attractorPoint - this._currentPosition;
     const force = distance * this._data.pullStrength;
     const dampedForce = force * this._data.dampingFactor;
@@ -66,7 +69,41 @@ export class PointAttractorLock {
     if (this._steps.length > 100) {
       this._steps.shift();
     }
+    this._updateLyapunov(previous, this._currentPosition);
+    this._updateEntropy();
     return step;
+  }
+
+  private _updateLyapunov(prev: number, curr: number): void {
+    const delta = Math.abs(curr - prev);
+    if (delta > 1e-12) {
+      this._lyapunovExponent = this._lyapunovExponent * 0.98 + Math.log(delta + 1) * 0.02;
+    }
+  }
+
+  private _updateEntropy(): void {
+    if (this._steps.length < 2) return;
+    const recent = this._steps.slice(-20);
+    const positions = recent.map((s) => s.position);
+    const min = Math.min(...positions);
+    const max = Math.max(...positions);
+    const bins = 5;
+    const counts = new Array(bins).fill(0);
+    for (const p of positions) {
+      const idx = Math.min(bins - 1, Math.floor(((p - min) / (max - min + 1e-9)) * bins));
+      counts[idx]++;
+    }
+    let entropy = 0;
+    for (const c of counts) {
+      if (c > 0) {
+        const prob = c / positions.length;
+        entropy -= prob * Math.log2(prob);
+      }
+    }
+    this._entropySeries.push(entropy);
+    if (this._entropySeries.length > 50) {
+      this._entropySeries.shift();
+    }
   }
 
   public converge(maxSteps: number): boolean {
@@ -81,10 +118,23 @@ export class PointAttractorLock {
 
   public setPullStrength(strength: number): void {
     this._data.pullStrength = Math.max(0, Math.min(1, strength));
+    this._recordBifurcation();
   }
 
   public setDamping(damping: number): void {
     this._data.dampingFactor = Math.max(0, Math.min(1, damping));
+    this._recordBifurcation();
+  }
+
+  private _recordBifurcation(): void {
+    const totalForce = this._data.pullStrength * this._data.dampingFactor;
+    let attractors = 1;
+    if (totalForce > 0.8) attractors = 2;
+    if (totalForce > 1.5) attractors = 4;
+    this._bifurcationHistory.push({ parameter: totalForce, attractors });
+    if (this._bifurcationHistory.length > 100) {
+      this._bifurcationHistory.shift();
+    }
   }
 
   public moveAttractor(newPoint: number): void {
@@ -115,6 +165,19 @@ export class PointAttractorLock {
     return false;
   }
 
+  public computeBasinOfAttraction(): number {
+    const testPoints: number[] = [];
+    for (let i = -50; i <= 50; i++) {
+      testPoints.push(this._data.attractorPoint + i * 0.2);
+    }
+    let converged = 0;
+    for (const p of testPoints) {
+      const dist = Math.abs(p - this._data.attractorPoint);
+      if (dist < this._basinRadius) converged++;
+    }
+    return converged / testPoints.length;
+  }
+
   public lockReport(): Record<string, unknown> {
     return {
       lockId: this.lockId,
@@ -125,7 +188,10 @@ export class PointAttractorLock {
       lockThreshold: this._lockThreshold,
       locked: this._locked,
       stepCount: this._steps.length,
+      lyapunovExponent: this._lyapunovExponent.toFixed(4),
       distanceToAttractor: Math.abs(this._data.attractorPoint - this._currentPosition).toFixed(6),
+      basinCoverage: this.computeBasinOfAttraction().toFixed(3),
+      entropySeriesLength: this._entropySeries.length,
     };
   }
 }

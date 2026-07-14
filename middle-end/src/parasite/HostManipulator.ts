@@ -1,9 +1,3 @@
-/**
- * HostManipulator - 宿主操控者
- * 操控宿主行为以满足自身需求，通过修改宿主的决策参数、
- * 感知输入与行为倾向，使宿主做出有利于寄生者的选择。
- */
-
 export interface HostManipulatorRecord {
   readonly manipulatorId: string;
   targetHost: string;
@@ -16,6 +10,7 @@ export interface BehaviorBias {
   behavior: string;
   originalWeight: number;
   biasedWeight: number;
+  payoff: number;
 }
 
 export class HostManipulator {
@@ -24,9 +19,12 @@ export class HostManipulator {
   private _perceptionFilter: Record<string, number> = {};
   private _manipulationLog: string[] = [];
   private _resistanceLevel: number = 0;
+  private _payoffMatrix: number[][] = [];
+  private _nashEquilibrium: number[] = [];
 
   constructor(record: HostManipulatorRecord) {
     this._record = { ...record };
+    this._initPayoffMatrix();
   }
 
   get manipulatorId(): string {
@@ -45,20 +43,39 @@ export class HostManipulator {
     return this._record.active;
   }
 
+  private _initPayoffMatrix(): void {
+    this._payoffMatrix = [
+      [3, 0],
+      [5, 1],
+    ];
+    this._computeNashEquilibrium();
+  }
+
+  private _computeNashEquilibrium(): void {
+    const a = this._payoffMatrix;
+    const p = (a[1][1] - a[1][0]) / (a[0][0] - a[0][1] - a[1][0] + a[1][1]);
+    const q = (a[1][1] - a[0][1]) / (a[0][0] - a[0][1] - a[1][0] + a[1][1]);
+    this._nashEquilibrium = [isFinite(p) ? Math.max(0, Math.min(1, p)) : 0.5, isFinite(q) ? Math.max(0, Math.min(1, q)) : 0.5];
+  }
+
   public activate(): void {
     this._record.active = true;
     this._resistanceLevel = Math.max(0, this._resistanceLevel - 0.1);
   }
 
   public injectBias(behavior: string, originalWeight: number, shift: number): BehaviorBias {
-    const biasedWeight = Math.max(
-      0,
-      Math.min(1, originalWeight + shift * this._record.controlStrength)
-    );
-    const bias: BehaviorBias = { behavior, originalWeight, biasedWeight };
+    const biasedWeight = Math.max(0, Math.min(1, originalWeight + shift * this._record.controlStrength));
+    const payoff = this._computePayoff(originalWeight, biasedWeight);
+    const bias: BehaviorBias = { behavior, originalWeight, biasedWeight, payoff };
     this._biases.set(behavior, bias);
     this._manipulationLog.push(`bias:${behavior}:${biasedWeight.toFixed(2)}`);
     return bias;
+  }
+
+  private _computePayoff(original: number, biased: number): number {
+    const cooperation = original > 0.5 ? 0 : 1;
+    const manipulation = biased > original ? 1 : 0;
+    return this._payoffMatrix[cooperation][manipulation];
   }
 
   public filterPerception(input: string, attenuation: number): number {
@@ -105,6 +122,13 @@ export class HostManipulator {
     this._perceptionFilter = {};
   }
 
+  public expectedPayoff(): number {
+    const p = this._nashEquilibrium[0];
+    const q = this._nashEquilibrium[1];
+    const a = this._payoffMatrix;
+    return p * q * a[0][0] + p * (1 - q) * a[0][1] + (1 - p) * q * a[1][0] + (1 - p) * (1 - q) * a[1][1];
+  }
+
   public manipulationReport(): Record<string, unknown> {
     return {
       manipulatorId: this.manipulatorId,
@@ -115,6 +139,8 @@ export class HostManipulator {
       activeBiases: this._biases.size,
       logEntries: this._manipulationLog.length,
       influenceRadius: this._record.influenceRadius,
+      nashEquilibrium: this._nashEquilibrium,
+      expectedPayoff: this.expectedPayoff().toFixed(3),
     };
   }
 }

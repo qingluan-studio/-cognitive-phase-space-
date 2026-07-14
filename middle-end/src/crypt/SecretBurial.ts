@@ -1,8 +1,3 @@
-/**
- * 秘密埋葬模块：将敏感模块加密深藏于系统最底层，
- * 通过多重加密与位置混淆防止被发现与提取。
- */
-
 export interface BuriedSecret {
   id: string;
   content: string;
@@ -25,6 +20,9 @@ export class SecretBurial {
   private _authorized: Set<string> = new Set();
   private _maxDepth = 100;
   private _defaultLayers = 3;
+  private _depthHashChain: Map<string, string> = new Map();
+  private _steganographyCapacity: number = 0;
+  private _layerEntropy: number[] = [];
 
   authorize(entity: string): void {
     this._authorized.add(entity);
@@ -50,19 +48,51 @@ export class SecretBurial {
     return result;
   }
 
+  private _computeDepthHash(content: string, depth: number): string {
+    let hash = 0;
+    for (let i = 0; i < content.length; i++) {
+      hash = ((hash << 5) - hash) + content.charCodeAt(i) + depth * 31;
+      hash = hash & hash;
+    }
+    return `d${Math.abs(hash).toString(16)}`;
+  }
+
+  private _computeLayerEntropy(content: string): number {
+    const freq: Record<string, number> = {};
+    for (const ch of content) freq[ch] = (freq[ch] ?? 0) + 1;
+    let entropy = 0;
+    for (const count of Object.values(freq)) {
+      const p = count / content.length;
+      entropy -= p * Math.log2(p);
+    }
+    return entropy;
+  }
+
   bury(id: string, content: string, depth: number): BuriedSecret {
     const clampedDepth = Math.min(depth, this._maxDepth);
     const layers = this._defaultLayers + Math.floor(clampedDepth / 20);
+    const encryptedContent = this._encrypt(content, layers);
     const secret: BuriedSecret = {
       id,
       content,
-      encryptedContent: this._encrypt(content, layers),
+      encryptedContent,
       depth: clampedDepth,
       encryptionLayers: layers,
       buriedAt: Date.now(),
     };
     this._secrets.set(id, secret);
+    this._depthHashChain.set(id, this._computeDepthHash(content, clampedDepth));
+    this._layerEntropy.push(this._computeLayerEntropy(encryptedContent));
+    this._updateSteganographyCapacity();
     return secret;
+  }
+
+  private _updateSteganographyCapacity(): void {
+    let total = 0;
+    for (const s of this._secrets.values()) {
+      total += s.encryptedContent.length;
+    }
+    this._steganographyCapacity = total / (this._secrets.size + 1);
   }
 
   requestExhumation(secretId: string, requester: string): ExhumationRequest {
@@ -83,6 +113,8 @@ export class SecretBurial {
     if (!request.authorized) return null;
     const secret = this._secrets.get(secretId);
     if (!secret) return null;
+    const hash = this._computeDepthHash(secret.content, secret.depth);
+    if (this._depthHashChain.get(secretId) !== hash) return null;
     return this._decrypt(secret.encryptedContent, secret.encryptionLayers);
   }
 
@@ -95,8 +127,10 @@ export class SecretBurial {
       const plain = this._decrypt(secret.encryptedContent, secret.encryptionLayers);
       secret.encryptionLayers += addedLayers;
       secret.encryptedContent = this._encrypt(plain, secret.encryptionLayers);
+      this._layerEntropy.push(this._computeLayerEntropy(secret.encryptedContent));
     }
     secret.depth = newDepth;
+    this._depthHashChain.set(secretId, this._computeDepthHash(secret.content, newDepth));
     return true;
   }
 
@@ -104,6 +138,7 @@ export class SecretBurial {
     const secret = this._secrets.get(secretId);
     if (!secret) return false;
     secret.depth = Math.min(newDepth, this._maxDepth);
+    this._depthHashChain.set(secretId, this._computeDepthHash(secret.content, secret.depth));
     return true;
   }
 
@@ -123,11 +158,20 @@ export class SecretBurial {
     return this._requests.filter(r => !r.authorized);
   }
 
+  getAverageLayerEntropy(): number {
+    if (this._layerEntropy.length === 0) return 0;
+    return this._layerEntropy.reduce((a, b) => a + b, 0) / this._layerEntropy.length;
+  }
+
   get secretCount(): number {
     return this._secrets.size;
   }
 
   get authorizedCount(): number {
     return this._authorized.size;
+  }
+
+  get steganographyCapacity(): number {
+    return this._steganographyCapacity;
   }
 }

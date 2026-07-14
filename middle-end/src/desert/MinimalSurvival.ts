@@ -1,8 +1,3 @@
-/**
- * 极简求生模块：以最少资源维持运转。
- * 在严格配给的资源下保持系统生命体征，并最大化每单位资源的产出。
- */
-
 export interface MinimalSurvivalData {
   water: number;
   food: number;
@@ -16,6 +11,9 @@ export class MinimalSurvival {
   private _energy: number;
   private _tick: number;
   private _rations: number;
+  private _metabolicRate: number;
+  private _homeostasisError: number[];
+  private _optimalPoint: number[];
 
   constructor(initialRations: number = 10) {
     this._water = 100;
@@ -23,6 +21,9 @@ export class MinimalSurvival {
     this._energy = 100;
     this._tick = 0;
     this._rations = initialRations;
+    this._metabolicRate = 1.0;
+    this._homeostasisError = [0, 0, 0];
+    this._optimalPoint = [100, 100, 100];
   }
 
   get alive(): boolean {
@@ -33,11 +34,17 @@ export class MinimalSurvival {
     return this._tick;
   }
 
+  get metabolicRate(): number {
+    return this._metabolicRate;
+  }
+
   public consume(): boolean {
     this._tick += 1;
-    this._water = Math.max(0, this._water - 5);
-    this._food = Math.max(0, this._food - 4);
-    this._energy = Math.max(0, this._energy - 3);
+    const decay = this._metabolicRate * (1 + 0.01 * this._tick);
+    this._water = Math.max(0, this._water - 5 * decay);
+    this._food = Math.max(0, this._food - 4 * decay);
+    this._energy = Math.max(0, this._energy - 3 * decay);
+    this._updateHomeostasis();
     return this.alive;
   }
 
@@ -47,6 +54,7 @@ export class MinimalSurvival {
     this._water = Math.min(100, this._water + amount * 0.5);
     this._food = Math.min(100, this._food + amount * 0.4);
     this._energy = Math.min(100, this._energy + amount * 0.3);
+    this._updateHomeostasis();
   }
 
   public rest(cycles: number): void {
@@ -54,6 +62,7 @@ export class MinimalSurvival {
       this._energy = Math.min(100, this._energy + 10);
       this._water = Math.max(0, this._water - 1);
     }
+    this._metabolicRate = Math.max(0.5, this._metabolicRate - 0.01 * cycles);
   }
 
   public efficiency(): number {
@@ -65,6 +74,7 @@ export class MinimalSurvival {
     if (found.water) this._water = Math.min(100, this._water + found.water);
     if (found.food) this._food = Math.min(100, this._food + found.food);
     if (found.energy) this._energy = Math.min(100, this._energy + found.energy);
+    this._updateHomeostasis();
   }
 
   public report(): MinimalSurvivalData {
@@ -74,5 +84,31 @@ export class MinimalSurvival {
       energy: this._energy,
       alive: this.alive,
     };
+  }
+
+  public computeLyapunovExponent(perturbation: number): number {
+    const state = [this._water, this._food, this._energy];
+    const neighbor = state.map(v => v + perturbation);
+    let divergence = 0;
+    for (let i = 0; i < 3; i++) {
+      divergence += (neighbor[i] - state[i]) ** 2;
+    }
+    return this._tick > 0 ? 0.5 * Math.log(divergence / (perturbation ** 2)) / this._tick : 0;
+  }
+
+  public phasePortrait(): number[][] {
+    return [
+      [this._water, this._food],
+      [this._food, this._energy],
+      [this._energy, this._water],
+    ];
+  }
+
+  private _updateHomeostasis(): void {
+    this._homeostasisError = [
+      this._optimalPoint[0] - this._water,
+      this._optimalPoint[1] - this._food,
+      this._optimalPoint[2] - this._energy,
+    ];
   }
 }

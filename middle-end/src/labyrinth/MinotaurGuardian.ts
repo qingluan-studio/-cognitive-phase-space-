@@ -1,88 +1,130 @@
-/**
- * 牛头怪守护者模块：守护迷宫中心的怪物。
- * 当入侵者靠近中心时，牛头怪会苏醒并发起对抗，需要正确祭品才能通过。
- */
-
 export interface MinotaurGuardianData {
-  awake: boolean;
-  rage: number;
-  offerings: string[];
-  centerBreached: boolean;
+  lurkingAt: string;
+  awareness: number;
+  aggression: number;
+  pathObstructed: boolean;
+}
+
+export interface RiddleAttempt {
+  answer: string;
+  accepted: boolean;
+  awarenessDelta: number;
 }
 
 export class MinotaurGuardian {
-  private _awake: boolean;
-  private _rage: number;
-  private _offerings: string[];
-  private _centerBreached: boolean;
-  private _requiredOffering: string;
+  private _lurkingAt: string;
+  private _awareness: number;
+  private _aggression: number;
+  private _riddlesSolved: number;
+  private _threatModel: Map<string, number>;
+  private _markovState: number;
+  private _entropyPool: number[];
 
-  constructor(requiredOffering: string = 'mirror') {
-    this._awake = false;
-    this._rage = 0;
-    this._offerings = [];
-    this._centerBreached = false;
-    this._requiredOffering = requiredOffering;
+  constructor(lurkingAt: string) {
+    this._lurkingAt = lurkingAt;
+    this._awareness = 0.1;
+    this._aggression = 0.5;
+    this._riddlesSolved = 0;
+    this._threatModel = new Map();
+    this._markovState = 0;
+    this._entropyPool = [];
   }
 
-  get awake(): boolean {
-    return this._awake;
+  get lurkingAt(): string {
+    return this._lurkingAt;
   }
 
-  get rage(): number {
-    return this._rage;
+  get awareness(): number {
+    return this._awareness;
   }
 
-  public approach(distance: number): string {
-    if (distance < 10) {
-      this._awake = true;
-      this._rage = Math.min(100, this._rage + (10 - distance) * 5);
-      return 'The Minotaur stirs.';
+  get aggression(): number {
+    return this._aggression;
+  }
+
+  get riddlesSolved(): number {
+    return this._riddlesSolved;
+  }
+
+  public stalk(stepCount: number): void {
+    for (let i = 0; i < stepCount; i++) {
+      const transition = this._markovTransition(this._markovState);
+      this._markovState = transition;
+      this._awareness = Math.min(1, this._awareness + 0.02 + this._markovState * 0.01);
+      this._aggression = Math.min(1, this._aggression + 0.01);
     }
-    return 'Silence in the maze.';
+    this._entropyPool.push(this._awareness);
+    if (this._entropyPool.length > 50) this._entropyPool.shift();
   }
 
-  public offer(item: string): boolean {
-    this._offerings.push(item);
-    if (item === this._requiredOffering) {
-      this._rage = Math.max(0, this._rage - 50);
-      if (this._rage === 0) {
-        this._centerBreached = true;
-        this._awake = false;
-      }
-      return true;
-    }
-    this._rage = Math.min(100, this._rage + 20);
-    return false;
+  public presentRiddle(riddle: string): RiddleAttempt {
+    const answer = riddle.split('').reverse().join('');
+    const accepted = Math.random() < (1 - this._awareness);
+    const delta = accepted ? -0.2 : 0.1;
+    this._awareness = Math.max(0, Math.min(1, this._awareness + delta));
+    if (accepted) this._riddlesSolved++;
+    this._threatModel.set(riddle, this._awareness);
+    return { answer, accepted, awarenessDelta: delta };
   }
 
-  public flee(): void {
-    this._rage = Math.max(0, this._rage - 10);
-    if (this._rage === 0) this._awake = false;
+  public charge(): boolean {
+    return Math.random() < this._aggression;
   }
 
-  public battle(rounds: number): { won: boolean; finalRage: number } {
-    for (let i = 0; i < rounds; i += 1) {
-      this._rage = Math.max(0, this._rage - 15);
-      if (this._rage === 0) {
-        this._awake = false;
-        this._centerBreached = true;
-        return { won: true, finalRage: 0 };
-      }
-    }
-    return { won: false, finalRage: this._rage };
+  public soothe(amount: number): void {
+    this._awareness = Math.max(0, this._awareness - amount);
+    this._aggression = Math.max(0, this._aggression - amount * 0.5);
+  }
+
+  public relocate(newLocation: string): void {
+    this._lurkingAt = newLocation;
+    this._awareness *= 0.9;
   }
 
   public report(): MinotaurGuardianData {
     return {
-      awake: this._awake,
-      rage: this._rage,
-      offerings: [...this._offerings],
-      centerBreached: this._centerBreached,
+      lurkingAt: this._lurkingAt,
+      awareness: this._awareness,
+      aggression: this._aggression,
+      pathObstructed: this._awareness > 0.7,
     };
   }
 
-  public revealRequirement(): string {
-    return this._requiredOffering;
+  public computeThreatEntropy(): number {
+    const values = Array.from(this._threatModel.values());
+    if (values.length === 0) return 0;
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
+  }
+
+  public predictNextState(): number {
+    return this._markovTransition(this._markovState);
+  }
+
+  public computeSteadyStateDistribution(): number[] {
+    const transitionMatrix = [
+      [0.7, 0.2, 0.1],
+      [0.3, 0.5, 0.2],
+      [0.1, 0.3, 0.6],
+    ];
+    let state = [1, 0, 0];
+    for (let iter = 0; iter < 100; iter++) {
+      const newState = [0, 0, 0];
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          newState[i] += state[j] * transitionMatrix[j][i];
+        }
+      }
+      state = newState;
+    }
+    return state;
+  }
+
+  private _markovTransition(current: number): number {
+    const r = Math.random();
+    if (current === 0) return r < 0.7 ? 0 : r < 0.9 ? 1 : 2;
+    if (current === 1) return r < 0.3 ? 0 : r < 0.8 ? 1 : 2;
+    return r < 0.1 ? 0 : r < 0.4 ? 1 : 2;
   }
 }

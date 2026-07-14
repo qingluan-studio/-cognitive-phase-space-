@@ -1,8 +1,3 @@
-/**
- * 祖先代码库：最原始的代码，永不修改。
- * 维护一份不可变的最原始代码库，所有读取操作只读，并记录所有访问者与引用。
- */
-
 export interface AncestralArtifact {
   id: string;
   signature: string;
@@ -23,11 +18,15 @@ export class AncestralCodebase {
   private _accessLog: AccessRecord[] = [];
   private _sealed = true;
   private _maxLogSize = 500;
+  private _lineageGraph: Map<string, Set<string>> = new Map();
+  private _mutationMatrix: Map<string, number[]> = new Map();
+  private _entropyCache: Map<string, number> = new Map();
 
   archive(artifact: AncestralArtifact): void {
     artifact.immutable = this._sealed;
     artifact.sealedAt = Date.now();
     this._artifacts.set(artifact.id, artifact);
+    this._entropyCache.set(artifact.id, this._computeShannonEntropy(artifact.content));
   }
 
   read(artifactId: string, accessor: string, purpose: string): AncestralArtifact | null {
@@ -53,6 +52,36 @@ export class AncestralCodebase {
     let common = 0;
     for (const ch of setA) if (setB.has(ch)) common++;
     return common / Math.max(setA.size, setB.size);
+  }
+
+  computePhylogeneticDistance(artifactIdA: string, artifactIdB: string): number {
+    const sim = this.compareLineage(artifactIdA, artifactIdB);
+    return -Math.log(Math.max(1e-10, sim));
+  }
+
+  buildLineageGraph(): void {
+    this._lineageGraph.clear();
+    const ids = Array.from(this._artifacts.keys());
+    for (const id of ids) {
+      this._lineageGraph.set(id, new Set());
+    }
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const dist = this.compareLineage(ids[i], ids[j]);
+        if (dist > 0.6) {
+          this._lineageGraph.get(ids[i])!.add(ids[j]);
+          this._lineageGraph.get(ids[j])!.add(ids[i]);
+        }
+      }
+    }
+  }
+
+  computeCentrality(artifactId: string): number {
+    if (this._lineageGraph.size === 0) this.buildLineageGraph();
+    const neighbors = this._lineageGraph.get(artifactId);
+    if (!neighbors) return 0;
+    const n = this._lineageGraph.size;
+    return neighbors.size / (n - 1);
   }
 
   getSignature(artifactId: string): string | null {
@@ -85,5 +114,25 @@ export class AncestralCodebase {
 
   get isSealed(): boolean {
     return this._sealed;
+  }
+
+  getTotalEntropy(): number {
+    let total = 0;
+    for (const e of this._entropyCache.values()) total += e;
+    return total;
+  }
+
+  private _computeShannonEntropy(content: string): number {
+    const freq = new Map<string, number>();
+    for (const ch of content) {
+      freq.set(ch, (freq.get(ch) ?? 0) + 1);
+    }
+    let entropy = 0;
+    const len = content.length;
+    for (const count of freq.values()) {
+      const p = count / len;
+      entropy -= p * Math.log2(p);
+    }
+    return entropy;
   }
 }

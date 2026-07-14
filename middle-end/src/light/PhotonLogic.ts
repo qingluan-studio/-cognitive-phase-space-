@@ -1,106 +1,137 @@
-/**
- * 光子逻辑模块：以光速运行的逻辑单元，处理瞬时传输的信息。
- * 用于建模系统中接近零延迟的高速推理路径。
- */
-
-export interface PhotonPulse {
-  id: number;
-  wavelength: number;
-  energy: number;
-  direction: number;
+export interface LogicGate {
+  id: string;
+  inputA: number;
+  inputB: number;
+  output: number;
+  gateType: 'and' | 'or' | 'xor' | 'not';
 }
 
-export type PhotonTransmission = {
-  pulses: number;
-  totalEnergy: number;
-  latency: number;
+export type LogicEvaluation = {
+  correct: boolean;
+  errorRate: number;
+  throughput: number;
 };
 
 export interface PhotonLogicConfig {
-  speedOfLight: number;
-  maxPulses: number;
-  energyQuanta: number;
+  photonEnergy: number;
+  noiseFloor: number;
+  gateDelay: number;
 }
 
 export class PhotonLogic {
   private _config: PhotonLogicConfig;
-  private _pulses: PhotonPulse[] = [];
-  private _nextId: number = 0;
-  private _transmission: PhotonTransmission | null = null;
+  private _gates: LogicGate[] = [];
+  private _evaluation: LogicEvaluation | null = null;
   private _state: Record<string, unknown> = {};
+  private _photonStatistics: number[] = [];
+  private _shotNoise: number = 0;
+  private _fanOutMatrix: number[][] = [];
 
   constructor(config: PhotonLogicConfig) {
     this._config = config;
+    this._initFanOut();
   }
 
-  get pulseCount(): number {
-    return this._pulses.length;
+  get gateCount(): number {
+    return this._gates.length;
   }
 
-  get speedOfLight(): number {
-    return this._config.speedOfLight;
+  get shotNoise(): number {
+    return this._shotNoise;
   }
 
-  emit(wavelength: number, direction: number): PhotonPulse {
-    const pulse: PhotonPulse = {
-      id: this._nextId++,
-      wavelength,
-      energy: this._config.energyQuanta / wavelength,
-      direction,
-    };
-    this._pulses.push(pulse);
-    if (this._pulses.length > this._config.maxPulses) {
-      this._pulses.shift();
+  private _initFanOut(): void {
+    this._fanOutMatrix = [];
+    for (let i = 0; i < 4; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < 4; j++) {
+        row.push(i === j ? 1 : 0);
+      }
+      this._fanOutMatrix.push(row);
     }
-    return pulse;
   }
 
-  transmit(distance: number): PhotonTransmission {
-    const latency = distance / this._config.speedOfLight;
-    const totalEnergy = this._pulses.reduce((acc, p) => acc + p.energy, 0);
-    this._transmission = {
-      pulses: this._pulses.length,
-      totalEnergy,
-      latency,
-    };
-    this._state.lastTransmission = { distance, latency };
-    return this._transmission;
+  private _computeShotNoise(intensity: number): number {
+    return Math.sqrt(intensity);
   }
 
-  scatter(angle: number): void {
-    for (const p of this._pulses) {
-      p.direction += angle;
+  private _evaluateGate(gate: LogicGate): number {
+    const a = gate.inputA > this._config.noiseFloor ? 1 : 0;
+    const b = gate.inputB > this._config.noiseFloor ? 1 : 0;
+    switch (gate.gateType) {
+      case 'and': return a & b;
+      case 'or': return a | b;
+      case 'xor': return a ^ b;
+      case 'not': return a ? 0 : 1;
+      default: return 0;
     }
-    this._state.scatteredAt = Date.now();
   }
 
-  filterByWavelength(min: number, max: number): PhotonPulse[] {
-    return this._pulses.filter((p) => p.wavelength >= min && p.wavelength <= max);
+  addGate(id: string, type: 'and' | 'or' | 'xor' | 'not', inputA: number, inputB: number = 0): LogicGate {
+    const gate: LogicGate = { id, inputA, inputB, output: 0, gateType: type };
+    gate.output = this._evaluateGate(gate);
+    this._gates.push(gate);
+    if (this._gates.length > 30) this._gates.shift();
+    this._shotNoise = this._computeShotNoise(inputA + inputB);
+    this._photonStatistics.push(inputA + inputB);
+    if (this._photonStatistics.length > 30) this._photonStatistics.shift();
+    return gate;
   }
 
-  averageEnergy(): number {
-    if (this._pulses.length === 0) return 0;
-    return this._pulses.reduce((acc, p) => acc + p.energy, 0) / this._pulses.length;
+  evaluateAll(): LogicEvaluation {
+    let errors = 0;
+    let totalThroughput = 0;
+    for (const gate of this._gates) {
+      const expected = this._evaluateGate(gate);
+      const noisyOutput = Math.random() < this._config.noiseFloor ? 1 - expected : expected;
+      if (noisyOutput !== expected) errors++;
+      totalThroughput += this._config.photonEnergy / (this._config.gateDelay + 0.001);
+    }
+    const errorRate = this._gates.length > 0 ? errors / this._gates.length : 0;
+    const correct = errors === 0;
+    this._evaluation = { correct, errorRate, throughput: totalThroughput };
+    return this._evaluation;
   }
 
-  isInstantaneous(distance: number): boolean {
-    const latency = distance / this._config.speedOfLight;
-    return latency < 1e-9;
+  isCorrect(): boolean {
+    return this.evaluateAll().correct;
   }
 
-  absorb(id: number): boolean {
-    const idx = this._pulses.findIndex((p) => p.id === id);
-    if (idx === -1) return false;
-    this._pulses.splice(idx, 1);
-    return true;
+  fanOut(gateId: string, targets: number): number[] {
+    const gate = this._gates.find((g) => g.id === gateId);
+    if (!gate) return [];
+    const outputs: number[] = [];
+    for (let i = 0; i < targets; i++) {
+      const attenuated = gate.output * (1 / (i + 1));
+      outputs.push(attenuated > this._config.noiseFloor ? 1 : 0);
+    }
+    return outputs;
+  }
+
+  computePhotonStatistics(): { mean: number; variance: number } {
+    if (this._photonStatistics.length === 0) return { mean: 0, variance: 0 };
+    const mean = this._photonStatistics.reduce((a, b) => a + b, 0) / this._photonStatistics.length;
+    const variance = this._photonStatistics.reduce((a, b) => a + (b - mean) * (b - mean), 0) / this._photonStatistics.length;
+    return { mean, variance };
+  }
+
+  reset(): void {
+    this._gates = [];
+    this._evaluation = null;
+    this._photonStatistics = [];
+    this._shotNoise = 0;
+    this._state = {};
   }
 
   report(): Record<string, unknown> {
+    const stats = this.computePhotonStatistics();
     return {
-      pulseCount: this._pulses.length,
-      averageEnergy: this.averageEnergy(),
-      transmission: this._transmission,
+      gates: this._gates.length,
+      evaluation: this._evaluation,
       state: this._state,
+      shotNoise: this._shotNoise.toFixed(4),
+      photonMean: stats.mean.toFixed(4),
+      photonVariance: stats.variance.toFixed(4),
     };
   }
 }

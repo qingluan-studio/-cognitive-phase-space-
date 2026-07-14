@@ -1,8 +1,3 @@
-/**
- * 阿尔奇拉桥：连接梦境与现实的彩虹桥。
- * 在梦境与现实间建立双向通道，允许信息在两侧流动并互相影响。
- */
-
 export interface BridgePillar {
   id: string;
   side: 'dream' | 'reality';
@@ -22,6 +17,8 @@ export class AltjiraBridge {
   private _crossings: CrossingEvent[] = [];
   private _structuralIntegrity = 1.0;
   private _maxPayloadSize = 1024;
+  private _loadHistory: number[] = [];
+  private _spectralLoad: number[] = [];
 
   addPillar(pillar: BridgePillar): void {
     this._pillars.set(pillar.id, pillar);
@@ -40,6 +37,8 @@ export class AltjiraBridge {
     this._crossings.push(event);
     if (this._crossings.length > 100) this._crossings.shift();
     this._distributeLoad(payloadSize);
+    this._loadHistory.push(payloadSize);
+    if (this._loadHistory.length > 50) this._loadHistory.shift();
     return event;
   }
 
@@ -52,6 +51,7 @@ export class AltjiraBridge {
       p.stability = Math.max(0, p.stability - share * 0.001);
     }
     this._structuralIntegrity = pillars.reduce((s, p) => s + p.stability, 0) / pillars.length;
+    this._updateSpectralLoad();
   }
 
   reinforce(pillarId: string, amount: number): BridgePillar | null {
@@ -81,5 +81,40 @@ export class AltjiraBridge {
 
   get pillarCount(): number {
     return this._pillars.size;
+  }
+
+  computeLoadEntropy(): number {
+    if (this._loadHistory.length === 0) return 0;
+    const mean = this._loadHistory.reduce((a, b) => a + b, 0) / this._loadHistory.length;
+    const variance = this._loadHistory.reduce((s, v) => s + (v - mean) ** 2, 0) / this._loadHistory.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
+  }
+
+  computeFourierLoad(): number[] {
+    const N = this._loadHistory.length;
+    if (N === 0) return [];
+    const result: number[] = new Array(N).fill(0);
+    for (let k = 0; k < N; k++) {
+      let real = 0;
+      let imag = 0;
+      for (let n = 0; n < N; n++) {
+        const angle = -2 * Math.PI * k * n / N;
+        real += this._loadHistory[n] * Math.cos(angle);
+        imag += this._loadHistory[n] * Math.sin(angle);
+      }
+      result[k] = Math.sqrt(real * real + imag * imag);
+    }
+    return result;
+  }
+
+  predictFailureProbability(): number {
+    const fft = this.computeFourierLoad();
+    if (fft.length === 0) return 0;
+    const dominantFreq = Math.max(...fft);
+    return 1 / (1 + Math.exp(-(dominantFreq / 1000 - this._structuralIntegrity)));
+  }
+
+  private _updateSpectralLoad(): void {
+    this._spectralLoad = this.computeFourierLoad();
   }
 }

@@ -1,91 +1,215 @@
-/**
- * 拟像层：层层仿真的现实。
- * 每一层都是上一层的仿真副本，副本可能比原作更"真实"，层叠形成深度仿真。
- */
-
-export interface SimulacrumLayerData {
+export interface LayerNode {
   id: string;
   depth: number;
-  sourceLayerId: string | null;
-  fidelity: number;
-  content: Record<string, unknown>;
+  opacity: number;
+  referenceCount: number;
+}
+
+export type LayerGraph = {
+  nodes: number;
+  edges: number;
+  cycles: number;
+};
+
+export interface LayerConfig {
+  maxDepth: number;
+  opacityDecay: number;
+  referenceBoost: number;
 }
 
 export class SimulacrumLayer {
-  private _layers: Map<string, SimulacrumLayerData> = new Map();
-  private _rootId: string | null = null;
-  private _maxDepth = 10;
+  private _config: LayerConfig;
+  private _nodes: LayerNode[] = [];
+  private _graph: LayerGraph | null = null;
+  private _state: Record<string, unknown> = {};
+  private _adjacencyList: Map<string, Set<string>> = new Map();
+  private _pagerank: Map<string, number> = new Map();
+  private _topologicalOrder: string[] = [];
 
-  addRoot(id: string, content: Record<string, unknown>): SimulacrumLayerData {
-    const layer: SimulacrumLayerData = {
-      id,
-      depth: 0,
-      sourceLayerId: null,
-      fidelity: 1.0,
-      content,
-    };
-    this._layers.set(id, layer);
-    this._rootId = id;
-    return layer;
+  constructor(config: LayerConfig) {
+    this._config = config;
   }
 
-  simulate(sourceId: string, newId: string, fidelity: number = 0.9): SimulacrumLayerData | null {
-    const source = this._layers.get(sourceId);
-    if (!source) return null;
-    if (source.depth + 1 > this._maxDepth) return null;
-    const layer: SimulacrumLayerData = {
-      id: newId,
-      depth: source.depth + 1,
-      sourceLayerId: sourceId,
-      fidelity,
-      content: { ...source.content, simulatedAt: Date.now() },
-    };
-    this._layers.set(newId, layer);
-    return layer;
+  get nodeCount(): number {
+    return this._nodes.length;
   }
 
-  computeDepth(id: string): number {
-    const layer = this._layers.get(id);
-    if (!layer) return -1;
-    let depth = 0;
-    let current: SimulacrumLayerData | undefined = layer;
-    while (current && current.sourceLayerId) {
-      depth++;
-      current = this._layers.get(current.sourceLayerId);
+  get deepestNode(): number {
+    return this._nodes.reduce((max, n) => (n.depth > max ? n.depth : max), 0);
+  }
+
+  get graphCycles(): number {
+    return this._graph ? this._graph.cycles : 0;
+  }
+
+  private _buildAdjacency(): void {
+    this._adjacencyList.clear();
+    for (const node of this._nodes) {
+      if (!this._adjacencyList.has(node.id)) {
+        this._adjacencyList.set(node.id, new Set());
+      }
+      for (const other of this._nodes) {
+        if (other.depth === node.depth + 1) {
+          this._adjacencyList.get(node.id)!.add(other.id);
+        }
+      }
     }
-    return depth;
   }
 
-  traceLineage(id: string): string[] {
-    const chain: string[] = [];
-    let current = this._layers.get(id);
-    while (current) {
-      chain.push(current.id);
-      current = current.sourceLayerId ? this._layers.get(current.sourceLayerId) : undefined;
+  private _computePageRank(iterations: number = 15): void {
+    const n = this._nodes.length;
+    if (n === 0) return;
+    const damping = 0.85;
+    const ranks = new Map<string, number>();
+    for (const node of this._nodes) {
+      ranks.set(node.id, 1 / n);
     }
-    return chain;
+    for (let iter = 0; iter < iterations; iter++) {
+      const newRanks = new Map<string, number>();
+      for (const node of this._nodes) {
+        let sum = 0;
+        for (const other of this._nodes) {
+          if (other.id === node.id) continue;
+          const neighbors = this._adjacencyList.get(other.id) || new Set();
+          if (neighbors.has(node.id)) {
+            const outDegree = neighbors.size;
+            sum += (ranks.get(other.id) || 0) / (outDegree || 1);
+          }
+        }
+        newRanks.set(node.id, (1 - damping) / n + damping * sum);
+      }
+      ranks.clear();
+      for (const [k, v] of newRanks) {
+        ranks.set(k, v);
+      }
+    }
+    this._pagerank = ranks;
   }
 
-  averageFidelity(): number {
-    if (this._layers.size === 0) return 0;
-    let sum = 0;
-    for (const l of this._layers.values()) sum += l.fidelity;
-    return sum / this._layers.size;
+  private _detectCycles(): number {
+    let cycles = 0;
+    const visited = new Set<string>();
+    const recStack = new Set<string>();
+    const dfs = (nodeId: string): boolean => {
+      visited.add(nodeId);
+      recStack.add(nodeId);
+      const neighbors = this._adjacencyList.get(nodeId) || new Set();
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor)) {
+          if (dfs(neighbor)) cycles++;
+        } else if (recStack.has(neighbor)) {
+          cycles++;
+        }
+      }
+      recStack.delete(nodeId);
+      return false;
+    };
+    for (const node of this._nodes) {
+      if (!visited.has(node.id)) {
+        dfs(node.id);
+      }
+    }
+    return cycles;
   }
 
-  removeLayer(id: string): boolean {
-    return this._layers.delete(id);
+  private _topologicalSort(): void {
+    this._topologicalOrder = [];
+    const inDegree = new Map<string, number>();
+    for (const node of this._nodes) {
+      inDegree.set(node.id, 0);
+    }
+    for (const node of this._nodes) {
+      const neighbors = this._adjacencyList.get(node.id) || new Set();
+      for (const neighbor of neighbors) {
+        inDegree.set(neighbor, (inDegree.get(neighbor) || 0) + 1);
+      }
+    }
+    const queue: string[] = [];
+    for (const [id, degree] of inDegree) {
+      if (degree === 0) queue.push(id);
+    }
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      this._topologicalOrder.push(current);
+      const neighbors = this._adjacencyList.get(current) || new Set();
+      for (const neighbor of neighbors) {
+        const newDegree = (inDegree.get(neighbor) || 0) - 1;
+        inDegree.set(neighbor, newDegree);
+        if (newDegree === 0) queue.push(neighbor);
+      }
+    }
   }
 
-  getLayer(id: string): SimulacrumLayerData | null {
-    return this._layers.get(id) ?? null;
+  addNode(id: string, depth: number): LayerNode {
+    const opacity = Math.exp(-depth * this._config.opacityDecay);
+    const node: LayerNode = { id, depth, opacity, referenceCount: 0 };
+    this._nodes.push(node);
+    if (this._nodes.length > 30) this._nodes.shift();
+    this._buildAdjacency();
+    this._computePageRank();
+    this._topologicalSort();
+    const cycles = this._detectCycles();
+    const edges = Array.from(this._adjacencyList.values()).reduce((acc, s) => acc + s.size, 0);
+    this._graph = { nodes: this._nodes.length, edges, cycles };
+    return node;
   }
 
-  get layerCount(): number {
-    return this._layers.size;
+  addReference(fromId: string, toId: string): boolean {
+    const from = this._nodes.find((n) => n.id === fromId);
+    const to = this._nodes.find((n) => n.id === toId);
+    if (!from || !to) return false;
+    to.referenceCount++;
+    if (!this._adjacencyList.has(fromId)) {
+      this._adjacencyList.set(fromId, new Set());
+    }
+    this._adjacencyList.get(fromId)!.add(toId);
+    this._computePageRank();
+    const cycles = this._detectCycles();
+    const edges = Array.from(this._adjacencyList.values()).reduce((acc, s) => acc + s.size, 0);
+    this._graph = { nodes: this._nodes.length, edges, cycles };
+    return true;
   }
 
-  get rootId(): string | null {
-    return this._rootId;
+  computeGraph(): LayerGraph {
+    return this._graph ?? { nodes: 0, edges: 0, cycles: 0 };
+  }
+
+  mostReferenced(): LayerNode | null {
+    if (this._nodes.length === 0) return null;
+    return this._nodes.reduce((best, n) => (n.referenceCount > best.referenceCount ? n : best));
+  }
+
+  isDAG(): boolean {
+    return this._topologicalOrder.length === this._nodes.length;
+  }
+
+  averageOpacity(): number {
+    if (this._nodes.length === 0) return 0;
+    return this._nodes.reduce((acc, n) => acc + n.opacity, 0) / this._nodes.length;
+  }
+
+  pagerankOf(id: string): number {
+    return this._pagerank.get(id) || 0;
+  }
+
+  reset(): void {
+    this._nodes = [];
+    this._graph = null;
+    this._adjacencyList.clear();
+    this._pagerank.clear();
+    this._topologicalOrder = [];
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      nodes: this._nodes.length,
+      deepest: this.deepestNode,
+      graph: this._graph,
+      state: this._state,
+      isDAG: this.isDAG(),
+      averageOpacity: this.averageOpacity().toFixed(4),
+      topologicalLength: this._topologicalOrder.length,
+    };
   }
 }

@@ -22,9 +22,14 @@ export class ChromosomalCrossOver {
   private _maxCrossovers: number = 3;
   private _maxResults: number = 200;
   private _linkageMap: Map<string, number> = new Map();
+  private _alleleFrequencies: Map<string, number> = new Map();
+  private _selectionCoefficient: number = 0.15;
 
   registerChromosome(chromosome: Chromosome): void {
     this._chromosomes.set(chromosome.id, chromosome);
+    for (const seg of chromosome.segments) {
+      this._alleleFrequencies.set(seg, (this._alleleFrequencies.get(seg) ?? 0) + 1);
+    }
   }
 
   crossover(parentAId: string, parentBId: string): CrossoverResult | null {
@@ -72,6 +77,14 @@ export class ChromosomalCrossOver {
     return -50 * Math.log(1 - 2 * r) / 2;
   }
 
+  computeKosambiMapDistance(resultId: string): number {
+    const result = this._results.find((r) => r.id === resultId);
+    if (!result) return 0;
+    const r = result.recombinationFraction;
+    if (r >= 0.5) return 50;
+    return 25 * Math.log((1 + 2 * r) / (1 - 2 * r));
+  }
+
   computeAverageRecombination(): number {
     if (this._results.length === 0) return 0;
     const sum = this._results.reduce((s, r) => s + r.recombinationFraction, 0);
@@ -99,6 +112,31 @@ export class ChromosomalCrossOver {
     return avgChildFitness - midParentFitness;
   }
 
+  computeHardyWeinbergDeviation(allele: string): number {
+    const totalAlleles = Array.from(this._alleleFrequencies.values()).reduce((s, v) => s + v, 0);
+    const p = (this._alleleFrequencies.get(allele) ?? 0) / totalAlleles;
+    const observedHomozygous = Array.from(this._chromosomes.values()).filter(
+      (c) => c.segments.filter((s) => s === allele).length >= 2
+    ).length;
+    const expectedHomozygous = p * p * this._chromosomes.size;
+    return observedHomozygous - expectedHomozygous;
+  }
+
+  computeLinkageDisequilibrium(locusA: number, locusB: number): number {
+    const haplotypes: Map<string, number> = new Map();
+    for (const chrom of this._chromosomes.values()) {
+      if (locusA >= chrom.segments.length || locusB >= chrom.segments.length) continue;
+      const key = `${chrom.segments[locusA]}_${chrom.segments[locusB]}`;
+      haplotypes.set(key, (haplotypes.get(key) ?? 0) + 1);
+    }
+    const total = Array.from(haplotypes.values()).reduce((s, v) => s + v, 0);
+    if (total === 0) return 0;
+    const freqAB = (haplotypes.get('A_B') ?? 0) / total;
+    const freqA = (Array.from(haplotypes.entries()).filter(([k]) => k.startsWith('A_')).reduce((s, [, v]) => s + v, 0)) / total;
+    const freqB = (Array.from(haplotypes.entries()).filter(([k]) => k.endsWith('_B')).reduce((s, [, v]) => s + v, 0)) / total;
+    return freqAB - freqA * freqB;
+  }
+
   getChromosome(id: string): Chromosome | null {
     return this._chromosomes.get(id) ?? null;
   }
@@ -109,6 +147,10 @@ export class ChromosomalCrossOver {
 
   get chromosomeCount(): number {
     return this._chromosomes.size;
+  }
+
+  get resultsCount(): number {
+    return this._results.length;
   }
 
   private _generateCrossoverPoints(minLen: number): number[] {
@@ -141,7 +183,8 @@ export class ChromosomalCrossOver {
     const uniqueRatio = new Set(childSegments).size / Math.max(childSegments.length, 1);
     const avgParent = (parentA.fitness + parentB.fitness) / 2;
     const heterosisBonus = uniqueRatio > 0.5 ? 0.1 * (uniqueRatio - 0.5) : 0;
-    return Math.max(0, Math.min(1, avgParent + heterosisBonus + (Math.random() - 0.5) * 0.05));
+    const selectionPressure = 1 + this._selectionCoefficient * (Math.random() - 0.5);
+    return Math.max(0, Math.min(1, (avgParent + heterosisBonus) * selectionPressure));
   }
 
   private _updateLinkage(points: number[]): void {

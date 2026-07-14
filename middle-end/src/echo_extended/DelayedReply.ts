@@ -1,8 +1,3 @@
-/**
- * 延迟回复模块：接收到输入后等待一段时间再给出回复。
- * 用于建模系统中具有显著延迟的响应路径。
- */
-
 export interface PendingReply {
   id: number;
   input: number;
@@ -29,6 +24,9 @@ export class DelayedReply {
   private _clock: number = 0;
   private _nextId: number = 0;
   private _state: Record<string, unknown> = {};
+  private _arrivalProcess: number[] = [];
+  private _serviceRate: number = 1;
+  private _queueLengthHistory: number[] = [];
 
   constructor(config: DelayedReplyConfig) {
     this._config = config;
@@ -46,9 +44,23 @@ export class DelayedReply {
     return this._clock;
   }
 
+  get averageQueueLength(): number {
+    if (this._queueLengthHistory.length === 0) return 0;
+    return this._queueLengthHistory.reduce((a, b) => a + b, 0) / this._queueLengthHistory.length;
+  }
+
+  private _poissonArrival(lambda: number): boolean {
+    return Math.random() < 1 - Math.exp(-lambda);
+  }
+
+  private _exponentialService(): number {
+    return -Math.log(1 - Math.random()) / this._serviceRate;
+  }
+
   receive(input: number): PendingReply {
     const jitter = (Math.random() - 0.5) * this._config.jitter;
-    const scheduledTime = this._clock + this._config.baseDelay + jitter;
+    const serviceTime = this._exponentialService();
+    const scheduledTime = this._clock + this._config.baseDelay + jitter + serviceTime;
     const reply: PendingReply = {
       id: this._nextId++,
       input,
@@ -59,6 +71,8 @@ export class DelayedReply {
     if (this._pending.length > this._config.maxPending) {
       this._pending.shift();
     }
+    this._arrivalProcess.push(this._clock);
+    if (this._arrivalProcess.length > 50) this._arrivalProcess.shift();
     return reply;
   }
 
@@ -74,6 +88,8 @@ export class DelayedReply {
     const delivered = ready.length;
     const delays = ready.map((r) => r.scheduledTime - (this._clock - dt));
     const avgDelay = delays.length > 0 ? delays.reduce((a, b) => a + b, 0) / delays.length : 0;
+    this._queueLengthHistory.push(this._pending.length);
+    if (this._queueLengthHistory.length > 50) this._queueLengthHistory.shift();
     this._state.lastTick = { delivered, remaining: this._pending.length };
     return { delivered, remaining: this._pending.length, avgDelay };
   }
@@ -106,12 +122,24 @@ export class DelayedReply {
     return this._pending.length >= this._config.maxPending * 0.8;
   }
 
+  computeTrafficIntensity(): number {
+    if (this._arrivalProcess.length < 2) return 0;
+    const intervals: number[] = [];
+    for (let i = 1; i < this._arrivalProcess.length; i++) {
+      intervals.push(this._arrivalProcess[i] - this._arrivalProcess[i - 1]);
+    }
+    const avgInterArrival = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    return avgInterArrival > 0 ? (1 / this._serviceRate) / avgInterArrival : 0;
+  }
+
   report(): Record<string, unknown> {
     return {
       pending: this._pending.length,
       delivered: this._delivered.length,
       clock: this._clock,
       state: this._state,
+      averageQueueLength: this.averageQueueLength.toFixed(3),
+      trafficIntensity: this.computeTrafficIntensity().toFixed(4),
     };
   }
 }

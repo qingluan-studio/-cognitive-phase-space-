@@ -1,8 +1,3 @@
-/**
- * 日冕物质抛射模块：从日冕突然释放巨大能量与物质的事件。
- * 用于刻画系统中突发性的大规模能量爆发过程。
- */
-
 export interface EjectionBurst {
   id: number;
   mass: number;
@@ -32,6 +27,10 @@ export class CoronalMassEjection {
   private _summary: EjectionSummary | null = null;
   private _accumulated: number = 0;
   private _state: Record<string, unknown> = {};
+  private _markovState: number = 0;
+  private _transitionMatrix: number[][] = [[0.7, 0.3], [0.4, 0.6]];
+  private _powerLawIndex: number = 2.5;
+  private _shockFrontRadius: number = 0;
 
   constructor(config: CoronalMassEjectionConfig) {
     this._config = config;
@@ -45,9 +44,20 @@ export class CoronalMassEjection {
     return this._accumulated;
   }
 
+  get shockFrontRadius(): number {
+    return this._shockFrontRadius;
+  }
+
   charge(amount: number): void {
     this._accumulated += amount;
     this._state.chargedAt = Date.now();
+    this._markovState = this._advanceMarkov(this._markovState);
+  }
+
+  private _advanceMarkov(current: number): number {
+    const row = this._transitionMatrix[current];
+    const roll = Math.random();
+    return roll < row[0] ? 0 : 1;
   }
 
   tryRelease(): EjectionBurst | null {
@@ -68,7 +78,13 @@ export class CoronalMassEjection {
     }
     this._accumulated = 0;
     this._state.lastRelease = burst.id;
+    this._updateShockFront(burst);
     return burst;
+  }
+
+  private _updateShockFront(burst: EjectionBurst): void {
+    const timeElapsed = (Date.now() - burst.timestamp) / 1000;
+    this._shockFrontRadius = burst.velocity * timeElapsed * 0.1;
   }
 
   computeSummary(): EjectionSummary {
@@ -99,6 +115,28 @@ export class CoronalMassEjection {
     return this._bursts.reduce((acc, b) => acc + b.velocity, 0) / this._bursts.length;
   }
 
+  computeVelocityDistribution(): Record<string, number> {
+    const dist: Record<string, number> = {};
+    for (const b of this._bursts) {
+      const bucket = Math.floor(b.velocity / 10) * 10;
+      dist[bucket] = (dist[bucket] ?? 0) + 1;
+    }
+    return dist;
+  }
+
+  computePowerLawFit(): number {
+    if (this._bursts.length < 2) return 0;
+    const energies = this._bursts.map((b) => b.energy).sort((a, b) => a - b);
+    const logE = energies.map((e) => Math.log(e + 1));
+    const logN = energies.map((_, i) => Math.log(energies.length - i));
+    const n = logE.length;
+    const sumX = logE.reduce((a, b) => a + b, 0);
+    const sumY = logN.reduce((a, b) => a + b, 0);
+    const sumXY = logE.reduce((s, x, i) => s + x * logN[i], 0);
+    const sumX2 = logE.reduce((s, x) => s + x * x, 0);
+    return (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  }
+
   setTrigger(threshold: number): void {
     this._config.triggerThreshold = threshold;
     this._state.triggerUpdated = threshold;
@@ -114,6 +152,10 @@ export class CoronalMassEjection {
       accumulated: this._accumulated,
       summary: this._summary,
       state: this._state,
+      markovState: this._markovState,
+      powerLawIndex: this._powerLawIndex.toFixed(2),
+      shockFrontRadius: this._shockFrontRadius.toFixed(3),
+      velocityDistribution: this.computeVelocityDistribution(),
     };
   }
 }

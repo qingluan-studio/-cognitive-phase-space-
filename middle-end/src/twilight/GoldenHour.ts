@@ -1,8 +1,3 @@
-/**
- * 黄金时刻模块：日出或日落前后短暂而珍贵的高质量状态。
- * 用于刻画系统中转瞬即逝的最佳运作区间。
- */
-
 export interface GoldenMoment {
   timestamp: number;
   warmth: number;
@@ -28,6 +23,8 @@ export class GoldenHour {
   private _elapsed: number = 0;
   private _window: GoldenWindow | null = null;
   private _state: Record<string, unknown> = {};
+  private _spectralAbsorption: number = 0.35;
+  private _chromaticTrajectory: number[] = [];
 
   constructor(config: GoldenHourConfig) {
     this._config = config;
@@ -49,12 +46,17 @@ export class GoldenHour {
     this._elapsed += dt;
     const progress = Math.min(1, this._elapsed / this._config.totalDuration);
     const bell = Math.sin(progress * Math.PI);
-    const warmth = this._config.peakWarmth * bell;
-    const quality = bell;
+    const airMass = 1 / Math.cos((progress * Math.PI) / 3 + 0.2);
+    const rayleighAtten = Math.exp(-this._spectralAbsorption * airMass);
+    const mieEnhancement = 1 + 0.15 * Math.pow(Math.sin(progress * Math.PI), 2);
+    const warmth = this._config.peakWarmth * bell * rayleighAtten * mieEnhancement;
+    const quality = bell * rayleighAtten;
     const remaining = this.remaining;
     const moment: GoldenMoment = { timestamp: Date.now(), warmth, quality, remaining };
     this._moments.push(moment);
     if (this._moments.length > 100) this._moments.shift();
+    this._chromaticTrajectory.push(warmth);
+    if (this._chromaticTrajectory.length > 50) this._chromaticTrajectory.shift();
     return moment;
   }
 
@@ -100,6 +102,7 @@ export class GoldenHour {
   reset(): void {
     this._moments = [];
     this._elapsed = 0;
+    this._chromaticTrajectory = [];
     this._state.resetAt = Date.now();
   }
 
@@ -111,5 +114,21 @@ export class GoldenHour {
       window: this._window,
       state: this._state,
     };
+  }
+
+  computeColorTemperatureTrajectory(): number[] {
+    return this._chromaticTrajectory.map(w => 6500 - w * 3000);
+  }
+
+  computeSpectralPurity(): number {
+    if (this._moments.length < 2) return 0;
+    const qualities = this._moments.map(m => m.quality);
+    const mean = qualities.reduce((a, b) => a + b, 0) / qualities.length;
+    const variance = qualities.reduce((a, b) => a + (b - mean) ** 2, 0) / qualities.length;
+    return mean > 0 ? 1 - Math.sqrt(variance) / mean : 0;
+  }
+
+  setSpectralAbsorption(alpha: number): void {
+    this._spectralAbsorption = Math.max(0.05, Math.min(1, alpha));
   }
 }

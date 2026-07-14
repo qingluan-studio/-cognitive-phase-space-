@@ -1,104 +1,153 @@
-/**
- * 镜像阶段：识别自身镜像，建立自我身份。
- * 模拟拉康镜像阶段，通过让系统识别自身的镜像来建立自我身份与边界感。
- */
-
-export type IdentityStage = 'pre-mirror' | 'encounter' | 'recognition' | 'identification' | 'integrated';
-
-export interface MirrorEncounter {
-  id: string;
-  stage: IdentityStage;
-  reflectionSeen: Record<string, unknown>;
-  identifiedAsSelf: boolean;
-  timestamp: number;
+export interface DevelopmentPhase {
+  phase: number;
+  recognition: number;
+  motorCoordination: number;
+  symbolicCapacity: number;
 }
 
-export interface IdentityProfile {
-  establishedAt: number;
-  stage: IdentityStage;
-  recognitionConfidence: number;
-  boundaryClarity: number;
+export type StageTransition = {
+  from: number;
+  to: number;
+  thresholdCrossed: boolean;
+  regressionRisk: number;
+};
+
+export interface MirrorStageConfig {
+  phases: number;
+  recognitionThreshold: number;
+  motorThreshold: number;
+  symbolicThreshold: number;
 }
 
 export class MirrorStage {
-  private _encounters: MirrorEncounter[] = [];
-  private _profile: IdentityProfile;
-  private _selfSignature: string;
-  private _recognitionThreshold = 0.7;
+  private _config: MirrorStageConfig;
+  private _phases: DevelopmentPhase[] = [];
+  private _transitions: StageTransition[] = [];
+  private _state: Record<string, unknown> = {};
+  private _bifurcationDiagram: number[][] = [];
+  private _orderParameter: number = 0;
+  private _controlParameter: number = 0;
 
-  constructor(selfSignature: string) {
-    this._selfSignature = selfSignature;
-    this._profile = {
-      establishedAt: 0,
-      stage: 'pre-mirror',
-      recognitionConfidence: 0,
-      boundaryClarity: 0,
-    };
+  constructor(config: MirrorStageConfig) {
+    this._config = config;
+    this._initPhases();
   }
 
-  encounter(reflection: Record<string, unknown>): MirrorEncounter {
-    const confidence = this._assessMatch(reflection);
-    const identifiedAsSelf = confidence >= this._recognitionThreshold;
-    const stage = this._advanceStage(identifiedAsSelf);
-
-    const encounter: MirrorEncounter = {
-      id: `enc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      stage,
-      reflectionSeen: { ...reflection },
-      identifiedAsSelf,
-      timestamp: Date.now(),
-    };
-    this._encounters.push(encounter);
-    if (this._encounters.length > 100) this._encounters.shift();
-
-    this._updateProfile(stage, confidence, identifiedAsSelf);
-    return encounter;
+  get phaseCount(): number {
+    return this._phases.length;
   }
 
-  private _assessMatch(reflection: Record<string, unknown>): number {
-    const signature = reflection.signature;
-    if (typeof signature !== 'string') return 0;
-    const common = this._commonPrefix(signature, this._selfSignature);
-    return common / Math.max(this._selfSignature.length, signature.length);
+  get currentPhase(): DevelopmentPhase | null {
+    return this._phases.length > 0 ? this._phases[this._phases.length - 1] : null;
   }
 
-  private _commonPrefix(a: string, b: string): number {
-    let i = 0;
-    while (i < a.length && i < b.length && a[i] === b[i]) i++;
-    return i;
+  get orderParameter(): number {
+    return this._orderParameter;
   }
 
-  private _advanceStage(identified: boolean): IdentityStage {
-    const current = this._profile.stage;
-    if (current === 'pre-mirror') return 'encounter';
-    if (current === 'encounter') return identified ? 'recognition' : 'encounter';
-    if (current === 'recognition') return identified ? 'identification' : 'recognition';
-    if (current === 'identification') return identified ? 'integrated' : 'identification';
-    return 'integrated';
-  }
-
-  private _updateProfile(stage: IdentityStage, confidence: number, identified: boolean): void {
-    this._profile.stage = stage;
-    this._profile.recognitionConfidence = Math.max(this._profile.recognitionConfidence, confidence);
-    this._profile.boundaryClarity = Math.min(1, this._profile.boundaryClarity + (identified ? 0.1 : 0.02));
-    if (stage === 'integrated' && this._profile.establishedAt === 0) {
-      this._profile.establishedAt = Date.now();
+  private _initPhases(): void {
+    this._phases = [];
+    for (let i = 0; i < this._config.phases; i++) {
+      this._phases.push({
+        phase: i,
+        recognition: 0,
+        motorCoordination: 0,
+        symbolicCapacity: 0,
+      });
     }
   }
 
-  setRecognitionThreshold(value: number): void {
-    this._recognitionThreshold = Math.max(0, Math.min(1, value));
+  private _computeOrderParameter(): void {
+    const last = this.currentPhase;
+    if (!last) return;
+    this._orderParameter =
+      (last.recognition + last.motorCoordination + last.symbolicCapacity) / 3;
   }
 
-  getProfile(): Readonly<IdentityProfile> {
-    return { ...this._profile };
+  private _logisticGrowth(r: number, x: number): number {
+    return r * x * (1 - x);
   }
 
-  getEncounters(): MirrorEncounter[] {
-    return [...this._encounters];
+  advance(recognitionDelta: number, motorDelta: number, symbolicDelta: number): DevelopmentPhase {
+    const current = this.currentPhase;
+    if (!current) return { phase: 0, recognition: 0, motorCoordination: 0, symbolicCapacity: 0 };
+    current.recognition = Math.min(1, current.recognition + recognitionDelta);
+    current.motorCoordination = Math.min(1, current.motorCoordination + motorDelta);
+    current.symbolicCapacity = Math.min(1, current.symbolicCapacity + symbolicDelta);
+    this._controlParameter += 0.01;
+    const nextPhaseValue = this._logisticGrowth(2 + this._controlParameter * 2, current.recognition);
+    if (nextPhaseValue > 0.8 && current.phase < this._config.phases - 1) {
+      const nextPhase = this._phases[current.phase + 1];
+      const transition: StageTransition = {
+        from: current.phase,
+        to: nextPhase.phase,
+        thresholdCrossed: true,
+        regressionRisk: 1 - current.motorCoordination,
+      };
+      this._transitions.push(transition);
+      if (this._transitions.length > 20) this._transitions.shift();
+      this._state.lastTransition = transition;
+    }
+    this._computeOrderParameter();
+    this._bifurcationDiagram.push([this._controlParameter, this._orderParameter]);
+    if (this._bifurcationDiagram.length > 50) this._bifurcationDiagram.shift();
+    return current;
   }
 
-  get isIntegrated(): boolean {
-    return this._profile.stage === 'integrated';
+  currentStage(): number {
+    const current = this.currentPhase;
+    if (!current) return 0;
+    if (current.symbolicCapacity >= this._config.symbolicThreshold) return 3;
+    if (current.motorCoordination >= this._config.motorThreshold) return 2;
+    if (current.recognition >= this._config.recognitionThreshold) return 1;
+    return 0;
+  }
+
+  isRecognizing(): boolean {
+    const current = this.currentPhase;
+    return current ? current.recognition >= this._config.recognitionThreshold : false;
+  }
+
+  regressionProbability(): number {
+    const lastTransition = this._transitions[this._transitions.length - 1];
+    return lastTransition ? lastTransition.regressionRisk : 0;
+  }
+
+  computeBifurcationEntropy(): number {
+    if (this._bifurcationDiagram.length === 0) return 0;
+    const values = this._bifurcationDiagram.map(([, y]) => y);
+    const bins = new Array(10).fill(0);
+    for (const v of values) {
+      const idx = Math.min(9, Math.floor(v * 10));
+      bins[idx]++;
+    }
+    const total = values.length;
+    let entropy = 0;
+    for (const b of bins) {
+      const p = b / total;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    return entropy;
+  }
+
+  reset(): void {
+    this._initPhases();
+    this._transitions = [];
+    this._bifurcationDiagram = [];
+    this._orderParameter = 0;
+    this._controlParameter = 0;
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      phases: this._phases.length,
+      currentStage: this.currentStage(),
+      transitions: this._transitions.length,
+      recognizing: this.isRecognizing(),
+      state: this._state,
+      orderParameter: this._orderParameter.toFixed(4),
+      bifurcationEntropy: this.computeBifurcationEntropy().toFixed(4),
+    };
   }
 }

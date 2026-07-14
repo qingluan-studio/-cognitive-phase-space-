@@ -1,8 +1,3 @@
-/**
- * 无限回声室模块：模拟永不衰减的重复反射，形成无限循环的回声。
- * 用于追踪信号在闭合空间中的永久持续路径。
- */
-
 export interface EchoReflection {
   iteration: number;
   amplitude: number;
@@ -28,9 +23,13 @@ export class InfiniteEchoChamber {
   private _source: number = 0;
   private _iteration: number = 0;
   private _state: Record<string, unknown> = {};
+  private _feedbackMatrix: number[][] = [];
+  private _modeShapes: number[][] = [];
+  private _eigenvalueHistory: number[] = [];
 
   constructor(config: EchoChamberConfig) {
     this._config = config;
+    this._initFeedbackMatrix();
   }
 
   get reflectionCount(): number {
@@ -43,6 +42,46 @@ export class InfiniteEchoChamber {
 
   get totalEnergy(): number {
     return this._reflections.reduce((acc, r) => acc + r.amplitude, 0);
+  }
+
+  get dominantEigenvalue(): number {
+    return this._eigenvalueHistory.length > 0 ? this._eigenvalueHistory[this._eigenvalueHistory.length - 1] : 0;
+  }
+
+  private _initFeedbackMatrix(): void {
+    const n = 4;
+    this._feedbackMatrix = [];
+    for (let i = 0; i < n; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < n; j++) {
+        row.push(i === j ? this._config.decayFactor : Math.random() * 0.1);
+      }
+      this._feedbackMatrix.push(row);
+    }
+  }
+
+  private _powerIteration(matrix: number[][]): number {
+    const n = matrix.length;
+    let vec = new Array(n).fill(1 / n);
+    for (let iter = 0; iter < 15; iter++) {
+      const next = new Array(n).fill(0);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          next[i] += matrix[i][j] * vec[j];
+        }
+      }
+      const norm = Math.sqrt(next.reduce((s, v) => s + v * v, 0));
+      vec = next.map((v) => v / (norm || 1));
+    }
+    let eigenvalue = 0;
+    for (let i = 0; i < n; i++) {
+      let sum = 0;
+      for (let j = 0; j < n; j++) {
+        sum += matrix[i][j] * vec[j];
+      }
+      eigenvalue += sum * vec[i];
+    }
+    return eigenvalue;
   }
 
   emit(source: number): EchoReflection {
@@ -62,9 +101,12 @@ export class InfiniteEchoChamber {
   step(): EchoReflection {
     this._iteration++;
     const last = this._reflections[this._reflections.length - 1];
+    const eigenvalue = this._powerIteration(this._feedbackMatrix);
+    this._eigenvalueHistory.push(eigenvalue);
+    if (this._eigenvalueHistory.length > 20) this._eigenvalueHistory.shift();
     const amplitude = this._config.decayFactor >= 1
       ? last.amplitude
-      : last.amplitude * this._config.decayFactor;
+      : last.amplitude * this._config.decayFactor * Math.abs(eigenvalue);
     const reflection: EchoReflection = {
       iteration: this._iteration,
       amplitude,
@@ -79,7 +121,7 @@ export class InfiniteEchoChamber {
   }
 
   trace(): EchoTrace {
-    const isStable = this._config.decayFactor >= 1;
+    const isStable = this._config.decayFactor >= 1 || this.dominantEigenvalue > 1;
     return {
       reflections: [...this._reflections],
       totalEnergy: this.totalEnergy,
@@ -108,6 +150,7 @@ export class InfiniteEchoChamber {
     this._reflections = [];
     this._iteration = 0;
     this._state.clearedAt = Date.now();
+    this._eigenvalueHistory = [];
   }
 
   report(): Record<string, unknown> {
@@ -116,6 +159,7 @@ export class InfiniteEchoChamber {
       iteration: this._iteration,
       totalEnergy: this.totalEnergy,
       state: this._state,
+      dominantEigenvalue: this.dominantEigenvalue.toFixed(4),
     };
   }
 }

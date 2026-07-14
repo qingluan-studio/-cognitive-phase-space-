@@ -1,124 +1,120 @@
-/**
- * 疤组织强度模块：修复后的部位比原始结构更强韧，
- * 通过加固伤口区域形成致密疤痕组织，提供额外保护。
- */
-
-export interface TissueRegion {
+export interface ScarLayer {
   id: string;
-  originalStrength: number;
-  currentStrength: number;
-  scarred: boolean;
-  scarLayers: number;
-  reinforcedAt: number | null;
+  youngsModulus: number;
+  thickness: number;
+  stressConcentration: number;
+  fractureToughness: number;
 }
 
-export interface RepairResult {
-  regionId: string;
-  newStrength: number;
-  layersAdded: number;
-  reinforced: boolean;
-  repairedAt: number;
+export interface StressResult {
+  layerId: string;
+  stress: number;
+  strain: number;
+  energyRelease: number;
+  failureProbability: number;
 }
 
 export class ScarTissueStrength {
-  private _regions: Map<string, TissueRegion> = new Map();
-  private _repairs: RepairResult[] = [];
-  private _scarMultiplier = 1.5;
-  private _maxLayers = 5;
-  private _maxStrength = 10.0;
+  private _layers: Map<string, ScarLayer> = new Map();
+  private _results: StressResult[] = [];
+  private _state: Record<string, unknown> = {};
+  private _compositeModulus: number = 0;
+  private _totalThickness: number = 0;
 
-  registerRegion(region: TissueRegion): void {
-    if (region.currentStrength === 0) region.currentStrength = region.originalStrength;
-    this._regions.set(region.id, region);
+  constructor() {}
+
+  get layerCount(): number {
+    return this._layers.size;
   }
 
-  damage(regionId: string, amount: number): boolean {
-    const region = this._regions.get(regionId);
-    if (!region) return false;
-    region.currentStrength = Math.max(0, region.currentStrength - amount);
-    return true;
+  get compositeModulus(): number {
+    return this._compositeModulus;
   }
 
-  repair(regionId: string): RepairResult | null {
-    const region = this._regions.get(regionId);
-    if (!region) return null;
-    if (region.currentStrength >= region.originalStrength) {
-      return {
-        regionId,
-        newStrength: region.currentStrength,
-        layersAdded: 0,
-        reinforced: false,
-        repairedAt: Date.now(),
-      };
+  addLayer(id: string, youngsModulus: number, thickness: number, toughness: number): void {
+    this._layers.set(id, {
+      id,
+      youngsModulus,
+      thickness,
+      stressConcentration: 1,
+      fractureToughness: toughness,
+    });
+    this._recomputeComposite();
+  }
+
+  private _recomputeComposite(): void {
+    let numerator = 0;
+    let denominator = 0;
+    for (const layer of this._layers.values()) {
+      numerator += layer.youngsModulus * layer.thickness;
+      denominator += layer.thickness;
     }
-    region.scarLayers = Math.min(this._maxLayers, region.scarLayers + 1);
-    const newStrength = Math.min(
-      this._maxStrength,
-      region.originalStrength * Math.pow(this._scarMultiplier, region.scarLayers)
-    );
-    region.currentStrength = newStrength;
-    region.scarred = true;
-    region.reinforcedAt = Date.now();
-    const result: RepairResult = {
-      regionId,
-      newStrength,
-      layersAdded: 1,
-      reinforced: true,
-      repairedAt: Date.now(),
+    this._compositeModulus = denominator > 0 ? numerator / denominator : 0;
+    this._totalThickness = denominator;
+  }
+
+  applyStress(layerId: string, force: number): StressResult | null {
+    const layer = this._layers.get(layerId);
+    if (!layer) return null;
+    const stress = force / layer.thickness;
+    const strain = stress / (layer.youngsModulus || 1);
+    const kt = layer.stressConcentration;
+    const maxStress = kt * stress;
+    const energyRelease = (maxStress ** 2 * Math.PI * layer.thickness) / (layer.youngsModulus || 1);
+    const failureProbability = 1 / (1 + Math.exp(-(maxStress - layer.fractureToughness)));
+    const result: StressResult = { layerId, stress, strain, energyRelease, failureProbability };
+    this._results.push(result);
+    if (this._results.length > 50) this._results.shift();
+    return result;
+  }
+
+  updateStressConcentration(layerId: string, notchDepth: number): void {
+    const layer = this._layers.get(layerId);
+    if (!layer) return;
+    const a = notchDepth;
+    const w = layer.thickness;
+    layer.stressConcentration = 1 + 2 * Math.sqrt(a / (w - a));
+  }
+
+  ruleOfMixtures(): { upper: number; lower: number } {
+    const volumes = Array.from(this._layers.values()).map((l) => l.thickness);
+    const total = volumes.reduce((s, v) => s + v, 0);
+    if (total === 0) return { upper: 0, lower: 0 };
+    const upper = Array.from(this._layers.values()).reduce((s, l) => s + l.youngsModulus * (l.thickness / total), 0);
+    const lower = 1 / Array.from(this._layers.values()).reduce((s, l) => s + (l.thickness / total) / (l.youngsModulus || 1), 0);
+    return { upper, lower };
+  }
+
+  griffithCriterion(layerId: string, crackLength: number): number {
+    const layer = this._layers.get(layerId);
+    if (!layer) return 0;
+    const gamma = layer.fractureToughness;
+    const e = layer.youngsModulus;
+    return Math.sqrt((2 * gamma * e) / (Math.PI * crackLength));
+  }
+
+  totalEnergyAbsorption(): number {
+    return this._results.reduce((s, r) => s + r.energyRelease, 0);
+  }
+
+  weakestLayer(): ScarLayer | null {
+    if (this._layers.size === 0) return null;
+    return Array.from(this._layers.values()).reduce((best, l) => (l.fractureToughness < best.fractureToughness ? l : best));
+  }
+
+  stressConcentrationFactor(layerId: string, notchRadius: number): number {
+    const layer = this._layers.get(layerId);
+    if (!layer) return 0;
+    return 1 + 2 * Math.sqrt(layer.thickness / (notchRadius || 1));
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      layers: this._layers.size,
+      compositeModulus: this._compositeModulus,
+      totalThickness: this._totalThickness,
+      energyAbsorption: this.totalEnergyAbsorption(),
+      state: this._state,
     };
-    this._repairs.push(result);
-    if (this._repairs.length > 200) this._repairs.shift();
-    return result;
-  }
-
-  isReinforced(regionId: string): boolean {
-    const region = this._regions.get(regionId);
-    return !!region && region.scarred;
-  }
-
-  computeDefensiveBonus(): number {
-    let bonus = 0;
-    for (const region of this._regions.values()) {
-      if (region.scarred) {
-        bonus += (region.currentStrength - region.originalStrength);
-      }
-    }
-    return bonus;
-  }
-
-  findStrongestScar(): TissueRegion | null {
-    let max = 0;
-    let result: TissueRegion | null = null;
-    for (const region of this._regions.values()) {
-      if (region.scarred && region.currentStrength > max) {
-        max = region.currentStrength;
-        result = region;
-      }
-    }
-    return result;
-  }
-
-  setScarMultiplier(value: number): void {
-    this._scarMultiplier = Math.max(1, value);
-  }
-
-  setMaxLayers(value: number): void {
-    this._maxLayers = Math.max(1, value);
-  }
-
-  getRepairHistory(limit: number = 50): RepairResult[] {
-    return this._repairs.slice(-limit);
-  }
-
-  getRegion(regionId: string): TissueRegion | null {
-    return this._regions.get(regionId) ?? null;
-  }
-
-  get regionCount(): number {
-    return this._regions.size;
-  }
-
-  get scarredCount(): number {
-    return Array.from(this._regions.values()).filter(r => r.scarred).length;
   }
 }

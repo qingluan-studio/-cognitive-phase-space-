@@ -1,103 +1,199 @@
-/**
- * 远程创世种子：跨进程投射可自生长的代码胚胎。
- * 把一个可自生长的代码胚胎打包，跨进程投射到远程运行时，
- * 在远程环境中生根发芽，长成独立的运行单元。
- */
-
-export interface CodeEmbryo {
-  id: string;
-  genome: string;
-  nutrients: Record<string, unknown>;
-  growthStage: number;
-  viability: number;
+export interface SeedCell {
+  x: number;
+  y: number;
+  state: number;
+  potential: number;
 }
 
-export type ProjectionStatus = 'packed' | 'projected' | 'germinating' | 'grown' | 'dead';
-
-export interface ProjectionTarget {
-  processId: string;
-  endpoint: string;
-  available: boolean;
+export interface SeedConfig {
+  gridSize: number;
+  initialDensity: number;
+  birthThreshold: number;
+  growthRate: number;
 }
 
 export class TelepoieticSeed {
-  private _embryo: CodeEmbryo | null = null;
-  private _status: ProjectionStatus = 'packed';
-  private _targets: Map<string, ProjectionTarget> = new Map();
-  private _projections: { embryoId: string; target: string; projectedAt: number }[] = [];
+  private _config: SeedConfig;
+  private _grid: SeedCell[][] = [];
+  private _generation: number = 0;
+  private _entropyHistory: number[] = [];
+  private _growthFront: number = 0;
+  private _vonNeumannRadius: number = 1;
 
-  /** 打包一个可自生长的代码胚胎。 */
-  pack(genome: string, nutrients: Record<string, unknown>): CodeEmbryo {
-    const embryo: CodeEmbryo = {
-      id: `embryo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      genome,
-      nutrients,
-      growthStage: 0,
-      viability: 1,
-    };
-    this._embryo = embryo;
-    this._status = 'packed';
-    return embryo;
+  constructor(config: SeedConfig) {
+    this._config = config;
+    this._initializeGrid();
   }
 
-  /** 注册一个可投射的远程目标。 */
-  registerTarget(target: ProjectionTarget): void {
-    this._targets.set(target.processId, target);
+  get gridSize(): number {
+    return this._config.gridSize;
+  }
+  get generation(): number {
+    return this._generation;
+  }
+  get liveCellCount(): number {
+    let count = 0;
+    for (const row of this._grid) {
+      for (const cell of row) {
+        if (cell.state > 0) count++;
+      }
+    }
+    return count;
+  }
+  private _initializeGrid(): void {
+    this._grid = [];
+    const n = this._config.gridSize;
+    for (let y = 0; y < n; y++) {
+      const row: SeedCell[] = [];
+      for (let x = 0; x < n; x++) {
+        row.push({ x, y, state: Math.random() < this._config.initialDensity ? 1 : 0, potential: 0 });
+      }
+      this._grid.push(row);
+    }
   }
 
-  /** 把胚胎投射到远程目标。 */
-  project(targetId: string): boolean {
-    if (!this._embryo) return false;
-    const target = this._targets.get(targetId);
-    if (!target || !target.available) return false;
-    this._status = 'projected';
-    this._projections.push({
-      embryoId: this._embryo.id,
-      target: targetId,
-      projectedAt: Date.now(),
-    });
+  grow(): void {
+    const n = this._config.gridSize;
+    const newGrid: SeedCell[][] = [];
+    for (let y = 0; y < n; y++) {
+      const row: SeedCell[] = [];
+      for (let x = 0; x < n; x++) {
+        const neighbors = this._countVonNeumannNeighbors(x, y);
+        const current = this._grid[y][x];
+        let newState = current.state, newPotential = current.potential;
+        if (current.state > 0) {
+          if (neighbors < 2 || neighbors > 3) {
+            newState = 0;
+            newPotential *= 0.5;
+          } else {
+            newPotential += this._config.growthRate;
+          }
+        } else if (neighbors >= this._config.birthThreshold) {
+          newState = 1;
+          newPotential = neighbors * this._config.growthRate;
+        }
+        row.push({ x, y, state: newState, potential: newPotential });
+      }
+      newGrid.push(row);
+    }
+    this._grid = newGrid;
+    this._generation++;
+    this._updateEntropy();
+    this._growthFront = this._computeGrowthFront();
+  }
+  private _countVonNeumannNeighbors(x: number, y: number): number {
+    let count = 0;
+    const r = this._vonNeumannRadius;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        if (Math.abs(dx) + Math.abs(dy) > r) continue;
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && nx < this._config.gridSize && ny >= 0 && ny < this._config.gridSize) {
+          count += this._grid[ny][nx].state > 0 ? 1 : 0;
+        }
+      }
+    }
+    return count;
+  }
+
+  private _updateEntropy(): void {
+    const live = this.liveCellCount;
+    const total = this._config.gridSize * this._config.gridSize;
+    const dead = total - live;
+    if (live === 0 || dead === 0) {
+      this._entropyHistory.push(0);
+    } else {
+      const pLive = live / total, pDead = dead / total;
+      this._entropyHistory.push(-pLive * Math.log2(pLive) - pDead * Math.log2(pDead));
+    }
+    if (this._entropyHistory.length > 50) this._entropyHistory.shift();
+  }
+  private _computeGrowthFront(): number {
+    let maxDist = 0;
+    const center = this._config.gridSize / 2;
+    for (const row of this._grid) {
+      for (const cell of row) {
+        if (cell.state > 0) {
+          const dist = Math.sqrt((cell.x - center) ** 2 + (cell.y - center) ** 2);
+          if (dist > maxDist) maxDist = dist;
+        }
+      }
+    }
+    return maxDist;
+  }
+
+  seedAt(x: number, y: number, potential: number = 1): boolean {
+    if (x < 0 || x >= this._config.gridSize || y < 0 || y >= this._config.gridSize) return false;
+    this._grid[y][x].state = 1;
+    this._grid[y][x].potential = potential;
+    return true;
+  }
+  extinguishAt(x: number, y: number): boolean {
+    if (x < 0 || x >= this._config.gridSize || y < 0 || y >= this._config.gridSize) return false;
+    this._grid[y][x].state = 0;
+    this._grid[y][x].potential = 0;
     return true;
   }
 
-  /** 在远程目标处开始发芽。 */
-  germinate(): boolean {
-    if (this._status !== 'projected' || !this._embryo) return false;
-    this._status = 'germinating';
-    this._embryo.growthStage = 1;
-    return true;
+  getCell(x: number, y: number): SeedCell | null {
+    if (x < 0 || x >= this._config.gridSize || y < 0 || y >= this._config.gridSize) return null;
+    return { ...this._grid[y][x] };
+  }
+  getDensity(): number {
+    const total = this._config.gridSize * this._config.gridSize;
+    return total > 0 ? this.liveCellCount / total : 0;
   }
 
-  /** 让胚胎在远程持续生长一个阶段。 */
-  grow(): CodeEmbryo | null {
-    if (!this._embryo || this._status !== 'germinating') return null;
-    this._embryo.growthStage++;
-    this._embryo.viability = Math.max(0, this._embryo.viability - 0.05);
-    if (this._embryo.growthStage >= 5) this._status = 'grown';
-    if (this._embryo.viability <= 0) this._status = 'dead';
-    return this._embryo;
+  reset(): void {
+    this._generation = 0;
+    this._entropyHistory = [];
+    this._growthFront = 0;
+    this._initializeGrid();
+  }
+  getEntropyHistory(): number[] {
+    return [...this._entropyHistory];
   }
 
-  /** 与母体分离，成为独立运行单元。 */
-  detach(): boolean {
-    if (this._status !== 'grown') return false;
-    this._embryo = null;
-    this._status = 'packed';
-    return true;
+  getGrowthFront(): number {
+    return this._growthFront;
+  }
+  computeCorrelationLength(): number {
+    const n = this._config.gridSize;
+    let totalPairs = 0, correlatedPairs = 0;
+    for (let y1 = 0; y1 < n; y1++) {
+      for (let x1 = 0; x1 < n; x1++) {
+        for (let dy = 1; dy <= 3; dy++) {
+          for (let dx = 0; dx <= 3; dx++) {
+            const x2 = x1 + dx, y2 = y1 + dy;
+            if (x2 >= n || y2 >= n) continue;
+            totalPairs++;
+            if (this._grid[y1][x1].state === this._grid[y2][x2].state) correlatedPairs++;
+          }
+        }
+      }
+    }
+    return totalPairs > 0 ? correlatedPairs / totalPairs : 0;
   }
 
-  getEmbryo(): CodeEmbryo | null {
-    return this._embryo;
+  setBirthThreshold(t: number): void {
+    this._config.birthThreshold = Math.max(1, Math.min(8, t));
   }
 
-  get status(): ProjectionStatus {
-    return this._status;
+  setVonNeumannRadius(r: number): void {
+    this._vonNeumannRadius = Math.max(1, Math.min(3, r));
   }
 
-  get projections(): { embryoId: string; target: string; projectedAt: number }[] {
-    return [...this._projections];
-  }
-
-  getTargets(): ProjectionTarget[] {
-    return [...this._targets.values()];
+  computeMeanPotential(): number {
+    let sum = 0, count = 0;
+    for (const row of this._grid) {
+      for (const cell of row) {
+        if (cell.state > 0) {
+          sum += cell.potential;
+          count++;
+        }
+      }
+    }
+    return count > 0 ? sum / count : 0;
   }
 }

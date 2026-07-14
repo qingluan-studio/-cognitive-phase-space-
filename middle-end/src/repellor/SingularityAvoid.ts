@@ -1,126 +1,126 @@
-/**
- * SingularityAvoid - 奇点规避
- * 永远避开无穷大点，当状态接近奇点时施加强力排斥，
- * 防止系统在发散点崩溃。
- */
-
-export interface SingularityAvoidData {
-  readonly avoidId: string;
-  singularityPosition: number;
-  safeDistance: number;
-  maxForce: number;
+export interface SingularityData {
+  readonly singularityId: string;
+  x: number;
+  y: number;
+  strength: number;
+  range: number;
 }
 
-export interface AvoidanceResult {
-  position: number;
-  distance: number;
-  forceApplied: number;
-  avoided: boolean;
+export interface AgentState {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  safe: boolean;
 }
 
 export class SingularityAvoid {
-  private _data: SingularityAvoidData;
-  private _results: AvoidanceResult[] = [];
-  private _avoidanceCount: number = 0;
-  private _closestApproach: number = Infinity;
-  private _currentForce: number = 0;
+  private _singularities: Map<string, SingularityData> = new Map();
+  private _agents: Map<string, AgentState> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _lyapunov: number = 0;
+  private _barrierCertificate: number = 0;
 
-  constructor(data: SingularityAvoidData) {
-    this._data = { ...data };
+  constructor() {}
+
+  get singularityCount(): number {
+    return this._singularities.size;
   }
 
-  get avoidId(): string {
-    return this._data.avoidId;
+  get agentCount(): number {
+    return this._agents.size;
   }
 
-  get singularityPosition(): number {
-    return this._data.singularityPosition;
+  addSingularity(data: SingularityData): void {
+    this._singularities.set(data.singularityId, { ...data });
   }
 
-  get safeDistance(): number {
-    return this._data.safeDistance;
+  registerAgent(id: string, x: number, y: number, vx: number, vy: number): void {
+    this._agents.set(id, { id, x, y, vx, vy, safe: true });
   }
 
-  public check(position: number): AvoidanceResult {
-    const distance = Math.abs(position - this._data.singularityPosition);
-    this._closestApproach = Math.min(this._closestApproach, distance);
-    let forceApplied = 0;
-    let avoided = true;
-    if (distance < this._data.safeDistance) {
-      const urgency = 1 - distance / this._data.safeDistance;
-      forceApplied = Math.min(this._data.maxForce, urgency * this._data.maxForce * 2);
-      const direction = position > this._data.singularityPosition ? 1 : -1;
-      const correctedPosition = this._data.singularityPosition + direction * this._data.safeDistance;
-      this._currentForce = forceApplied;
-      this._avoidanceCount++;
-      avoided = true;
-      const result: AvoidanceResult = {
-        position: correctedPosition,
-        distance: this._data.safeDistance,
-        forceApplied,
-        avoided,
-      };
-      this._results.push(result);
-      if (this._results.length > 40) {
-        this._results.shift();
-      }
-      return result;
+  computeRepulsion(agentId: string): { fx: number; fy: number; potential: number } {
+    const agent = this._agents.get(agentId);
+    if (!agent) return { fx: 0, fy: 0, potential: 0 };
+    let fx = 0;
+    let fy = 0;
+    let potential = 0;
+    for (const s of this._singularities.values()) {
+      const dx = agent.x - s.x;
+      const dy = agent.y - s.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist === 0 || dist > s.range) continue;
+      const force = s.strength / (dist * dist);
+      const norm = dist;
+      fx += (dx / norm) * force;
+      fy += (dy / norm) * force;
+      potential += s.strength / dist;
     }
-    this._currentForce = 0;
-    const result: AvoidanceResult = { position, distance, forceApplied, avoided };
-    this._results.push(result);
-    if (this._results.length > 40) {
-      this._results.shift();
+    return { fx, fy, potential };
+  }
+
+  stepAgent(agentId: string, dt: number): void {
+    const agent = this._agents.get(agentId);
+    if (!agent) return;
+    const { fx, fy, potential } = this.computeRepulsion(agentId);
+    agent.vx += fx * dt;
+    agent.vy += fy * dt;
+    agent.x += agent.vx * dt;
+    agent.y += agent.vy * dt;
+    agent.safe = potential < 10;
+    this._lyapunov = potential;
+    this._barrierCertificate = Math.min(0, distToNearest(agent, this._singularities));
+  }
+
+  isSafe(agentId: string): boolean {
+    return this._agents.get(agentId)?.safe ?? false;
+  }
+
+  gradientDescentStep(agentId: string, stepSize: number): { x: number; y: number } {
+    const agent = this._agents.get(agentId);
+    if (!agent) return { x: 0, y: 0 };
+    const { fx, fy } = this.computeRepulsion(agentId);
+    agent.x += fx * stepSize;
+    agent.y += fy * stepSize;
+    return { x: agent.x, y: agent.y };
+  }
+
+  lyapunovValue(): number {
+    return this._lyapunov;
+  }
+
+  barrierCertificate(): number {
+    return this._barrierCertificate;
+  }
+
+  safetyMargin(agentId: string): number {
+    const agent = this._agents.get(agentId);
+    if (!agent) return 0;
+    let minDist = Infinity;
+    for (const s of this._singularities.values()) {
+      const d = Math.sqrt((agent.x - s.x) ** 2 + (agent.y - s.y) ** 2);
+      if (d < minDist) minDist = d;
     }
-    return result;
+    return minDist;
   }
 
-  public setSafeDistance(distance: number): void {
-    this._data.safeDistance = Math.max(0.001, distance);
-  }
-
-  public setMaxForce(force: number): void {
-    this._data.maxForce = Math.max(0, force);
-  }
-
-  public relocateSingularity(newPosition: number): void {
-    this._data.singularityPosition = newPosition;
-    this._closestApproach = Infinity;
-  }
-
-  public computeSafetyMargin(position: number): number {
-    const distance = Math.abs(position - this._data.singularityPosition);
-    return distance - this._data.safeDistance;
-  }
-
-  public isInDanger(position: number): boolean {
-    return this.computeSafetyMargin(position) < 0;
-  }
-
-  public tightenSafeZone(factor: number): void {
-    this._data.safeDistance *= factor;
-  }
-
-  public measureVigilance(): number {
-    if (this._results.length === 0) {
-      return 0;
-    }
-    const recent = this._results.slice(-20);
-    const triggered = recent.filter((r) => r.forceApplied > 0).length;
-    return triggered / recent.length;
-  }
-
-  public avoidReport(): Record<string, unknown> {
+  report(): Record<string, unknown> {
     return {
-      avoidId: this.avoidId,
-      singularityPosition: this._data.singularityPosition,
-      safeDistance: this._data.safeDistance.toFixed(4),
-      maxForce: this._data.maxForce.toFixed(3),
-      currentForce: this._currentForce.toFixed(3),
-      avoidanceCount: this._avoidanceCount,
-      closestApproach: this._closestApproach === Infinity ? 'none' : this._closestApproach.toFixed(4),
-      vigilance: this.measureVigilance().toFixed(3),
-      resultCount: this._results.length,
+      singularities: this._singularities.size,
+      agents: this._agents.size,
+      lyapunov: this._lyapunov,
+      barrier: this._barrierCertificate,
+      state: this._state,
     };
   }
+}
+
+function distToNearest(agent: AgentState, singularities: Map<string, SingularityData>): number {
+  let min = Infinity;
+  for (const s of singularities.values()) {
+    const d = Math.sqrt((agent.x - s.x) ** 2 + (agent.y - s.y) ** 2);
+    if (d < min) min = d;
+  }
+  return min;
 }

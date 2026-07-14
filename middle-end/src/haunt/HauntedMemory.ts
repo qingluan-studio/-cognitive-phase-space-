@@ -1,101 +1,171 @@
-/**
- * 闹鬼记忆：被删除的数据偶尔闪回。
- * 已被删除的数据片段以闪回形式重新出现在内存中，形成闹鬼现象。
- */
-
-export type FlashbackTrigger = 'random' | 'associative' | 'temporal' | 'corruption';
-
-export interface DeletedMemory {
+export interface MemoryBlock {
   id: string;
-  originalKey: string;
-  content: unknown;
-  deletedAt: number;
-  flashbackPotential: number;
+  size: number;
+  allocatedAt: number;
+  freedAt: number | null;
+  references: number;
+  owner: string;
 }
 
-export interface FlashbackEvent {
-  id: string;
-  memoryId: string;
-  trigger: FlashbackTrigger;
-  glimpsedContent: unknown;
-  intensity: number;
-  occurredAt: number;
+export interface MemorySnapshot {
+  timestamp: number;
+  totalAllocated: number;
+  totalFreed: number;
+  activeBlocks: number;
+  fragmentationIndex: number;
 }
 
 export class HauntedMemory {
-  private _deleted: Map<string, DeletedMemory> = new Map();
-  private _flashbacks: FlashbackEvent[] = [];
-  private _flashbackProbability = 0.1;
-  private _hauntingIntensity = 1.0;
+  private _blocks: Map<string, MemoryBlock> = new Map();
+  private _snapshots: MemorySnapshot[] = [];
+  private _state: Record<string, unknown> = {};
+  private _referenceGraph: Map<string, Set<string>> = new Map();
+  private _leakScore: Map<string, number> = new Map();
+  private _fragmentationHistory: number[] = [];
 
-  delete(key: string, content: unknown): DeletedMemory {
-    const memory: DeletedMemory = {
-      id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      originalKey: key,
-      content,
-      deletedAt: Date.now(),
-      flashbackPotential: Math.random() * this._hauntingIntensity,
+  allocate(id: string, size: number, owner: string): MemoryBlock {
+    const block: MemoryBlock = {
+      id,
+      size,
+      allocatedAt: Date.now(),
+      freedAt: null,
+      references: 1,
+      owner,
     };
-    this._deleted.set(memory.id, memory);
-    return memory;
+    this._blocks.set(id, block);
+    this._referenceGraph.set(id, new Set());
+    this._leakScore.set(id, 0);
+    return block;
   }
 
-  attemptFlashback(trigger: FlashbackTrigger = 'random'): FlashbackEvent | null {
-    if (Math.random() > this._flashbackProbability) return null;
-    const candidates = Array.from(this._deleted.values()).filter(m => m.flashbackPotential > 0.3);
-    if (candidates.length === 0) return null;
-    const memory = candidates[Math.floor(Math.random() * candidates.length)];
+  free(id: string): boolean {
+    const block = this._blocks.get(id);
+    if (!block || block.freedAt !== null) return false;
+    block.freedAt = Date.now();
+    block.references = 0;
+    this._referenceGraph.delete(id);
+    this._leakScore.delete(id);
+    return true;
+  }
 
-    const glimpsedContent = this._distort(memory.content);
-    const intensity = memory.flashbackPotential * (0.5 + Math.random() * 0.5);
-    memory.flashbackPotential *= 0.9;
+  addReference(from: string, to: string): boolean {
+    const fromBlock = this._blocks.get(from);
+    const toBlock = this._blocks.get(to);
+    if (!fromBlock || !toBlock) return false;
+    const refs = this._referenceGraph.get(from) ?? new Set();
+    refs.add(to);
+    this._referenceGraph.set(from, refs);
+    toBlock.references++;
+    return true;
+  }
 
-    const event: FlashbackEvent = {
-      id: `flash-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      memoryId: memory.id,
-      trigger,
-      glimpsedContent,
-      intensity,
-      occurredAt: Date.now(),
+  removeReference(from: string, to: string): boolean {
+    const refs = this._referenceGraph.get(from);
+    if (!refs || !refs.has(to)) return false;
+    refs.delete(to);
+    const toBlock = this._blocks.get(to);
+    if (toBlock) toBlock.references--;
+    return true;
+  }
+
+  snapshot(): MemorySnapshot {
+    const active = Array.from(this._blocks.values()).filter(b => b.freedAt === null);
+    const totalAllocated = this._blocks.size;
+    const totalFreed = Array.from(this._blocks.values()).filter(b => b.freedAt !== null).length;
+    const frag = this._computeFragmentation();
+    this._fragmentationHistory.push(frag);
+    if (this._fragmentationHistory.length > 100) this._fragmentationHistory.shift();
+    const snap: MemorySnapshot = {
+      timestamp: Date.now(),
+      totalAllocated,
+      totalFreed,
+      activeBlocks: active.length,
+      fragmentationIndex: frag,
     };
-    this._flashbacks.push(event);
-    if (this._flashbacks.length > 100) this._flashbacks.shift();
-    return event;
+    this._snapshots.push(snap);
+    if (this._snapshots.length > 200) this._snapshots.shift();
+    this._updateLeakScores();
+    return snap;
   }
 
-  private _distort(content: unknown): unknown {
-    if (typeof content === 'string') {
-      return content.split('').map(c => Math.random() < 0.1 ? '?' : c).join('');
+  private _computeFragmentation(): number {
+    const active = Array.from(this._blocks.values()).filter(b => b.freedAt === null).map(b => b.size);
+    if (active.length < 2) return 0;
+    const total = active.reduce((a, b) => a + b, 0);
+    const largest = Math.max(...active);
+    return 1 - largest / total;
+  }
+
+  private _updateLeakScores(): void {
+    const now = Date.now();
+    for (const block of this._blocks.values()) {
+      if (block.freedAt !== null) continue;
+      const age = now - block.allocatedAt;
+      const refs = block.references;
+      const score = age * 0.001 + (refs === 0 ? 10 : 0);
+      this._leakScore.set(block.id, score);
     }
-    if (typeof content === 'number') {
-      return content + (Math.random() - 0.5) * content * 0.1;
+  }
+
+  detectLeaks(threshold: number = 100): MemoryBlock[] {
+    return Array.from(this._blocks.values()).filter(b => {
+      return b.freedAt === null && (this._leakScore.get(b.id) ?? 0) > threshold;
+    });
+  }
+
+  reachableFrom(rootId: string): Set<string> {
+    const reachable = new Set<string>();
+    const queue = [rootId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (reachable.has(current)) continue;
+      reachable.add(current);
+      for (const neighbor of this._referenceGraph.get(current) ?? []) {
+        queue.push(neighbor);
+      }
     }
-    return content;
+    return reachable;
   }
 
-  purge(memoryId: string): boolean {
-    return this._deleted.delete(memoryId);
+  getOrphanBlocks(): MemoryBlock[] {
+    return Array.from(this._blocks.values()).filter(b => {
+      return b.freedAt === null && b.references === 0;
+    });
   }
 
-  exorciseAll(): number {
-    const count = this._deleted.size;
-    this._deleted.clear();
-    return count;
+  totalActiveSize(): number {
+    return Array.from(this._blocks.values()).filter(b => b.freedAt === null).reduce((s, b) => s + b.size, 0);
   }
 
-  setFlashbackProbability(p: number): void {
-    this._flashbackProbability = Math.max(0, Math.min(1, p));
+  averageBlockSize(): number {
+    const active = Array.from(this._blocks.values()).filter(b => b.freedAt === null);
+    if (active.length === 0) return 0;
+    return active.reduce((s, b) => s + b.size, 0) / active.length;
   }
 
-  setHauntingIntensity(intensity: number): void {
-    this._hauntingIntensity = Math.max(0, intensity);
+  getSnapshots(limit: number = 50): MemorySnapshot[] {
+    return this._snapshots.slice(-limit);
   }
 
-  getFlashbacks(limit: number = 50): FlashbackEvent[] {
-    return this._flashbacks.slice(-limit);
+  get fragmentationTrend(): number {
+    if (this._fragmentationHistory.length < 2) return 0;
+    const recent = this._fragmentationHistory.slice(-10);
+    const first = recent[0];
+    const last = recent[recent.length - 1];
+    return last - first;
   }
 
-  get deletedCount(): number {
-    return this._deleted.size;
+  memoryReport(): Record<string, unknown> {
+    return {
+      totalBlocks: this._blocks.size,
+      activeBlocks: Array.from(this._blocks.values()).filter(b => b.freedAt === null).length,
+      totalActiveSize: this.totalActiveSize(),
+      averageBlockSize: this.averageBlockSize().toFixed(2),
+      fragmentationIndex: this._computeFragmentation().toFixed(4),
+      fragmentationTrend: this.fragmentationTrend.toFixed(4),
+      leakCount: this.detectLeaks().length,
+      orphanCount: this.getOrphanBlocks().length,
+      state: this._state,
+    };
   }
 }

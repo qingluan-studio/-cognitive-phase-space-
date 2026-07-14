@@ -1,8 +1,3 @@
-/**
- * 模棱两可引擎：有意识地使用双重含义。
- * 对每条语句注入字面义与隐喻义两层解读，使传播过程同时承载多重视角。
- */
-
 export interface EquivocalStatement {
   id: string;
   literal: string;
@@ -22,6 +17,8 @@ export class EquivocationEngine {
   private _interpretations: DoubleMeaningResult[] = [];
   private _ambiguityBias = 0.5;
   private _totalEmissions = 0;
+  private _semanticOverlap: Map<string, number> = new Map();
+  private _pragmaticMatrix: number[][] = [[0.4, 0.35, 0.25], [0.3, 0.45, 0.25], [0.25, 0.25, 0.5]];
 
   emit(literal: string, figurative: string): EquivocalStatement {
     const stmt: EquivocalStatement = {
@@ -33,6 +30,7 @@ export class EquivocationEngine {
     };
     this._statements.set(stmt.id, stmt);
     this._totalEmissions++;
+    this._semanticOverlap.set(stmt.id, this._computeSemanticOverlap(literal, figurative));
     return stmt;
   }
 
@@ -45,8 +43,9 @@ export class EquivocationEngine {
     const stmt = this._statements.get(statementId);
     if (!stmt) return null;
     const roll = Math.random();
+    const probs = this._pragmaticMatrix[Math.floor(stmt.ambiguityScore * 2) % 3];
     const interpretation: DoubleMeaningResult['readerInterpretation'] =
-      roll < 0.4 ? 'literal' : roll < 0.8 ? 'figurative' : 'both';
+      roll < probs[0] ? 'literal' : roll < probs[0] + probs[1] ? 'figurative' : 'both';
     const combined = interpretation === 'both'
       ? `${stmt.literal} ‖ ${stmt.figurative}`
       : interpretation === 'literal' ? stmt.literal : stmt.figurative;
@@ -76,7 +75,42 @@ export class EquivocationEngine {
     return [...this._interpretations];
   }
 
+  computePragmaticEntropy(): number {
+    const counts = [0, 0, 0];
+    for (const r of this._interpretations) {
+      if (r.readerInterpretation === 'literal') counts[0]++;
+      else if (r.readerInterpretation === 'figurative') counts[1]++;
+      else counts[2]++;
+    }
+    const total = counts.reduce((a, b) => a + b, 0);
+    if (total === 0) return 0;
+    let entropy = 0;
+    for (const c of counts) {
+      const p = c / total;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    return entropy;
+  }
+
+  computeSemanticDistance(statementIdA: string, statementIdB: string): number {
+    const a = this._statements.get(statementIdA);
+    const b = this._statements.get(statementIdB);
+    if (!a || !b) return -1;
+    const setA = new Set(a.literal + a.figurative);
+    const setB = new Set(b.literal + b.figurative);
+    const intersection = new Set([...setA].filter(x => setB.has(x)));
+    const union = new Set([...setA, ...setB]);
+    return 1 - intersection.size / union.size;
+  }
+
   get totalEmissions(): number {
     return this._totalEmissions;
+  }
+
+  private _computeSemanticOverlap(a: string, b: string): number {
+    const tokensA = new Set(a.split(''));
+    const tokensB = new Set(b.split(''));
+    const intersection = new Set([...tokensA].filter(x => tokensB.has(x)));
+    return intersection.size / Math.max(tokensA.size, tokensB.size, 1);
   }
 }

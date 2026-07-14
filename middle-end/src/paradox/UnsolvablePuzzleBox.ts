@@ -1,86 +1,143 @@
-/**
- * 无解谜箱：装有无解问题的盒子，永不打开。
- * 维护一个无解问题集合，对每个尝试求解的操作进行记录但永不真正开启盒子。
- */
-
-export interface UnsolvedProblem {
+export interface PuzzleState {
   id: string;
-  statement: string;
+  complexity: number;
   attempts: number;
-  sealedAt: number;
-  metadata: Record<string, unknown>;
+  opened: boolean;
 }
 
-export interface UnlockAttempt {
-  id: string;
-  problemId: string;
-  approach: string;
-  result: 'blocked' | 'paradox' | 'incomplete';
+export interface AttemptRecord {
+  puzzleId: string;
+  strategy: string;
+  outcome: 'success' | 'failure' | 'paradox';
   attemptedAt: number;
 }
 
 export class UnsolvablePuzzleBox {
-  private _problems: Map<string, UnsolvedProblem> = new Map();
-  private _attempts: UnlockAttempt[] = [];
-  private _sealed = true;
-  private _lockStrength = 1.0;
+  private _puzzles: Map<string, PuzzleState> = new Map();
+  private _attempts: AttemptRecord[] = [];
+  private _defaultComplexity = 1.0;
+  private _attemptEntropy: number[] = [];
+  private _strategyMatrix: Map<string, Map<string, number>> = new Map();
 
-  seal(problem: UnsolvedProblem): void {
-    this._problems.set(problem.id, problem);
+  createPuzzle(id: string, complexity: number = this._defaultComplexity): PuzzleState {
+    const puzzle: PuzzleState = {
+      id,
+      complexity,
+      attempts: 0,
+      opened: false,
+    };
+    this._puzzles.set(id, puzzle);
+    return puzzle;
   }
 
-  attempt(problemId: string, approach: string): UnlockAttempt {
-    const problem = this._problems.get(problemId);
-    problem && problem.attempts++;
-    const result: UnlockAttempt['result'] = this._sealed
-      ? 'blocked'
-      : Math.random() < 0.5 ? 'paradox' : 'incomplete';
-    const attempt: UnlockAttempt = {
-      id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      problemId,
-      approach,
-      result,
+  attempt(puzzleId: string, strategy: string): AttemptRecord {
+    const puzzle = this._puzzles.get(puzzleId);
+    const outcome: AttemptRecord['outcome'] =
+      puzzle && puzzle.complexity >= 1.0 ? 'paradox' : puzzle && puzzle.attempts > 100 ? 'failure' : Math.random() < 0.1 ? 'success' : 'failure';
+    const record: AttemptRecord = {
+      puzzleId,
+      strategy,
+      outcome,
       attemptedAt: Date.now(),
     };
-    this._attempts.push(attempt);
-    if (this._attempts.length > 200) this._attempts.shift();
-    this._lockStrength = Math.min(1.0, this._lockStrength + 0.01);
-    return attempt;
+    this._attempts.push(record);
+    if (this._attempts.length > 100) this._attempts.shift();
+    if (puzzle) {
+      puzzle.attempts++;
+      if (outcome === 'success') puzzle.opened = true;
+    }
+    this._updateStrategyMatrix(strategy, outcome);
+    this._attemptEntropy.push(this._computeOutcomeEntropy());
+    if (this._attemptEntropy.length > 50) this._attemptEntropy.shift();
+    return record;
   }
 
-  reinforceLock(amount: number): number {
-    this._lockStrength = Math.min(1.0, this._lockStrength + amount);
-    return this._lockStrength;
+  public forceOpen(puzzleId: string): boolean {
+    const puzzle = this._puzzles.get(puzzleId);
+    if (!puzzle) return false;
+    puzzle.opened = true;
+    return true;
   }
 
-  getStatus(): 'sealed' | 'forced-open' {
-    return this._sealed ? 'sealed' : 'forced-open';
+  public reset(puzzleId: string): boolean {
+    const puzzle = this._puzzles.get(puzzleId);
+    if (!puzzle) return false;
+    puzzle.attempts = 0;
+    puzzle.opened = false;
+    return true;
   }
 
-  getProblem(id: string): UnsolvedProblem | null {
-    return this._problems.get(id) ?? null;
+  public getPuzzle(id: string): PuzzleState | null {
+    return this._puzzles.get(id) ?? null;
   }
 
-  getAttempts(limit: number = 50): UnlockAttempt[] {
+  public getAttempts(limit: number = 50): AttemptRecord[] {
     return this._attempts.slice(-limit);
   }
 
-  listProblems(): UnsolvedProblem[] {
-    return Array.from(this._problems.values());
+  public computeSuccessRate(): number {
+    const total = this._attempts.length;
+    if (total === 0) return 0;
+    return this._attempts.filter(a => a.outcome === 'success').length / total;
   }
 
-  peek(problemId: string): string | null {
-    const problem = this._problems.get(problemId);
-    if (!problem) return null;
-    const previewLen = Math.min(8, Math.floor(problem.statement.length * 0.2));
-    return problem.statement.slice(0, previewLen) + '…';
+  public computeAttemptEntropy(): number {
+    if (this._attemptEntropy.length === 0) return 0;
+    const mean = this._attemptEntropy.reduce((a, b) => a + b, 0) / this._attemptEntropy.length;
+    const variance = this._attemptEntropy.reduce((s, v) => s + (v - mean) ** 2, 0) / this._attemptEntropy.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
   }
 
-  get problemCount(): number {
-    return this._problems.size;
+  public predictOutcome(strategy: string): string {
+    const map = this._strategyMatrix.get(strategy);
+    if (!map || map.size === 0) return 'unknown';
+    let best = '';
+    let maxCount = 0;
+    for (const [outcome, count] of map) {
+      if (count > maxCount) {
+        maxCount = count;
+        best = outcome;
+      }
+    }
+    return best;
   }
 
-  get lockStrength(): number {
-    return this._lockStrength;
+  public computePuzzleComplexitySpectrum(): number[] {
+    const complexities = Array.from(this._puzzles.values()).map(p => p.complexity);
+    const N = complexities.length;
+    if (N === 0) return [];
+    const result: number[] = new Array(N).fill(0);
+    for (let k = 0; k < N; k++) {
+      let real = 0;
+      let imag = 0;
+      for (let n = 0; n < N; n++) {
+        const angle = -2 * Math.PI * k * n / N;
+        real += complexities[n] * Math.cos(angle);
+        imag += complexities[n] * Math.sin(angle);
+      }
+      result[k] = Math.sqrt(real * real + imag * imag);
+    }
+    return result;
+  }
+
+  private _updateStrategyMatrix(strategy: string, outcome: string): void {
+    if (!this._strategyMatrix.has(strategy)) {
+      this._strategyMatrix.set(strategy, new Map());
+    }
+    const map = this._strategyMatrix.get(strategy)!;
+    map.set(outcome, (map.get(outcome) ?? 0) + 1);
+  }
+
+  private _computeOutcomeEntropy(): number {
+    const outcomes = ['success', 'failure', 'paradox'];
+    const counts = outcomes.map(o => this._attempts.filter(a => a.outcome === o).length);
+    const total = counts.reduce((a, b) => a + b, 0);
+    if (total === 0) return 0;
+    let entropy = 0;
+    for (const c of counts) {
+      const p = c / total;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    return entropy;
   }
 }

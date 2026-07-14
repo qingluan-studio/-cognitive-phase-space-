@@ -1,8 +1,3 @@
-/**
- * 星风模块：从恒星持续流出的高速带电粒子流。
- * 用于刻画系统中持续向外辐射的高速粒子流。
- */
-
 export interface StellarWindParticle {
   id: number;
   velocity: number;
@@ -29,6 +24,10 @@ export class StellarWind {
   private _nextId: number = 0;
   private _flux: WindFlux | null = null;
   private _state: Record<string, unknown> = {};
+  private _machNumber: number = 1;
+  private _sonicPointRadius: number = 1;
+  private _spectralEnergy: Map<number, number> = new Map();
+  private _cumulativeSpectrum: number[] = [];
 
   constructor(config: StellarWindConfig) {
     this._config = config;
@@ -40,6 +39,10 @@ export class StellarWind {
 
   get emissionRate(): number {
     return this._config.emissionRate;
+  }
+
+  get machNumber(): number {
+    return this._machNumber;
   }
 
   emit(count: number): StellarWindParticle[] {
@@ -60,7 +63,30 @@ export class StellarWind {
     if (this._particles.length > this._config.maxParticles) {
       this._particles.splice(0, this._particles.length - this._config.maxParticles);
     }
+    this._updateMachNumber();
+    this._updateSpectrum();
     return newParticles;
+  }
+
+  private _updateMachNumber(): void {
+    if (this._particles.length === 0) return;
+    const avgV = this._particles.reduce((s, p) => s + p.velocity, 0) / this._particles.length;
+    const soundSpeed = this._config.baseVelocity * 0.5;
+    this._machNumber = avgV / soundSpeed;
+    this._sonicPointRadius = Math.sqrt(1 / (this._machNumber * this._machNumber));
+  }
+
+  private _updateSpectrum(): void {
+    const freqs = [1, 2, 4, 8, 16];
+    this._cumulativeSpectrum = [];
+    for (const f of freqs) {
+      let sum = 0;
+      for (const p of this._particles) {
+        sum += p.energy * Math.sin(f * p.id * 0.1);
+      }
+      this._spectralEnergy.set(f, sum * sum);
+      this._cumulativeSpectrum.push(sum);
+    }
   }
 
   computeFlux(): WindFlux {
@@ -91,6 +117,16 @@ export class StellarWind {
     return this._particles.reduce((acc, p) => acc + p.energy, 0);
   }
 
+  computeParkerVelocity(radius: number): number {
+    const cs = this._config.baseVelocity * 0.5;
+    const term = Math.log((radius / this._sonicPointRadius) ** 2) + 3 * (1 - this._sonicPointRadius / radius);
+    return cs * Math.sqrt(term + 1);
+  }
+
+  computeFluxTubeExpansion(factor: number): number {
+    return this._machNumber * Math.pow(factor, 2);
+  }
+
   setVelocity(velocity: number): void {
     this._config.baseVelocity = velocity;
     this._state.velocityUpdated = velocity;
@@ -110,6 +146,10 @@ export class StellarWind {
       particleCount: this._particles.length,
       flux: this._flux,
       state: this._state,
+      machNumber: this._machNumber.toFixed(3),
+      sonicPointRadius: this._sonicPointRadius.toFixed(3),
+      spectralEnergy: Object.fromEntries(this._spectralEnergy),
+      cumulativeSpectrum: this._cumulativeSpectrum,
     };
   }
 }

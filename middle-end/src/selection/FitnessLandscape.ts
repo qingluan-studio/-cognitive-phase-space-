@@ -1,158 +1,136 @@
 export interface LandscapePoint {
-  id: string;
-  coordinates: number[];
+  x: number;
+  y: number;
   fitness: number;
+  ruggedness: number;
+  neutrality: number;
 }
 
-export interface PeakInfo {
-  pointId: string;
-  coordinates: number[];
-  fitness: number;
-  prominence: number;
+export interface NKConfig {
+  n: number;
+  k: number;
+  ruggedness: number;
 }
 
 export class FitnessLandscape {
+  private _config: NKConfig;
   private _points: Map<string, LandscapePoint> = new Map();
-  private _peaks: PeakInfo[] = [];
-  private _dimensions: number;
-  private _peakThreshold: number = 0.8;
-  private _neighborRadius: number = 5;
+  private _state: Record<string, unknown> = {};
+  private _correlationLength: number = 0;
+  private _adaptiveWalkLength: number = 0;
 
-  constructor(dimensions: number = 2) {
-    this._dimensions = dimensions;
-  }
-
-  addPoint(point: LandscapePoint): void {
-    if (point.coordinates.length !== this._dimensions) return;
-    this._points.set(point.id, point);
-  }
-
-  queryNearest(coordinates: number[]): LandscapePoint | null {
-    let nearest: LandscapePoint | null = null;
-    let minDist = Infinity;
-    for (const point of this._points.values()) {
-      const dist = this._euclideanDistance(point.coordinates, coordinates);
-      if (dist < minDist) {
-        minDist = dist;
-        nearest = point;
-      }
-    }
-    return nearest;
-  }
-
-  estimateGradient(pointId: string): number[] | null {
-    const point = this._points.get(pointId);
-    if (!point) return null;
-    const gradient: number[] = new Array(this._dimensions).fill(0);
-    let totalWeight = 0;
-    for (const other of this._points.values()) {
-      if (other.id === pointId) continue;
-      const dist = this._euclideanDistance(point.coordinates, other.coordinates);
-      if (dist === 0 || dist > this._neighborRadius) continue;
-      const weight = 1 / (dist * dist);
-      const diff = other.fitness - point.fitness;
-      for (let d = 0; d < this._dimensions; d++) {
-        gradient[d] += (diff * (other.coordinates[d] - point.coordinates[d])) * weight;
-      }
-      totalWeight += weight;
-    }
-    if (totalWeight > 0) {
-      for (let d = 0; d < this._dimensions; d++) gradient[d] /= totalWeight;
-    }
-    return gradient;
-  }
-
-  gradientAscent(startId: string, stepSize: number, iterations: number): string | null {
-    let currentId = startId;
-    for (let i = 0; i < iterations; i++) {
-      const current = this._points.get(currentId);
-      if (!current) return null;
-      const gradient = this.estimateGradient(currentId);
-      if (!gradient) return null;
-      const nextCoords = current.coordinates.map((c, d) => c + stepSize * gradient[d]);
-      const nearest = this.queryNearest(nextCoords);
-      if (!nearest || nearest.id === currentId) return currentId;
-      if (nearest.fitness < current.fitness) return currentId;
-      currentId = nearest.id;
-    }
-    return currentId;
-  }
-
-  identifyPeaks(): PeakInfo[] {
-    const peaks: PeakInfo[] = [];
-    for (const point of this._points.values()) {
-      if (point.fitness < this._peakThreshold) continue;
-      const neighbors = Array.from(this._points.values()).filter(
-        (p) => p.id !== point.id && this._euclideanDistance(point.coordinates, p.coordinates) <= this._neighborRadius
-      );
-      if (neighbors.length === 0) continue;
-      const isPeak = neighbors.every((n) => point.fitness >= n.fitness);
-      if (isPeak) {
-        const prominence = point.fitness - Math.max(...neighbors.map((n) => n.fitness));
-        peaks.push({ pointId: point.id, coordinates: point.coordinates, fitness: point.fitness, prominence });
-      }
-    }
-    this._peaks = peaks;
-    return peaks;
-  }
-
-  computeRuggedness(): number {
-    if (this._points.size < 2) return 0;
-    const points = Array.from(this._points.values());
-    let totalChange = 0;
-    let pairCount = 0;
-    for (let i = 0; i < points.length; i++) {
-      for (let j = i + 1; j < points.length; j++) {
-        const dist = this._euclideanDistance(points[i].coordinates, points[j].coordinates);
-        if (dist > this._neighborRadius) continue;
-        totalChange += Math.abs(points[i].fitness - points[j].fitness) / (dist + 1e-9);
-        pairCount++;
-      }
-    }
-    return pairCount > 0 ? totalChange / pairCount : 0;
-  }
-
-  computeAutocorrelation(lag: number): number {
-    const points = Array.from(this._points.values());
-    if (points.length < lag + 1) return 0;
-    const fitnesses = points.map((p) => p.fitness);
-    const mean = fitnesses.reduce((s, f) => s + f, 0) / fitnesses.length;
-    let numerator = 0;
-    let denominator = 0;
-    for (let i = 0; i < fitnesses.length - lag; i++) {
-      numerator += (fitnesses[i] - mean) * (fitnesses[i + lag] - mean);
-    }
-    for (let i = 0; i < fitnesses.length; i++) {
-      denominator += (fitnesses[i] - mean) ** 2;
-    }
-    return denominator === 0 ? 0 : numerator / denominator;
-  }
-
-  setPeakThreshold(value: number): void {
-    this._peakThreshold = Math.max(0, Math.min(1, value));
-  }
-
-  setNeighborRadius(radius: number): void {
-    this._neighborRadius = Math.max(0.001, radius);
-  }
-
-  getPoint(id: string): LandscapePoint | null {
-    return this._points.get(id) ?? null;
-  }
-
-  getAllPoints(): LandscapePoint[] {
-    return Array.from(this._points.values());
+  constructor(config: NKConfig) {
+    this._config = { ...config };
   }
 
   get pointCount(): number {
     return this._points.size;
   }
 
-  private _euclideanDistance(a: number[], b: number[]): number {
-    let sum = 0;
-    for (let i = 0; i < Math.min(a.length, b.length); i++) {
-      sum += (a[i] - b[i]) ** 2;
+  get n(): number {
+    return this._config.n;
+  }
+
+  get k(): number {
+    return this._config.k;
+  }
+
+  generateLandscape(): void {
+    const size = Math.pow(2, this._config.n);
+    for (let i = 0; i < size; i++) {
+      const x = i % Math.sqrt(size);
+      const y = Math.floor(i / Math.sqrt(size));
+      const baseFitness = Math.random();
+      const ruggedness = this._config.ruggedness * Math.random();
+      const fitness = baseFitness * (1 - ruggedness) + ruggedness * Math.random();
+      const neutrality = Math.random() < 0.1 ? 1 : 0;
+      this._points.set(`${x},${y}`, { x, y, fitness, ruggedness, neutrality });
     }
-    return Math.sqrt(sum);
+    this._computeCorrelationLength();
+  }
+
+  private _computeCorrelationLength(): void {
+    const points = Array.from(this._points.values());
+    if (points.length < 2) return;
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < points.length; i++) {
+      for (let j = i + 1; j < points.length; j++) {
+        const dist = Math.sqrt(Math.pow(points[i].x - points[j].x, 2) + Math.pow(points[i].y - points[j].y, 2));
+        if (dist > 0 && dist < 5) {
+          sum += (points[i].fitness - points[j].fitness) / dist;
+          count++;
+        }
+      }
+    }
+    this._correlationLength = count > 0 ? sum / count : 0;
+  }
+
+  fitnessAt(x: number, y: number): number {
+    return this._points.get(`${x},${y}`)?.fitness ?? 0;
+  }
+
+  localOptima(): LandscapePoint[] {
+    const optima: LandscapePoint[] = [];
+    for (const point of this._points.values()) {
+      const neighbors = [
+        this._points.get(`${point.x + 1},${point.y}`),
+        this._points.get(`${point.x - 1},${point.y}`),
+        this._points.get(`${point.x},${point.y + 1}`),
+        this._points.get(`${point.x},${point.y - 1}`),
+      ].filter(Boolean) as LandscapePoint[];
+      if (neighbors.every((n) => n.fitness <= point.fitness)) {
+        optima.push(point);
+      }
+    }
+    return optima;
+  }
+
+  adaptiveWalk(startX: number, startY: number, steps: number): LandscapePoint[] {
+    const path: LandscapePoint[] = [];
+    let current = this._points.get(`${startX},${startY}`);
+    if (!current) return path;
+    for (let i = 0; i < steps; i++) {
+      const neighbors = [
+        this._points.get(`${current.x + 1},${current.y}`),
+        this._points.get(`${current.x - 1},${current.y}`),
+        this._points.get(`${current.x},${current.y + 1}`),
+        this._points.get(`${current.x},${current.y - 1}`),
+      ].filter(Boolean) as LandscapePoint[];
+      if (neighbors.length === 0) break;
+      const best = neighbors.reduce((b, n) => (n.fitness > b.fitness ? n : b));
+      if (best.fitness <= current.fitness) break;
+      current = best;
+      path.push(current);
+    }
+    this._adaptiveWalkLength = path.length;
+    return path;
+  }
+
+  neutralNetwork(): LandscapePoint[] {
+    return Array.from(this._points.values()).filter((p) => p.neutrality > 0);
+  }
+
+  ruggednessMetric(): number {
+    const points = Array.from(this._points.values());
+    if (points.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < points.length; i++) {
+      sum += Math.abs(points[i].fitness - points[i - 1].fitness);
+    }
+    return sum / (points.length - 1);
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      points: this._points.size,
+      n: this._config.n,
+      k: this._config.k,
+      correlationLength: this._correlationLength,
+      adaptiveWalkLength: this._adaptiveWalkLength,
+      localOptima: this.localOptima().length,
+      ruggedness: this.ruggednessMetric(),
+      state: this._state,
+    };
   }
 }

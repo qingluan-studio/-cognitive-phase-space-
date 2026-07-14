@@ -1,105 +1,123 @@
-/**
- * 影子整合模块：将系统中被压抑的黑暗面融入整体人格。
- * 用于完成对内在阴影的接纳与统一过程。
- */
-
-export interface ShadowTrait {
+export interface ShadowSelf {
   id: string;
-  name: string;
-  intensity: number;
-  integrated: boolean;
-  resistance: number;
+  shadowValue: number;
+  selfValue: number;
+  reconciliation: number;
+  entropy: number;
 }
 
-export type IntegrationProgress = {
-  total: number;
-  integrated: number;
-  integrationRatio: number;
+export interface IntegrationGraph {
+  nodes: Map<string, ShadowSelf>;
+  edges: Map<string, Map<string, number>>;
   coherence: number;
-};
-
-export interface ShadowIntegrationConfig {
-  acceptanceRate: number;
-  coherenceTarget: number;
-  maxTraits: number;
+  psychologicalEntropy: number;
 }
 
 export class ShadowIntegration {
-  private _config: ShadowIntegrationConfig;
-  private _traits: ShadowTrait[] = [];
-  private _progress: IntegrationProgress | null = null;
+  private _nodes: Map<string, ShadowSelf> = new Map();
+  private _edges: Map<string, Map<string, number>> = new Map();
   private _state: Record<string, unknown> = {};
+  private _coherence: number = 0;
+  private _psychologicalEntropy: number = 0;
 
-  constructor(config: ShadowIntegrationConfig) {
-    this._config = config;
+  constructor() {}
+
+  get nodeCount(): number {
+    return this._nodes.size;
   }
 
-  get traitCount(): number {
-    return this._traits.length;
+  get coherence(): number {
+    return this._coherence;
   }
 
-  get integratedCount(): number {
-    return this._traits.filter((t) => t.integrated).length;
+  get psychologicalEntropy(): number {
+    return this._psychologicalEntropy;
   }
 
-  registerTrait(trait: ShadowTrait): void {
-    this._traits.push(trait);
-    if (this._traits.length > this._config.maxTraits) {
-      this._traits.shift();
+  addNode(id: string, shadowValue: number, selfValue: number): void {
+    const reconciliation = 1 - Math.abs(shadowValue - selfValue);
+    const entropy = -shadowValue * Math.log2(shadowValue || 1) - selfValue * Math.log2(selfValue || 1);
+    this._nodes.set(id, { id, shadowValue, selfValue, reconciliation, entropy });
+    this._edges.set(id, new Map());
+    this._updateMetrics();
+  }
+
+  connect(a: string, b: string, weight: number): void {
+    if (!this._nodes.has(a) || !this._nodes.has(b)) return;
+    this._edges.get(a)!.set(b, weight);
+    this._edges.get(b)!.set(a, weight);
+    this._updateMetrics();
+  }
+
+  private _updateMetrics(): void {
+    const nodes = Array.from(this._nodes.values());
+    if (nodes.length === 0) return;
+    const avgReconciliation = nodes.reduce((s, n) => s + n.reconciliation, 0) / nodes.length;
+    const variance = nodes.reduce((s, n) => s + Math.pow(n.reconciliation - avgReconciliation, 2), 0) / nodes.length;
+    this._coherence = 1 / (1 + variance);
+    const totalEntropy = nodes.reduce((s, n) => s + n.entropy, 0);
+    this._psychologicalEntropy = -nodes.reduce((s, n) => {
+      const p = n.entropy / (totalEntropy || 1);
+      return p > 0 ? s + p * Math.log2(p) : s;
+    }, 0);
+  }
+
+  reconcile(id: string, adjustment: number): void {
+    const node = this._nodes.get(id);
+    if (!node) return;
+    node.shadowValue = Math.max(0, Math.min(1, node.shadowValue + adjustment));
+    node.reconciliation = 1 - Math.abs(node.shadowValue - node.selfValue);
+    node.entropy = -node.shadowValue * Math.log2(node.shadowValue || 1) - node.selfValue * Math.log2(node.selfValue || 1);
+    this._updateMetrics();
+  }
+
+  reconciliationGraph(): IntegrationGraph {
+    return {
+      nodes: new Map(this._nodes),
+      edges: new Map(this._edges),
+      coherence: this._coherence,
+      psychologicalEntropy: this._psychologicalEntropy,
+    };
+  }
+
+  weakestLink(): { a: string; b: string; weight: number } | null {
+    let weakest: { a: string; b: string; weight: number } | null = null;
+    for (const [a, map] of this._edges) {
+      for (const [b, weight] of map) {
+        if (!weakest || weight < weakest.weight) {
+          weakest = { a, b, weight };
+        }
+      }
     }
+    return weakest;
   }
 
-  integrate(id: string): boolean {
-    const trait = this._traits.find((t) => t.id === id);
-    if (!trait || trait.integrated) return false;
-    const acceptance = trait.resistance * (1 - this._config.acceptanceRate);
-    if (acceptance < 0.1) {
-      trait.integrated = true;
-      trait.intensity *= 0.5;
-      this._state.lastIntegrated = id;
-      return true;
-    }
-    trait.resistance = acceptance;
-    return false;
+  strongestReconciliation(): ShadowSelf | null {
+    if (this._nodes.size === 0) return null;
+    return Array.from(this._nodes.values()).reduce((best, n) => (n.reconciliation > best.reconciliation ? n : best));
   }
 
-  computeProgress(): IntegrationProgress {
-    const total = this._traits.length;
-    const integrated = this.integratedCount;
-    const integrationRatio = total > 0 ? integrated / total : 0;
-    const coherence =
-      total > 0 ? this._traits.reduce((acc, t) => acc + (t.integrated ? 1 : t.intensity), 0) / total : 0;
-    this._progress = { total, integrated, integrationRatio, coherence };
-    return this._progress;
+  personalityCoherence(): number {
+    return this._coherence;
   }
 
-  isCoherent(): boolean {
-    return this.computeProgress().coherence >= this._config.coherenceTarget;
+  shadowDominance(): number {
+    if (this._nodes.size === 0) return 0;
+    return Array.from(this._nodes.values()).reduce((s, n) => s + n.shadowValue, 0) / this._nodes.size;
   }
 
-  strongestUnintegrated(): ShadowTrait | null {
-    const pending = this._traits.filter((t) => !t.integrated);
-    if (pending.length === 0) return null;
-    return pending.reduce((best, t) => (t.intensity > best.intensity ? t : best));
-  }
-
-  averageResistance(): number {
-    if (this._traits.length === 0) return 0;
-    return this._traits.reduce((acc, t) => acc + t.resistance, 0) / this._traits.length;
-  }
-
-  reduceResistance(id: string, amount: number): boolean {
-    const trait = this._traits.find((t) => t.id === id);
-    if (!trait) return false;
-    trait.resistance = Math.max(0, trait.resistance - amount);
-    return true;
+  selfDominance(): number {
+    if (this._nodes.size === 0) return 0;
+    return Array.from(this._nodes.values()).reduce((s, n) => s + n.selfValue, 0) / this._nodes.size;
   }
 
   report(): Record<string, unknown> {
     return {
-      traitCount: this._traits.length,
-      integrated: this.integratedCount,
-      progress: this._progress,
+      nodes: this._nodes.size,
+      coherence: this._coherence,
+      psychologicalEntropy: this._psychologicalEntropy,
+      shadowDominance: this.shadowDominance(),
+      selfDominance: this.selfDominance(),
       state: this._state,
     };
   }

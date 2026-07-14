@@ -1,123 +1,155 @@
-/**
- * ActionAtDistance - 超距作用
- * 非接触式地传递影响，不依赖直接物理接触即可改变远处
- * 实体的状态，类似量子纠缠或引力作用。
- */
-
-export interface ActionAtDistanceData {
-  readonly actionId: string;
-  sourceId: string;
-  influenceStrength: number;
-  entangledTargets: string[];
+export interface FieldInteraction {
+  source: string;
+  target: string;
+  strength: number;
+  range: number;
 }
 
-export interface DistanceAction {
-  targetId: string;
-  effect: number;
-  delay: number;
-  applied: boolean;
+export type InteractionResult = {
+  force: number;
+  coupled: boolean;
+  distance: number;
+};
+
+export interface ActionConfig {
+  couplingConstant: number;
+  maxRange: number;
+  attenuation: number;
 }
 
 export class ActionAtDistance {
-  private _data: ActionAtDistanceData;
-  private _actions: DistanceAction[] = [];
-  private _totalEffects: number = 0;
-  private _quantumLink: Map<string, number> = new Map();
-  private _decoherenceLevel: number = 0;
+  private _config: ActionConfig;
+  private _interactions: FieldInteraction[] = [];
+  private _log: Record<string, unknown> = {};
+  private _adjacencyMatrix: Map<string, Map<string, number>> = new Map();
+  private _propagator: number[] = [];
+  private _kineticEnergy: number = 0;
 
-  constructor(data: ActionAtDistanceData) {
-    this._data = { ...data, entangledTargets: [...data.entangledTargets] };
-    this._data.entangledTargets.forEach((t) => this._quantumLink.set(t, 1));
+  constructor(config: ActionConfig) {
+    this._config = config;
+    this._initPropagator();
   }
 
-  get actionId(): string {
-    return this._data.actionId;
+  get interactionCount(): number {
+    return this._interactions.length;
   }
 
-  get sourceId(): string {
-    return this._data.sourceId;
+  get kineticEnergy(): number {
+    return this._kineticEnergy;
   }
 
-  get entangledCount(): number {
-    return this._quantumLink.size;
+  get propagatorPeak(): number {
+    return this._propagator.length > 0 ? Math.max(...this._propagator) : 0;
   }
 
-  public entangle(targetId: string, linkStrength: number): void {
-    this._quantumLink.set(targetId, Math.max(0, Math.min(1, linkStrength)));
-    if (!this._data.entangledTargets.includes(targetId)) {
-      this._data.entangledTargets.push(targetId);
+  private _initPropagator(): void {
+    this._propagator = [];
+    for (let r = 0; r < 10; r++) {
+      const range = r + 1;
+      this._propagator.push(this._config.couplingConstant / (range * range + 0.001));
     }
   }
 
-  public exert(effect: number, delay: number): DistanceAction[] {
-    const results: DistanceAction[] = [];
-    this._quantumLink.forEach((strength, targetId) => {
-      const actualEffect = effect * strength * (1 - this._decoherenceLevel);
-      const action: DistanceAction = {
-        targetId,
-        effect: actualEffect,
-        delay,
-        applied: actualEffect > 0.01,
-      };
-      results.push(action);
-      this._actions.push(action);
-      if (this._actions.length > 40) {
-        this._actions.shift();
+  private _updateAdjacency(): void {
+    this._adjacencyMatrix.clear();
+    for (const inter of this._interactions) {
+      if (!this._adjacencyMatrix.has(inter.source)) {
+        this._adjacencyMatrix.set(inter.source, new Map());
       }
-      if (action.applied) {
-        this._totalEffects += actualEffect;
-        this._degradeLink(targetId);
+      this._adjacencyMatrix.get(inter.source)!.set(inter.target, inter.strength);
+    }
+  }
+
+  private _computeGraphCentrality(entity: string): number {
+    let sum = 0;
+    const neighbors = this._adjacencyMatrix.get(entity);
+    if (!neighbors) return 0;
+    for (const [, strength] of neighbors) {
+      sum += strength;
+    }
+    return sum;
+  }
+
+  register(source: string, target: string, strength: number, range: number): void {
+    this._interactions.push({ source, target, strength, range });
+    if (this._interactions.length > 50) {
+      this._interactions.shift();
+    }
+    this._updateAdjacency();
+  }
+
+  computeForce(source: string, target: string): InteractionResult {
+    const pair = this._interactions.find(
+      (i) => i.source === source && i.target === target
+    );
+    if (!pair) {
+      return { force: 0, coupled: false, distance: Infinity };
+    }
+    const distance = Math.max(1, pair.range);
+    const attenuation = Math.exp(-distance * this._config.attenuation);
+    const centrality = this._computeGraphCentrality(source);
+    const force = (this._config.couplingConstant * pair.strength * attenuation * centrality) / (distance * distance);
+    const coupled = force > 0.001;
+    this._kineticEnergy += force * distance;
+    return { force, coupled, distance };
+  }
+
+  broadcast(source: string, signal: number): Record<string, number> {
+    const results: Record<string, number> = {};
+    for (const inter of this._interactions) {
+      if (inter.source === source) {
+        const distance = Math.max(1, inter.range);
+        const attenuation = Math.exp(-distance * this._config.attenuation);
+        results[inter.target] = signal * attenuation * inter.strength;
       }
-    });
+    }
+    this._log.lastBroadcast = { source, signal, targets: Object.keys(results).length };
     return results;
   }
 
-  private _degradeLink(targetId: string): void {
-    const current = this._quantumLink.get(targetId) ?? 0;
-    const degraded = current * 0.95;
-    this._quantumLink.set(targetId, degraded);
-    this._decoherenceLevel = Math.min(1, this._decoherenceLevel + 0.02);
-    if (degraded < 0.05) {
-      this._quantumLink.delete(targetId);
+  weaken(source: string, factor: number): void {
+    for (const inter of this._interactions) {
+      if (inter.source === source) {
+        inter.strength *= factor;
+      }
     }
+    this._updateAdjacency();
   }
 
-  public reinforceLink(targetId: string, amount: number): void {
-    const current = this._quantumLink.get(targetId) ?? 0;
-    this._quantumLink.set(targetId, Math.min(1, current + amount));
-    this._decoherenceLevel = Math.max(0, this._decoherenceLevel - 0.05);
+  strengthen(source: string, factor: number): void {
+    this.weaken(source, 1 + factor);
   }
 
-  public measureCorrelation(targetId: string): number {
-    return this._quantumLink.get(targetId) ?? 0;
+  strongestCoupling(): FieldInteraction | null {
+    if (this._interactions.length === 0) return null;
+    return this._interactions.reduce((best, i) => (i.strength > best.strength ? i : best));
   }
 
-  public adjustInfluenceStrength(delta: number): void {
-    this._data.influenceStrength = Math.max(0, this._data.influenceStrength + delta);
+  totalCoupling(): number {
+    return this._interactions.reduce((acc, i) => acc + i.strength, 0);
   }
 
-  public disentangle(targetId: string): void {
-    this._quantumLink.delete(targetId);
-    const idx = this._data.entangledTargets.indexOf(targetId);
-    if (idx >= 0) {
-      this._data.entangledTargets.splice(idx, 1);
+  computeNetworkDiameter(): number {
+    let max = 0;
+    for (const inter of this._interactions) {
+      if (inter.range > max) max = inter.range;
     }
+    return max;
   }
 
-  public isCoherent(): boolean {
-    return this._decoherenceLevel < 0.5 && this._quantumLink.size > 0;
+  reset(): void {
+    this._interactions = [];
+    this._adjacencyMatrix.clear();
+    this._kineticEnergy = 0;
   }
 
-  public actionReport(): Record<string, unknown> {
+  report(): Record<string, unknown> {
     return {
-      actionId: this.actionId,
-      sourceId: this.sourceId,
-      influenceStrength: this._data.influenceStrength.toFixed(3),
-      entangledCount: this.entangledCount,
-      decoherenceLevel: this._decoherenceLevel.toFixed(3),
-      totalEffects: this._totalEffects.toFixed(2),
-      actionCount: this._actions.length,
-      coherent: this.isCoherent(),
+      interactions: this._interactions.length,
+      kineticEnergy: this._kineticEnergy,
+      log: this._log,
+      propagatorPeak: this.propagatorPeak.toFixed(4),
+      networkDiameter: this.computeNetworkDiameter(),
     };
   }
 }

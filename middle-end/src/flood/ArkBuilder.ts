@@ -1,8 +1,3 @@
-/**
- * 方舟建造者模块：建造保存核心数据的方舟。
- * 在洪水来临前完成建造，按优先级装入物种（核心数据），超过容量则拒绝登船。
- */
-
 export interface ArkBuilderData {
   capacity: number;
   boarded: number;
@@ -21,12 +16,16 @@ export class ArkBuilder {
   private _cargo: SpeciesCargo[];
   private _sealed: boolean;
   private _constructionProgress: number;
+  private _knapsackValue: number;
+  private _diversityIndex: number;
 
   constructor(capacity: number = 100) {
     this._capacity = capacity;
     this._cargo = [];
     this._sealed = false;
     this._constructionProgress = 0;
+    this._knapsackValue = 0;
+    this._diversityIndex = 0;
   }
 
   get boarded(): number {
@@ -35,6 +34,14 @@ export class ArkBuilder {
 
   get sealed(): boolean {
     return this._sealed;
+  }
+
+  get knapsackValue(): number {
+    return this._knapsackValue;
+  }
+
+  get diversityIndex(): number {
+    return this._diversityIndex;
   }
 
   public build(workUnits: number): void {
@@ -51,6 +58,7 @@ export class ArkBuilder {
     if (this._cargo.length >= this._capacity) return false;
     this._cargo.push(cargo);
     this._cargo.sort((a, b) => b.priority - a.priority);
+    this._updateKnapsack();
     return true;
   }
 
@@ -58,6 +66,7 @@ export class ArkBuilder {
     if (this._cargo.length <= this._capacity) return [];
     const overflow = this._cargo.slice(this._capacity);
     this._cargo = this._cargo.slice(0, this._capacity);
+    this._updateKnapsack();
     return overflow;
   }
 
@@ -80,5 +89,49 @@ export class ArkBuilder {
       manifest: this.manifest(),
       sealed: this._sealed,
     };
+  }
+
+  public solveKnapsack(): SpeciesCargo[] {
+    const n = this._cargo.length;
+    const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(this._capacity + 1).fill(0));
+    for (let i = 1; i <= n; i++) {
+      for (let w = 1; w <= this._capacity; w++) {
+        if (i - 1 < this._cargo.length && 1 <= w) {
+          dp[i][w] = Math.max(
+            dp[i - 1][w],
+            dp[i - 1][w - 1] + this._cargo[i - 1].priority
+          );
+        }
+      }
+    }
+    const selected: SpeciesCargo[] = [];
+    let w = this._capacity;
+    for (let i = n; i > 0 && w > 0; i--) {
+      if (dp[i][w] !== dp[i - 1][w]) {
+        selected.push(this._cargo[i - 1]);
+        w -= 1;
+      }
+    }
+    return selected;
+  }
+
+  public computeShannonDiversity(): number {
+    const freq = new Map<string, number>();
+    for (const c of this._cargo) {
+      freq.set(c.species, (freq.get(c.species) ?? 0) + 1);
+    }
+    const total = this._cargo.length;
+    if (total === 0) return 0;
+    let diversity = 0;
+    for (const count of freq.values()) {
+      const p = count / total;
+      diversity -= p * Math.log(p);
+    }
+    return diversity;
+  }
+
+  private _updateKnapsack(): void {
+    this._knapsackValue = this._cargo.reduce((s, c) => s + c.priority, 0);
+    this._diversityIndex = this.computeShannonDiversity();
   }
 }

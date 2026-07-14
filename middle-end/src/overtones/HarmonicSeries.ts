@@ -1,8 +1,3 @@
-/**
- * 谐波系列模块：以基频为基础，叠加整数倍频率的谐波成分。
- * 用于构造复杂周期信号并分析其频谱结构。
- */
-
 export interface HarmonicComponent {
   order: number;
   frequency: number;
@@ -14,6 +9,9 @@ export type HarmonicSpectrum = {
   fundamental: number;
   components: HarmonicComponent[];
   totalEnergy: number;
+  thd: number;
+  inharmonicity: number;
+  spectralSlope: number;
 };
 
 export interface HarmonicConfig {
@@ -27,10 +25,12 @@ export class HarmonicSeries {
   private _components: HarmonicComponent[] = [];
   private _spectrum: HarmonicSpectrum | null = null;
   private _meta: Record<string, unknown> = {};
+  private _window: number[] = [];
 
   constructor(config: HarmonicConfig) {
     this._config = config;
     this._buildSeries();
+    this._buildHannWindow();
   }
 
   get fundamental(): number {
@@ -57,19 +57,56 @@ export class HarmonicSeries {
     }
   }
 
+  private _buildHannWindow(): void {
+    const N = this._config.harmonicCount;
+    this._window = Array.from({ length: N }, (_, i) => 0.5 * (1 - Math.cos((2 * Math.PI * i) / (N - 1))));
+  }
+
   sample(time: number): number {
     let value = 0;
-    for (const c of this._components) {
-      value += c.amplitude * Math.sin(2 * Math.PI * c.frequency * time + c.phase);
+    for (let i = 0; i < this._components.length; i++) {
+      const c = this._components[i];
+      const w = this._window[i] || 1;
+      value += c.amplitude * w * Math.sin(2 * Math.PI * c.frequency * time + c.phase);
     }
     return value;
   }
 
   computeSpectrum(): HarmonicSpectrum {
+    const totalEnergy = this.totalEnergy;
+    const fundamentalAmp = this._components.find((c) => c.order === 1)?.amplitude ?? 0;
+    let distortionEnergy = 0;
+    for (const c of this._components) {
+      if (c.order !== 1) distortionEnergy += c.amplitude * c.amplitude;
+    }
+    const thd = fundamentalAmp > 0 ? Math.sqrt(distortionEnergy) / fundamentalAmp : 0;
+    let inharmonicity = 0;
+    for (const c of this._components) {
+      const ideal = this._config.fundamental * c.order;
+      inharmonicity += Math.pow(c.frequency - ideal, 2) * c.amplitude;
+    }
+    inharmonicity = inharmonicity / (totalEnergy || 1);
+    let sumXY = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let sumX2 = 0;
+    for (const c of this._components) {
+      const x = Math.log2(c.order);
+      const y = Math.log2(c.amplitude + 1e-10);
+      sumXY += x * y;
+      sumX += x;
+      sumY += y;
+      sumX2 += x * x;
+    }
+    const n = this._components.length;
+    const spectralSlope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
     this._spectrum = {
       fundamental: this._config.fundamental,
       components: [...this._components],
-      totalEnergy: this.totalEnergy,
+      totalEnergy,
+      thd,
+      inharmonicity,
+      spectralSlope,
     };
     return this._spectrum;
   }
@@ -102,12 +139,20 @@ export class HarmonicSeries {
     return total > 0 ? (c.amplitude * c.amplitude) / total : 0;
   }
 
+  crestFactor(): number {
+    if (this._components.length === 0) return 0;
+    const peak = Math.max(...this._components.map((c) => c.amplitude));
+    const rms = Math.sqrt(this.totalEnergy / this._components.length);
+    return rms > 0 ? peak / rms : 0;
+  }
+
   report(): Record<string, unknown> {
     return {
       fundamental: this._config.fundamental,
       components: this._components.length,
       totalEnergy: this.totalEnergy,
       meta: this._meta,
+      crestFactor: this.crestFactor(),
     };
   }
 }

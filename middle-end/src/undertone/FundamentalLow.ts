@@ -1,8 +1,3 @@
-/**
- * 极低基频模块：逼近零频率的振动，代表系统最底层的缓慢波动。
- * 用于建模超长时间尺度的基底变化。
- */
-
 export interface LowFrequencyBin {
   frequency: number;
   energy: number;
@@ -26,9 +21,12 @@ export class FundamentalLow {
   private _bins: LowFrequencyBin[] = [];
   private _spectrum: LowFrequencySpectrum | null = null;
   private _state: Record<string, unknown> = {};
+  private _cepstrum: number[] = [];
+  private _nyquist: number;
 
   constructor(config: FundamentalLowConfig) {
     this._config = config;
+    this._nyquist = config.sampleRate / 2;
     this._buildBins();
   }
 
@@ -66,6 +64,18 @@ export class FundamentalLow {
       nearest.energy += energy;
       this._state.lastInjection = { frequency, energy };
     }
+    this._updateCepstrum();
+  }
+
+  private _updateCepstrum(): void {
+    this._cepstrum = [];
+    for (let i = 0; i < this._bins.length; i++) {
+      let sum = 0;
+      for (let j = 0; j < this._bins.length; j++) {
+        sum += this._bins[j].energy * Math.cos(2 * Math.PI * i * j / this._bins.length);
+      }
+      this._cepstrum.push(Math.abs(sum));
+    }
   }
 
   computeSpectrum(): LowFrequencySpectrum {
@@ -96,6 +106,7 @@ export class FundamentalLow {
     for (const bin of this._bins) {
       bin.energy *= factor;
     }
+    this._updateCepstrum();
   }
 
   isApproachingZero(): boolean {
@@ -105,6 +116,7 @@ export class FundamentalLow {
 
   reset(): void {
     for (const bin of this._bins) bin.energy = 0;
+    this._cepstrum = [];
     this._state.resetAt = Date.now();
   }
 
@@ -115,5 +127,27 @@ export class FundamentalLow {
       spectrum: this._spectrum,
       state: this._state,
     };
+  }
+
+  computeCepstralPeak(): number {
+    if (this._cepstrum.length === 0) return 0;
+    const maxVal = Math.max(...this._cepstrum);
+    const maxIdx = this._cepstrum.indexOf(maxVal);
+    return maxIdx > 0 ? this._config.sampleRate / maxIdx : 0;
+  }
+
+  computeSpectralCentroid(): number {
+    const totalEnergy = this._bins.reduce((a, b) => a + b.energy, 0);
+    if (totalEnergy === 0) return 0;
+    const weightedSum = this._bins.reduce((a, b) => a + b.frequency * b.energy, 0);
+    return weightedSum / totalEnergy;
+  }
+
+  computeSpectralFlatness(): number {
+    const energies = this._bins.map(b => b.energy).filter(e => e > 0);
+    if (energies.length === 0) return 0;
+    const geometricMean = Math.exp(energies.reduce((a, e) => a + Math.log(e), 0) / energies.length);
+    const arithmeticMean = energies.reduce((a, e) => a + e, 0) / energies.length;
+    return arithmeticMean > 0 ? geometricMean / arithmeticMean : 0;
   }
 }

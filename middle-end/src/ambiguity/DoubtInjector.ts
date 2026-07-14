@@ -1,8 +1,3 @@
-/**
- * 怀疑注入器：向确定性结论注入合理怀疑。
- * 对高置信度的结论有计划地注入怀疑因子，迫使系统保持开放与可证伪性。
- */
-
 export interface CertainConclusion {
   id: string;
   statement: string;
@@ -22,16 +17,22 @@ export class DoubtInjector {
   private _injections: DoubtInjection[] = [];
   private _ceiling = 0.95;
   private _maxDoubtPerRound = 0.3;
+  private _bayesianPriors: Map<string, number> = new Map();
+  private _evidenceMatrix: Map<string, number[]> = new Map();
 
   register(conclusion: CertainConclusion): void {
     if (conclusion.confidence > this._ceiling) conclusion.confidence = this._ceiling;
     this._conclusions.set(conclusion.id, conclusion);
+    this._bayesianPriors.set(conclusion.id, conclusion.confidence);
+    this._evidenceMatrix.set(conclusion.id, []);
   }
 
   inject(conclusionId: string, reason: string): DoubtInjection | null {
     const c = this._conclusions.get(conclusionId);
     if (!c) return null;
-    const amount = Math.min(this._maxDoubtPerRound, c.confidence * 0.2);
+    const evidence = this._evidenceMatrix.get(conclusionId) ?? [];
+    const posterior = this._computePosterior(c.confidence, evidence);
+    const amount = Math.min(this._maxDoubtPerRound, Math.abs(c.confidence - posterior));
     c.confidence = Math.max(0, c.confidence - amount);
     c.injectedDoubt += amount;
     const injection: DoubtInjection = {
@@ -59,8 +60,19 @@ export class DoubtInjector {
   restoreConfidence(conclusionId: string, evidence: number): CertainConclusion | null {
     const c = this._conclusions.get(conclusionId);
     if (!c) return null;
+    const evidences = this._evidenceMatrix.get(conclusionId) ?? [];
+    evidences.push(evidence);
+    this._evidenceMatrix.set(conclusionId, evidences);
     c.confidence = Math.min(this._ceiling, c.confidence + evidence);
     return c;
+  }
+
+  computeDoubtEntropy(): number {
+    const doubts = Array.from(this._conclusions.values()).map(c => c.injectedDoubt);
+    if (doubts.length === 0) return 0;
+    const mean = doubts.reduce((a, b) => a + b, 0) / doubts.length;
+    const variance = doubts.reduce((s, v) => s + (v - mean) ** 2, 0) / doubts.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
   }
 
   setCeiing(value: number): void {
@@ -77,5 +89,12 @@ export class DoubtInjector {
 
   get conclusionCount(): number {
     return this._conclusions.size;
+  }
+
+  private _computePosterior(prior: number, evidence: number[]): number {
+    const logPrior = Math.log(prior + 1e-10);
+    const logLikelihood = evidence.reduce((s, e) => s + Math.log(1 - e + 1e-10), 0);
+    const logPosterior = logPrior + logLikelihood;
+    return Math.max(0, Math.min(1, Math.exp(logPosterior)));
   }
 }

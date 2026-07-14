@@ -1,112 +1,190 @@
-/**
- * 平原跳跃者模块：在不同知识平原（稳定概念区）之间进行跳跃，
- * 跨越中间的混沌谷地，直接抵达另一稳定认知平台。
- */
-
-export interface KnowledgePlateau {
+export interface PlateauState {
   id: string;
-  name: string;
-  altitude: number;
-  stability: number;
+  elevation: number;
+  energy: number;
+  connections: string[];
+  visited: boolean;
+  localMinimum: boolean;
+  globalMinimum: boolean;
+  saddlePoint: boolean;
+  partitionFunction: number;
+  barrierHeight: number;
 }
 
-export interface PlateauJump {
-  id: string;
+export interface HopResult {
   from: string;
   to: string;
-  gapCrossed: number;
-  landed: boolean;
-  jumpedAt: number;
+  energyChange: number;
+  temperature: number;
+  probability: number;
+  boltzmannFactor: number;
+  accepted: boolean;
+}
+
+export interface PlateauConfig {
+  temperature: number;
+  coolingRate: number;
+  threshold: number;
 }
 
 export class PlateauHopper {
-  private _plateaus: Map<string, KnowledgePlateau> = new Map();
-  private _jumps: PlateauJump[] = [];
-  private _current: string | null = null;
-  private _maxJumpDistance = 5.0;
+  private _config: PlateauConfig;
+  private _states: Map<string, PlateauState> = new Map();
+  private _currentStateId: string = '';
+  private _hopHistory: HopResult[] = [];
+  private _meta: Record<string, unknown> = {};
+  private _totalEnergy: number = 0;
+  private _transitionMatrix: Map<string, Map<string, number>> = new Map();
+  private _barrierMatrix: Map<string, Map<string, number>> = new Map();
+  private _markovChain: Map<string, number[]> = new Map();
+  private _equilibriumDistribution: Map<string, number> = new Map();
 
-  registerPlateau(plateau: KnowledgePlateau): void {
-    this._plateaus.set(plateau.id, plateau);
-    if (this._current === null) this._current = plateau.id;
+  constructor(config: PlateauConfig) {
+    this._config = { ...config };
   }
 
-  measureGap(a: string, b: string): number {
-    const pa = this._plateaus.get(a);
-    const pb = this._plateaus.get(b);
-    if (!pa || !pb) return Infinity;
-    const altDiff = Math.abs(pa.altitude - pb.altitude);
-    const stabDiff = Math.abs(pa.stability - pb.stability);
-    return altDiff + stabDiff;
+  get stateCount(): number {
+    return this._states.size;
   }
 
-  jump(to: string): PlateauJump | null {
-    if (!this._current || !this._plateaus.has(to)) return null;
-    const gap = this.measureGap(this._current, to);
-    if (gap > this._maxJumpDistance) {
-      const failed: PlateauJump = {
-        id: `jump-${Date.now()}`,
-        from: this._current,
-        to,
-        gapCrossed: gap,
-        landed: false,
-        jumpedAt: Date.now(),
-      };
-      this._jumps.push(failed);
-      return failed;
-    }
-    const jump: PlateauJump = {
-      id: `jump-${Date.now()}`,
-      from: this._current,
-      to,
-      gapCrossed: gap,
-      landed: true,
-      jumpedAt: Date.now(),
+  get currentStateId(): string {
+    return this._currentStateId;
+  }
+
+  get temperature(): number {
+    return this._config.temperature;
+  }
+
+  addState(id: string, elevation: number): PlateauState {
+    const state: PlateauState = {
+      id,
+      elevation,
+      energy: elevation,
+      connections: [],
+      visited: false,
+      localMinimum: false,
+      globalMinimum: false,
+      saddlePoint: false,
+      partitionFunction: 0,
+      barrierHeight: 0,
     };
-    this._jumps.push(jump);
-    if (this._jumps.length > 200) this._jumps.shift();
-    this._current = to;
-    return jump;
+    this._states.set(id, state);
+    this._transitionMatrix.set(id, new Map());
+    this._barrierMatrix.set(id, new Map());
+    this._markovChain.set(id, []);
+    if (this._currentStateId === '') {
+      this._currentStateId = id;
+      state.visited = true;
+    }
+    return state;
   }
 
-  findReachable(): string[] {
-    if (!this._current) return [];
-    return Array.from(this._plateaus.keys()).filter(id => {
-      if (id === this._current) return false;
-      return this.measureGap(this._current, id) <= this._maxJumpDistance;
-    });
+  connectStates(a: string, b: string, weight: number = 1): void {
+    const stateA = this._states.get(a);
+    const stateB = this._states.get(b);
+    if (!stateA || !stateB) return;
+    stateA.connections.push(b);
+    stateB.connections.push(a);
+    this._transitionMatrix.get(a)!.set(b, weight);
+    this._transitionMatrix.get(b)!.set(a, weight);
+    const barrier = Math.abs(stateA.elevation - stateB.elevation) / 2;
+    this._barrierMatrix.get(a)!.set(b, barrier);
+    this._barrierMatrix.get(b)!.set(a, barrier);
   }
 
-  buildBridge(a: string, b: string): boolean {
-    const pa = this._plateaus.get(a);
-    const pb = this._plateaus.get(b);
-    if (!pa || !pb) return false;
-    const avgAlt = (pa.altitude + pb.altitude) / 2;
-    const avgStab = (pa.stability + pb.stability) / 2;
-    pa.altitude = avgAlt;
-    pb.altitude = avgAlt;
-    pa.stability = avgStab;
-    pb.stability = avgStab;
-    return true;
+  hop(targetId: string): HopResult | null {
+    const current = this._states.get(this._currentStateId);
+    const target = this._states.get(targetId);
+    if (!current || !target) return null;
+    const energyChange = target.energy - current.energy;
+    const boltzmannFactor = Math.exp(-energyChange / (this._config.temperature || 1));
+    const weight = this._transitionMatrix.get(this._currentStateId)?.get(targetId) ?? 1;
+    const probability = weight * boltzmannFactor;
+    const accepted = Math.random() < probability || energyChange < 0;
+    const result: HopResult = {
+      from: this._currentStateId,
+      to: targetId,
+      energyChange,
+      temperature: this._config.temperature,
+      probability,
+      boltzmannFactor,
+      accepted,
+    };
+    this._hopHistory.push(result);
+    if (this._hopHistory.length > 100) this._hopHistory.shift();
+    if (accepted) {
+      this._currentStateId = targetId;
+      target.visited = true;
+      this._totalEnergy += energyChange;
+    }
+    this._cool();
+    return result;
   }
 
-  expandJumpCapability(delta: number): void {
-    this._maxJumpDistance = Math.max(1, this._maxJumpDistance + delta);
+  private _cool(): void {
+    this._config.temperature *= this._config.coolingRate;
+    if (this._config.temperature < this._config.threshold) {
+      this._config.temperature = this._config.threshold;
+    }
   }
 
-  getSuccessfulJumps(): PlateauJump[] {
-    return this._jumps.filter(j => j.landed);
+  findLocalMinima(): PlateauState[] {
+    const minima: PlateauState[] = [];
+    for (const state of this._states.values()) {
+      const neighborElevations = state.connections.map((id) => this._states.get(id)!.elevation);
+      state.localMinimum = neighborElevations.every((e) => e >= state.elevation);
+      if (state.localMinimum) minima.push(state);
+    }
+    return minima;
   }
 
-  getCurrentPlateau(): KnowledgePlateau | null {
-    if (!this._current) return null;
-    return this._plateaus.get(this._current) ?? null;
+  findGlobalMinimum(): PlateauState | null {
+    const states = Array.from(this._states.values());
+    if (states.length === 0) return null;
+    const min = states.reduce((best, s) => (s.elevation < best.elevation ? s : best));
+    for (const s of states) s.globalMinimum = s.id === min.id;
+    return min;
   }
 
-  get plateauCount(): number {
-    return this._plateaus.size;
+  findSaddlePoints(): PlateauState[] {
+    const saddles: PlateauState[] = [];
+    for (const state of this._states.values()) {
+      if (state.connections.length < 2) continue;
+      const elevations = state.connections.map((id) => this._states.get(id)!.elevation);
+      const higher = elevations.filter((e) => e > state.elevation).length;
+      const lower = elevations.filter((e) => e < state.elevation).length;
+      state.saddlePoint = higher > 0 && lower > 0;
+      if (state.saddlePoint) saddles.push(state);
+    }
+    return saddles;
   }
 
-  get jumpCount(): number {
-    return this._jumps.length;
+  computePartitionFunction(): number {
+    let z = 0;
+    for (const state of this._states.values()) {
+      state.partitionFunction = Math.exp(-state.energy / (this._config.temperature || 1));
+      z += state.partitionFunction;
+    }
+    return z;
+  }
+
+  barrierHeight(from: string, to: string): number {
+    return this._barrierMatrix.get(from)?.get(to) ?? 0;
+  }
+
+  hopReport(): Record<string, unknown> {
+    return {
+      states: this._states.size,
+      currentState: this._currentStateId,
+      totalEnergy: this._totalEnergy,
+      hopCount: this._hopHistory.length,
+      temperature: this._config.temperature,
+      localMinima: this.findLocalMinima().length,
+      globalMinimum: this.findGlobalMinimum()?.id,
+      saddlePoints: this.findSaddlePoints().length,
+      partitionFunction: this.computePartitionFunction(),
+      equilibrium: Object.fromEntries(this._equilibriumDistribution),
+      meta: this._meta,
+    };
   }
 }

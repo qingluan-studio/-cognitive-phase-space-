@@ -1,143 +1,156 @@
-export interface Candidate {
+export interface Individual {
   id: string;
+  genotype: number[];
   fitness: number;
-  age: number;
-  traits: Record<string, unknown>;
+  generation: number;
+  heritability: number;
 }
 
 export interface SelectionResult {
-  survivors: string[];
-  eliminated: string[];
-  averageFitness: number;
-  fitnessVariance: number;
-  selectionPressure: number;
-  selectedAt: number;
+  parentIds: string[];
+  childId: string;
+  crossoverPoint: number;
+  mutationRate: number;
+  fitnessDelta: number;
 }
 
 export class NaturalSelector {
-  private _candidates: Map<string, Candidate> = new Map();
+  private _population: Map<string, Individual> = new Map();
+  private _generation: number = 0;
   private _history: SelectionResult[] = [];
-  private _survivalRatio: number = 0.5;
-  private _maxAge: number = 100;
-  private _tournamentSize: number = 3;
+  private _state: Record<string, unknown> = {};
+  private _selectionPressure: number = 1.5;
+  private _mutationRate: number = 0.01;
+  private _heritabilityEstimate: number = 0.5;
 
-  registerCandidate(candidate: Candidate): void {
-    this._candidates.set(candidate.id, candidate);
+  constructor() {}
+
+  get populationSize(): number {
+    return this._population.size;
   }
 
-  select(): SelectionResult {
-    const sorted = Array.from(this._candidates.values()).sort((a, b) => b.fitness - a.fitness);
-    const survivorCount = Math.max(1, Math.floor(sorted.length * this._survivalRatio));
-    const survivors: string[] = [];
-    const eliminated: string[] = [];
-    for (let i = 0; i < sorted.length; i++) {
-      if (i < survivorCount && sorted[i].age < this._maxAge) {
-        survivors.push(sorted[i].id);
-      } else {
-        eliminated.push(sorted[i].id);
-        this._candidates.delete(sorted[i].id);
-      }
+  get generation(): number {
+    return this._generation;
+  }
+
+  seed(id: string, genotype: number[], fitness: number): void {
+    this._population.set(id, { id, genotype: [...genotype], fitness, generation: 0, heritability: 0.5 });
+  }
+
+  select(): Individual | null {
+    if (this._population.size === 0) return null;
+    const individuals = Array.from(this._population.values());
+    const minFitness = Math.min(...individuals.map((i) => i.fitness));
+    const adjusted = individuals.map((i) => Math.pow(i.fitness - minFitness + 1, this._selectionPressure));
+    const total = adjusted.reduce((s, v) => s + v, 0);
+    let r = Math.random() * total;
+    for (let i = 0; i < individuals.length; i++) {
+      r -= adjusted[i];
+      if (r <= 0) return individuals[i];
     }
-    const survivorFitnesses = survivors.map((id) => this._candidates.get(id)?.fitness ?? 0);
-    const averageFitness = survivorFitnesses.length > 0
-      ? survivorFitnesses.reduce((s, f) => s + f, 0) / survivorFitnesses.length
-      : 0;
-    const fitnessVariance = this._computeVariance(survivorFitnesses, averageFitness);
-    const allFitnesses = sorted.map((c) => c.fitness);
-    const populationMean = allFitnesses.length > 0 ? allFitnesses.reduce((s, f) => s + f, 0) / allFitnesses.length : 0;
-    const selectionPressure = populationMean > 0 ? (averageFitness - populationMean) / populationMean : 0;
+    return individuals[individuals.length - 1];
+  }
+
+  reproduce(parentA: string, parentB: string, childId: string): SelectionResult | null {
+    const a = this._population.get(parentA);
+    const b = this._population.get(parentB);
+    if (!a || !b) return null;
+    const len = Math.min(a.genotype.length, b.genotype.length);
+    const crossoverPoint = Math.floor(Math.random() * len);
+    const childGenotype: number[] = [];
+    for (let i = 0; i < len; i++) {
+      const gene = i < crossoverPoint ? a.genotype[i] : b.genotype[i];
+      const mutated = Math.random() < this._mutationRate ? gene + (Math.random() - 0.5) : gene;
+      childGenotype.push(mutated);
+    }
+    const meanParentFitness = (a.fitness + b.fitness) / 2;
+    const breedingValue = this._heritabilityEstimate * meanParentFitness;
+    const childFitness = Math.max(0, breedingValue + (Math.random() - 0.5) * 0.1);
+    const child: Individual = {
+      id: childId,
+      genotype: childGenotype,
+      fitness: childFitness,
+      generation: this._generation,
+      heritability: this._heritabilityEstimate,
+    };
+    this._population.set(childId, child);
     const result: SelectionResult = {
-      survivors,
-      eliminated,
-      averageFitness,
-      fitnessVariance,
-      selectionPressure,
-      selectedAt: Date.now(),
+      parentIds: [parentA, parentB],
+      childId,
+      crossoverPoint,
+      mutationRate: this._mutationRate,
+      fitnessDelta: childFitness - meanParentFitness,
     };
     this._history.push(result);
     if (this._history.length > 100) this._history.shift();
     return result;
   }
 
-  tournamentSelect(): string | null {
-    if (this._candidates.size === 0) return null;
-    const candidates = Array.from(this._candidates.values());
-    const tournamentSize = Math.min(this._tournamentSize, candidates.length);
-    let best: Candidate | null = null;
-    for (let i = 0; i < tournamentSize; i++) {
-      const candidate = candidates[Math.floor(Math.random() * candidates.length)];
-      if (!best || candidate.fitness > best.fitness) {
-        best = candidate;
+  cull(percentage: number): void {
+    const sorted = Array.from(this._population.values()).sort((a, b) => a.fitness - b.fitness);
+    const toRemove = Math.floor(sorted.length * percentage);
+    for (let i = 0; i < toRemove; i++) {
+      this._population.delete(sorted[i].id);
+    }
+  }
+
+  evolve(generations: number): void {
+    for (let g = 0; g < generations; g++) {
+      this._generation++;
+      const parentA = this.select();
+      const parentB = this.select();
+      if (parentA && parentB) {
+        this.reproduce(parentA.id, parentB.id, `gen_${this._generation}_${Math.random().toString(36).slice(2, 6)}`);
+      }
+      if (this._population.size > 100) {
+        this.cull(0.2);
       }
     }
-    return best ? best.id : null;
   }
 
-  rouletteSelect(): string | null {
-    const candidates = Array.from(this._candidates.values());
-    if (candidates.length === 0) return null;
-    const totalFitness = candidates.reduce((s, c) => s + Math.max(0, c.fitness), 0);
-    if (totalFitness === 0) return candidates[Math.floor(Math.random() * candidates.length)].id;
-    let roll = Math.random() * totalFitness;
-    for (const c of candidates) {
-      roll -= Math.max(0, c.fitness);
-      if (roll <= 0) return c.id;
+  fisherFundamentalTheorem(): number {
+    const fitnesses = Array.from(this._population.values()).map((i) => i.fitness);
+    const mean = fitnesses.reduce((s, v) => s + v, 0) / (fitnesses.length || 1);
+    const variance = fitnesses.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / (fitnesses.length || 1);
+    return variance / (mean || 1);
+  }
+
+  priceEquation(): { deltaZ: number; cov: number; expDelta: number } {
+    const individuals = Array.from(this._population.values());
+    if (individuals.length === 0) return { deltaZ: 0, cov: 0, expDelta: 0 };
+    const z = individuals.map((i) => i.fitness);
+    const w = individuals.map(() => 1);
+    const meanW = w.reduce((s, v) => s + v, 0) / w.length;
+    const meanZ = z.reduce((s, v) => s + v, 0) / z.length;
+    let cov = 0;
+    for (let i = 0; i < individuals.length; i++) {
+      cov += (w[i] - meanW) * (z[i] - meanZ);
     }
-    return candidates[candidates.length - 1].id;
+    cov /= individuals.length;
+    const expDelta = 0;
+    const deltaZ = cov / (meanW || 1) + expDelta;
+    return { deltaZ, cov, expDelta };
   }
 
-  computeGiniCoefficient(): number {
-    const candidates = Array.from(this._candidates.values());
-    if (candidates.length === 0) return 0;
-    const fitnesses = candidates.map((c) => c.fitness).sort((a, b) => a - b);
-    const n = fitnesses.length;
-    const sum = fitnesses.reduce((s, f) => s + f, 0);
-    if (sum === 0) return 0;
-    let cumulativeSum = 0;
-    for (let i = 0; i < n; i++) {
-      cumulativeSum += (i + 1) * fitnesses[i];
-    }
-    return (2 * cumulativeSum) / (n * sum) - (n + 1) / n;
+  averageFitness(): number {
+    if (this._population.size === 0) return 0;
+    return Array.from(this._population.values()).reduce((s, i) => s + i.fitness, 0) / this._population.size;
   }
 
-  computeResponseToSelection(): number {
-    if (this._history.length < 2) return 0;
-    const current = this._history[this._history.length - 1].averageFitness;
-    const previous = this._history[this._history.length - 2].averageFitness;
-    return current - previous;
+  fitnessVariance(): number {
+    const avg = this.averageFitness();
+    if (this._population.size === 0) return 0;
+    return Array.from(this._population.values()).reduce((s, i) => s + Math.pow(i.fitness - avg, 2), 0) / this._population.size;
   }
 
-  ageAll(): void {
-    for (const c of this._candidates.values()) c.age++;
-  }
-
-  setSurvivalRatio(value: number): void {
-    this._survivalRatio = Math.max(0, Math.min(1, value));
-  }
-
-  setMaxAge(age: number): void {
-    this._maxAge = Math.max(1, age);
-  }
-
-  setTournamentSize(size: number): void {
-    this._tournamentSize = Math.max(1, size);
-  }
-
-  getCandidate(id: string): Candidate | null {
-    return this._candidates.get(id) ?? null;
-  }
-
-  getHistory(limit: number = 20): SelectionResult[] {
-    return this._history.slice(-limit);
-  }
-
-  get candidateCount(): number {
-    return this._candidates.size;
-  }
-
-  private _computeVariance(values: number[], mean: number): number {
-    if (values.length === 0) return 0;
-    const sumSq = values.reduce((s, v) => s + (v - mean) ** 2, 0);
-    return sumSq / values.length;
+  report(): Record<string, unknown> {
+    return {
+      population: this._population.size,
+      generation: this._generation,
+      avgFitness: this.averageFitness(),
+      variance: this.fitnessVariance(),
+      fisherTheorem: this.fisherFundamentalTheorem(),
+      state: this._state,
+    };
   }
 }

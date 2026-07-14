@@ -1,139 +1,129 @@
-/**
- * CoralReefNetwork - 珊瑚礁网络模块
- * 模拟众多共生模块构成的生态系统网络，珊瑚、藻类、鱼类等
- * 多个节点相互依存，形成高密度、高多样性的共生生态。
- */
-
-export interface ReefNode {
-  readonly nodeId: string;
-  species: string;
-  role: 'producer' | 'consumer' | 'decomposer' | 'symbiont';
-  energy: number;
-  connections: string[];
+export interface ReefSpecies {
+  id: string;
+  trophicLevel: number;
+  biomass: number;
+  energyInput: number;
+  biodiversityContribution: number;
 }
 
-export interface ReefEdge {
-  from: string;
-  to: string;
-  weight: number;
-  type: 'mutualism' | 'commensalism' | 'parasitism';
+export interface TrophicLink {
+  predator: string;
+  prey: string;
+  energyTransfer: number;
+  efficiency: number;
 }
 
 export class CoralReefNetwork {
-  private _nodes: Map<string, ReefNode> = new Map();
-  private _edges: ReefEdge[] = [];
-  private _biodiversityIndex: number = 0;
-  private _thermalStress: number = 0;
-  private _bleachingEvents: number = 0;
+  private _species: Map<string, ReefSpecies> = new Map();
+  private _links: TrophicLink[] = [];
+  private _state: Record<string, unknown> = {};
+  private _energyPyramid: Map<number, number> = new Map();
+  private _trophicEfficiency: number = 0.1;
 
   constructor() {}
 
-  get nodeCount(): number {
-    return this._nodes.size;
+  get speciesCount(): number {
+    return this._species.size;
   }
 
-  get biodiversity(): number {
-    return this._biodiversityIndex;
+  get linkCount(): number {
+    return this._links.length;
   }
 
-  get thermalStress(): number {
-    return this._thermalStress;
+  addSpecies(id: string, trophicLevel: number, biomass: number, energyInput: number): void {
+    const biodiversityContribution = biomass * Math.exp(-trophicLevel * 0.5);
+    this._species.set(id, { id, trophicLevel, biomass, energyInput, biodiversityContribution });
+    this._updateEnergyPyramid();
   }
 
-  public addNode(node: ReefNode): void {
-    if (this._nodes.has(node.nodeId)) {
-      return;
-    }
-    this._nodes.set(node.nodeId, { ...node, connections: [...node.connections] });
-    this._recalculateBiodiversity();
-  }
-
-  public addEdge(edge: ReefEdge): void {
-    if (!this._nodes.has(edge.from) || !this._nodes.has(edge.to)) {
-      return;
-    }
-    this._edges.push({ ...edge });
-    const from = this._nodes.get(edge.from)!;
-    if (!from.connections.includes(edge.to)) {
-      from.connections.push(edge.to);
+  private _updateEnergyPyramid(): void {
+    this._energyPyramid.clear();
+    for (const sp of this._species.values()) {
+      const current = this._energyPyramid.get(sp.trophicLevel) ?? 0;
+      this._energyPyramid.set(sp.trophicLevel, current + sp.energyInput);
     }
   }
 
-  private _recalculateBiodiversity(): void {
-    const species = new Set<string>();
-    this._nodes.forEach((n) => species.add(n.species));
-    const richness = species.size;
-    const evenness = this._computeEvenness();
-    this._biodiversityIndex = richness * evenness;
+  linkTrophic(predator: string, prey: string): void {
+    const p = this._species.get(predator);
+    const q = this._species.get(prey);
+    if (!p || !q || p.trophicLevel <= q.trophicLevel) return;
+    const energyTransfer = q.energyInput * this._trophicEfficiency;
+    const efficiency = energyTransfer / (q.energyInput || 1);
+    this._links.push({ predator, prey, energyTransfer, efficiency });
   }
 
-  private _computeEvenness(): number {
-    if (this._nodes.size === 0) {
-      return 0;
+  trophicLevelEnergy(level: number): number {
+    return this._energyPyramid.get(level) ?? 0;
+  }
+
+  pyramidRatio(): number {
+    const levels = Array.from(this._energyPyramid.keys()).sort((a, b) => a - b);
+    if (levels.length < 2) return 0;
+    const base = this._energyPyramid.get(levels[0]) ?? 1;
+    const top = this._energyPyramid.get(levels[levels.length - 1]) ?? 0;
+    return top / base;
+  }
+
+  shannonDiversity(): number {
+    const biomasses = Array.from(this._species.values()).map((s) => s.biomass);
+    const total = biomasses.reduce((s, v) => s + v, 0);
+    if (total === 0) return 0;
+    return -biomasses.reduce((s, v) => {
+      const p = v / total;
+      return p > 0 ? s + p * Math.log2(p) : s;
+    }, 0);
+  }
+
+  simpsonDiversity(): number {
+    const biomasses = Array.from(this._species.values()).map((s) => s.biomass);
+    const total = biomasses.reduce((s, v) => s + v, 0);
+    if (total === 0) return 0;
+    return biomasses.reduce((s, v) => s + Math.pow(v / total, 2), 0);
+  }
+
+  keystoneSpecies(): string | null {
+    let maxLinks = 0;
+    let keystone: string | null = null;
+    const linkCounts = new Map<string, number>();
+    for (const link of this._links) {
+      linkCounts.set(link.predator, (linkCounts.get(link.predator) ?? 0) + 1);
+      linkCounts.set(link.prey, (linkCounts.get(link.prey) ?? 0) + 1);
     }
-    const counts: Record<string, number> = {};
-    this._nodes.forEach((n) => {
-      counts[n.species] = (counts[n.species] ?? 0) + 1;
-    });
-    const total = this._nodes.size;
-    const proportions = Object.values(counts).map((c) => c / total);
-    const entropy = proportions.reduce((s, p) => s - p * Math.log(p), 0);
-    const maxEntropy = Math.log(Object.keys(counts).length || 1);
-    return maxEntropy === 0 ? 0 : entropy / maxEntropy;
-  }
-
-  public flowEnergy(): void {
-    this._edges.forEach((edge) => {
-      const from = this._nodes.get(edge.from);
-      const to = this._nodes.get(edge.to);
-      if (!from || !to) {
-        return;
+    for (const [id, count] of linkCounts) {
+      if (count > maxLinks) {
+        maxLinks = count;
+        keystone = id;
       }
-      if (from.energy < edge.weight) {
-        return;
-      }
-      from.energy -= edge.weight;
-      to.energy += edge.weight * 0.9;
-    });
-  }
-
-  public applyThermalStress(delta: number): void {
-    this._thermalStress = Math.min(1, this._thermalStress + delta);
-    if (this._thermalStress > 0.7) {
-      this.triggerBleaching();
     }
+    return keystone;
   }
 
-  public triggerBleaching(): void {
-    this._bleachingEvents++;
-    this._nodes.forEach((node) => {
-      if (node.role === 'symbiont') {
-        node.energy *= 0.3;
+  cascadeRemoval(id: string): string[] {
+    const affected: string[] = [];
+    const removed = new Set<string>([id]);
+    const queue: string[] = [id];
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      for (const link of this._links) {
+        if (link.predator === curr && !removed.has(link.prey)) {
+          removed.add(link.prey);
+          affected.push(link.prey);
+          queue.push(link.prey);
+        }
       }
-    });
-    this._edges = this._edges.filter((e) => e.type !== 'mutualism' || Math.random() > 0.5);
-    this._thermalStress *= 0.5;
+    }
+    return affected;
   }
 
-  public recover(): void {
-    this._thermalStress = Math.max(0, this._thermalStress - 0.1);
-    this._nodes.forEach((node) => {
-      node.energy = Math.min(100, node.energy + 2);
-    });
-  }
-
-  public ecosystemReport(): Record<string, unknown> {
-    const roleCounts: Record<string, number> = {};
-    this._nodes.forEach((n) => {
-      roleCounts[n.role] = (roleCounts[n.role] ?? 0) + 1;
-    });
+  report(): Record<string, unknown> {
     return {
-      nodeCount: this.nodeCount,
-      edgeCount: this._edges.length,
-      biodiversity: this._biodiversityIndex.toFixed(3),
-      thermalStress: this._thermalStress.toFixed(3),
-      bleachingEvents: this._bleachingEvents,
-      roles: roleCounts,
+      species: this._species.size,
+      links: this._links.length,
+      shannon: this.shannonDiversity(),
+      simpson: this.simpsonDiversity(),
+      keystone: this.keystoneSpecies(),
+      state: this._state,
     };
   }
 }

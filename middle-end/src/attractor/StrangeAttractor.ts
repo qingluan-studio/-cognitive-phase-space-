@@ -1,9 +1,3 @@
-/**
- * StrangeAttractor - 奇异吸引子
- * 混沌系统中隐藏的有序模式，轨迹永不重复但始终被吸引
- * 到一个分形结构的奇异区域内，如洛伦兹吸引子的蝴蝶翅膀。
- */
-
 export interface StrangeAttractorData {
   readonly attractorId: string;
   sigma: number;
@@ -25,6 +19,9 @@ export class StrangeAttractor {
   private _position: { x: number; y: number; z: number };
   private _step: number = 0;
   private _lyapunovEstimate: number = 0;
+  private _kaplanYorkeDimension: number = 0;
+  private _recurrenceMatrix: boolean[][] = [];
+  private _boxCounts: Map<number, number> = new Map();
 
   constructor(data: StrangeAttractorData, initial: { x: number; y: number; z: number }) {
     this._data = { ...data };
@@ -41,6 +38,10 @@ export class StrangeAttractor {
 
   get trajectoryLength(): number {
     return this._trajectory.length;
+  }
+
+  get kaplanYorkeDimension(): number {
+    return this._kaplanYorkeDimension;
   }
 
   public evolve(): TrajectoryPoint {
@@ -63,6 +64,7 @@ export class StrangeAttractor {
       this._trajectory.shift();
     }
     this._updateLyapunov();
+    this._updateKaplanYorke();
     return point;
   }
 
@@ -77,6 +79,38 @@ export class StrangeAttractor {
     const dz = curr.z - prev.z;
     const divergence = Math.sqrt(dx * dx + dy * dy + dz * dz);
     this._lyapunovEstimate = this._lyapunovEstimate * 0.99 + divergence * 0.01;
+  }
+
+  private _updateKaplanYorke(): void {
+    if (this._trajectory.length < 10) return;
+    const n = Math.min(this._trajectory.length, 50);
+    const recent = this._trajectory.slice(-n);
+    const exponents = this._computeLocalExponents(recent);
+    let sum = 0;
+    let dim = 0;
+    for (let i = 0; i < exponents.length; i++) {
+      sum += exponents[i];
+      if (sum < 0) {
+        dim = i + sum / Math.abs(exponents[i]);
+        break;
+      }
+    }
+    this._kaplanYorkeDimension = dim;
+  }
+
+  private _computeLocalExponents(points: TrajectoryPoint[]): number[] {
+    const dxx = this._averageDifference(points, 'x');
+    const dyy = this._averageDifference(points, 'y');
+    const dzz = this._averageDifference(points, 'z');
+    return [Math.log(dxx + 1e-9), Math.log(dyy + 1e-9), Math.log(dzz + 1e-9)];
+  }
+
+  private _averageDifference(points: TrajectoryPoint[], axis: 'x' | 'y' | 'z'): number {
+    let sum = 0;
+    for (let i = 1; i < points.length; i++) {
+      sum += Math.abs(points[i][axis] - points[i - 1][axis]);
+    }
+    return sum / (points.length - 1);
   }
 
   public runSteps(count: number): TrajectoryPoint[] {
@@ -110,6 +144,8 @@ export class StrangeAttractor {
     this._trajectory = [];
     this._step = 0;
     this._lyapunovEstimate = 0;
+    this._kaplanYorkeDimension = 0;
+    this._boxCounts.clear();
   }
 
   public computeBounds(): { minX: number; maxX: number; minZ: number; maxZ: number } {
@@ -126,6 +162,39 @@ export class StrangeAttractor {
     return { minX, maxX, minZ, maxZ };
   }
 
+  public computeBoxCountingDimension(boxSizes: number[] = [0.5, 0.25, 0.125, 0.0625]): number {
+    const bounds = this.computeBounds();
+    if (bounds.maxX === bounds.minX) return 0;
+    const dims: number[] = [];
+    for (const size of boxSizes) {
+      const boxes = new Set<string>();
+      for (const p of this._trajectory) {
+        const ix = Math.floor((p.x - bounds.minX) / size);
+        const iz = Math.floor((p.z - bounds.minZ) / size);
+        boxes.add(`${ix},${iz}`);
+      }
+      this._boxCounts.set(size, boxes.size);
+      dims.push(Math.log(boxes.size + 1) / Math.log(1 / size + 1));
+    }
+    return dims.reduce((a, b) => a + b, 0) / dims.length;
+  }
+
+  public computeRecurrencePlot(threshold: number = 2): number[][] {
+    const n = Math.min(this._trajectory.length, 100);
+    if (n < 2) return [];
+    const matrix: number[][] = [];
+    for (let i = 0; i < n; i++) {
+      matrix[i] = [];
+      for (let j = 0; j < n; j++) {
+        const a = this._trajectory[this._trajectory.length - n + i];
+        const b = this._trajectory[this._trajectory.length - n + j];
+        const d = Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2);
+        matrix[i][j] = d < threshold ? 1 : 0;
+      }
+    }
+    return matrix;
+  }
+
   public attractorReport(): Record<string, unknown> {
     const bounds = this.computeBounds();
     return {
@@ -138,6 +207,8 @@ export class StrangeAttractor {
       position: { x: this._position.x.toFixed(3), y: this._position.y.toFixed(3), z: this._position.z.toFixed(3) },
       trajectoryLength: this.trajectoryLength,
       lyapunovEstimate: this._lyapunovEstimate.toFixed(4),
+      kaplanYorkeDimension: this._kaplanYorkeDimension.toFixed(3),
+      boxCountingDimension: this.computeBoxCountingDimension().toFixed(3),
       bounds,
     };
   }

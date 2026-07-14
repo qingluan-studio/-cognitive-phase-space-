@@ -1,114 +1,127 @@
-/**
- * 降神召唤器：召唤已逝模块的幽灵提供信息。
- * 通过降神会召唤已终止模块的幽灵，向其询问信息或获取遗留知识。
- */
-
-export type SeanceOutcome = 'contact' | 'silence' | 'distortion' | 'possession' | 'failed';
-
-export interface DeceasedModule {
-  id: string;
-  name: string;
-  lastKnowledge: Record<string, unknown>;
-  departedAt: number;
-  spiritStrength: number;
-}
-
-export interface SeanceSession {
+export interface SeanceCall {
   id: string;
   target: string;
-  outcome: SeanceOutcome;
-  questions: string[];
-  answers: string[];
-  channeledAt: number;
+  latency: number;
+  success: boolean;
+  retryCount: number;
+  timestamp: number;
+}
+
+export interface SeanceEndpoint {
+  id: string;
+  failureRate: number;
+  baseLatency: number;
+  loadFactor: number;
 }
 
 export class SeanceCaller {
-  private _deceased: Map<string, DeceasedModule> = new Map();
-  private _sessions: SeanceSession[] = [];
-  private _mediumClarity = 0.7;
-  private _possessionRisk = 0.05;
+  private _calls: SeanceCall[] = [];
+  private _endpoints: Map<string, SeanceEndpoint> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _latencyDistribution: number[] = [];
+  private _arrivalTimes: number[] = [];
+  private _poissonLambda: number = 5;
+  private _backoffMultiplier: number = 2;
 
-  register(name: string, lastKnowledge: Record<string, unknown>): DeceasedModule {
-    const module: DeceasedModule = {
-      id: `dec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      name,
-      lastKnowledge,
-      departedAt: Date.now(),
-      spiritStrength: 1.0,
-    };
-    this._deceased.set(module.id, module);
-    return module;
+  registerEndpoint(id: string, failureRate: number, baseLatency: number): SeanceEndpoint {
+    const endpoint: SeanceEndpoint = { id, failureRate, baseLatency, loadFactor: 1 };
+    this._endpoints.set(id, endpoint);
+    return endpoint;
   }
 
-  summon(targetName: string, questions: string[]): SeanceSession {
-    const target = Array.from(this._deceased.values()).find(d => d.name === targetName);
-    const outcome = this._determineOutcome(target);
-    const answers = outcome === 'contact' || outcome === 'distortion'
-      ? this._channel(target, questions, outcome)
-      : [];
-
-    const session: SeanceSession = {
-      id: `seance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      target: targetName,
-      outcome,
-      questions: [...questions],
-      answers,
-      channeledAt: Date.now(),
+  call(target: string, retryCount: number = 0): SeanceCall {
+    const endpoint = this._endpoints.get(target);
+    const now = Date.now();
+    this._arrivalTimes.push(now);
+    if (this._arrivalTimes.length > 100) this._arrivalTimes.shift();
+    let latency = endpoint ? endpoint.baseLatency * endpoint.loadFactor : 100;
+    latency += Math.random() * latency * 0.2;
+    const success = endpoint ? Math.random() > endpoint.failureRate : Math.random() > 0.1;
+    const call: SeanceCall = {
+      id: `call-${now}-${Math.random().toString(36).slice(2, 6)}`,
+      target,
+      latency: Math.floor(latency),
+      success,
+      retryCount,
+      timestamp: now,
     };
-    this._sessions.push(session);
-    if (this._sessions.length > 100) this._sessions.shift();
+    this._calls.push(call);
+    if (this._calls.length > 200) this._calls.shift();
+    this._latencyDistribution.push(latency);
+    if (this._latencyDistribution.length > 100) this._latencyDistribution.shift();
+    if (endpoint) endpoint.loadFactor = Math.max(1, endpoint.loadFactor * (success ? 0.99 : 1.01));
+    return call;
+  }
 
-    if (target && outcome === 'contact') {
-      target.spiritStrength *= 0.9;
+  retry(callId: string): SeanceCall | null {
+    const original = this._calls.find(c => c.id === callId);
+    if (!original || original.success) return null;
+    const newRetry = original.retryCount + 1;
+    const backoffDelay = Math.pow(this._backoffMultiplier, newRetry) * 100;
+    const endpoint = this._endpoints.get(original.target);
+    if (endpoint) endpoint.loadFactor = Math.max(1, endpoint.loadFactor * 0.95);
+    const retried = this.call(original.target, newRetry);
+    retried.latency += backoffDelay;
+    return retried;
+  }
+
+  getCallsForTarget(target: string): SeanceCall[] {
+    return this._calls.filter(c => c.target === target);
+  }
+
+  averageLatency(): number {
+    if (this._calls.length === 0) return 0;
+    return this._calls.reduce((acc, c) => acc + c.latency, 0) / this._calls.length;
+  }
+
+  latencyPercentile(p: number): number {
+    if (this._latencyDistribution.length === 0) return 0;
+    const sorted = [...this._latencyDistribution].sort((a, b) => a - b);
+    const idx = Math.floor((p / 100) * (sorted.length - 1));
+    return sorted[idx];
+  }
+
+  successRate(): number {
+    if (this._calls.length === 0) return 0;
+    return this._calls.filter(c => c.success).length / this._calls.length;
+  }
+
+  estimatePoissonLambda(): number {
+    if (this._arrivalTimes.length < 2) return 0;
+    const intervals: number[] = [];
+    for (let i = 1; i < this._arrivalTimes.length; i++) {
+      intervals.push(this._arrivalTimes[i] - this._arrivalTimes[i - 1]);
     }
-    return session;
+    const meanInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    return meanInterval > 0 ? 1000 / meanInterval : 0;
   }
 
-  private _determineOutcome(target: DeceasedModule | undefined): SeanceOutcome {
-    if (!target) return 'failed';
-    if (target.spiritStrength < 0.1) return 'silence';
-    if (Math.random() < this._possessionRisk) return 'possession';
-    if (Math.random() > this._mediumClarity) return 'distortion';
-    return 'contact';
+  getRecentCalls(limit: number = 50): SeanceCall[] {
+    return this._calls.slice(-limit);
   }
 
-  private _channel(target: DeceasedModule | undefined, questions: string[], outcome: SeanceOutcome): string[] {
-    if (!target) return [];
-    return questions.map(q => {
-      const knowledgeKeys = Object.keys(target.lastKnowledge);
-      if (knowledgeKeys.length === 0) return '...';
-      const key = knowledgeKeys[Math.floor(Math.random() * knowledgeKeys.length)];
-      const value = String(target.lastKnowledge[key]);
-      if (outcome === 'distortion') {
-        return value.split('').reverse().join('');
-      }
-      return `${q}: ${value}`;
-    });
+  setBackoffMultiplier(multiplier: number): void {
+    this._backoffMultiplier = Math.max(1, multiplier);
   }
 
-  improveMediumClarity(amount: number): void {
-    this._mediumClarity = Math.min(1, this._mediumClarity + amount);
+  get endpointCount(): number {
+    return this._endpoints.size;
   }
 
-  setPossessionRisk(risk: number): void {
-    this._possessionRisk = Math.max(0, Math.min(1, risk));
+  get callCount(): number {
+    return this._calls.length;
   }
 
-  banish(targetName: string): boolean {
-    const target = Array.from(this._deceased.values()).find(d => d.name === targetName);
-    if (!target) return false;
-    return this._deceased.delete(target.id);
-  }
-
-  getSessions(limit: number = 50): SeanceSession[] {
-    return this._sessions.slice(-limit);
-  }
-
-  get deceasedCount(): number {
-    return this._deceased.size;
-  }
-
-  get mediumClarity(): number {
-    return this._mediumClarity;
+  callerReport(): Record<string, unknown> {
+    return {
+      callCount: this._calls.length,
+      endpointCount: this._endpoints.size,
+      averageLatency: this.averageLatency().toFixed(2),
+      latencyP95: this.latencyPercentile(95).toFixed(2),
+      latencyP99: this.latencyPercentile(99).toFixed(2),
+      successRate: this.successRate().toFixed(4),
+      estimatedLambda: this.estimatePoissonLambda().toFixed(4),
+      state: this._state,
+    };
   }
 }

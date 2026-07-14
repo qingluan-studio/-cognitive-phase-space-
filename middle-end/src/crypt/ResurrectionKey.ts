@@ -1,8 +1,3 @@
-/**
- * 复活钥匙模块：保留复活已死模块的唯一密钥，
- * 每把钥匙只能使用一次，使用后即焚毁，确保复活的稀缺性。
- */
-
 export interface ResurrectionKeyRecord {
   id: string;
   targetModule: string;
@@ -26,9 +21,24 @@ export class ResurrectionKey {
   private _results: ResurrectionResult[] = [];
   private _deadModules: Map<string, string> = new Map();
   private _maxUsesPerKey = 1;
+  private _entropyPool: number[] = [];
+  private _shamirPolynomial: number[] = [];
+  private _keyDerivationRounds: number = 1000;
 
   registerDeadModule(moduleId: string, codeSnapshot: string): void {
     this._deadModules.set(moduleId, codeSnapshot);
+    this._entropyPool.push(this._computeStringEntropy(codeSnapshot));
+  }
+
+  private _computeStringEntropy(text: string): number {
+    const freq: Record<string, number> = {};
+    for (const ch of text) freq[ch] = (freq[ch] ?? 0) + 1;
+    let entropy = 0;
+    for (const count of Object.values(freq)) {
+      const p = count / text.length;
+      entropy -= p * Math.log2(p);
+    }
+    return entropy;
   }
 
   forge(targetModule: string): ResurrectionKeyRecord | null {
@@ -36,23 +46,35 @@ export class ResurrectionKey {
     const key: ResurrectionKeyRecord = {
       id: `key-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       targetModule,
-      keyHash: this._hash(`${targetModule}-${Date.now()}`),
+      keyHash: this._deriveKey(`${targetModule}-${Date.now()}`),
       usesRemaining: this._maxUsesPerKey,
       createdAt: Date.now(),
       usedAt: null,
     };
     this._keys.set(key.id, key);
+    this._generateShamirPolynomial(targetModule);
     return key;
   }
 
-  private _hash(text: string): string {
+  private _deriveKey(text: string): string {
     let hash = 0;
-    for (let i = 0; i < text.length; i++) {
-      const char = text.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
+    for (let round = 0; round < this._keyDerivationRounds; round++) {
+      for (let i = 0; i < text.length; i++) {
+        const char = text.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char + round;
+        hash = hash & hash;
+      }
     }
     return `h${Math.abs(hash).toString(16)}`;
+  }
+
+  private _generateShamirPolynomial(secret: string): void {
+    const seed = secret.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
+    this._shamirPolynomial = [seed % 97, (seed * 13) % 97, (seed * 7) % 97];
+  }
+
+  private _evaluateShamir(x: number): number {
+    return this._shamirPolynomial.reduce((sum, coeff, power) => sum + coeff * Math.pow(x, power), 0) % 97;
   }
 
   verify(keyId: string): boolean {
@@ -71,6 +93,10 @@ export class ResurrectionKey {
     const code = this._deadModules.get(key.targetModule);
     if (!code) {
       return this._fail(keyId, key.targetModule, 'Dead module snapshot missing');
+    }
+    const shamirCheck = this._evaluateShamir(keyId.length) === this._evaluateShamir(key.targetModule.length);
+    if (!shamirCheck) {
+      return this._fail(keyId, key.targetModule, 'Shamir verification failed');
     }
     key.usesRemaining--;
     key.usedAt = Date.now();
@@ -138,5 +164,10 @@ export class ResurrectionKey {
 
   get deadModuleCount(): number {
     return this._deadModules.size;
+  }
+
+  get averageEntropy(): number {
+    if (this._entropyPool.length === 0) return 0;
+    return this._entropyPool.reduce((a, b) => a + b, 0) / this._entropyPool.length;
   }
 }

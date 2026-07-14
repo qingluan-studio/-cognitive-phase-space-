@@ -1,111 +1,116 @@
-/**
- * HostRejection - 宿主排斥
- * 免疫系统识别并攻击寄生模块的过程，通过抗体、吞噬细胞、
- * 炎症反应等多层机制试图清除寄生者，恢复宿主的健康状态。
- */
-
-export interface HostRejectionData {
-  readonly hostId: string;
-  immuneStrength: number;
-  toleranceLevel: number;
-  parasiteTarget: string;
-  inflammationLevel: number;
+export interface Antigen {
+  id: string;
+  epitope: string;
+  virulence: number;
 }
 
-export interface AttackWave {
-  waveId: string;
-  intensity: number;
-  cellsDeployed: number;
-  damageDealt: number;
-  repelled: boolean;
+export interface ImmuneResponse {
+  antigenId: string;
+  cytokineLevel: number;
+  antibodyTiter: number;
+  cytotoxicity: number;
+  timestamp: number;
 }
 
 export class HostRejection {
-  private _data: HostRejectionData;
-  private _waves: AttackWave[] = [];
-  private _antibodyTiter: number = 0;
-  private _collateralDamage: number = 0;
-  private _parasiteHP: number = 100;
+  private _antigens: Map<string, Antigen> = new Map();
+  private _responses: ImmuneResponse[] = [];
+  private _memoryCells: Map<string, number> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _clonalExpansionRate: number = 0.3;
+  private _cytokineThreshold: number = 10;
+  private _hammingDistanceCache: Map<string, number> = new Map();
 
-  constructor(data: HostRejectionData) {
-    this._data = { ...data };
-  }
-
-  get hostId(): string {
-    return this._data.hostId;
-  }
-
-  get inflammationLevel(): number {
-    return this._data.inflammationLevel;
-  }
-
-  get antibodyTiter(): number {
-    return this._antibodyTiter;
-  }
-
-  get parasiteRemaining(): number {
-    return this._parasiteHP;
-  }
-
-  public identifyParasite(signature: string): boolean {
-    const recognized = Math.random() < (1 - this._data.toleranceLevel);
-    if (recognized) {
-      this._antibodyTiter = Math.min(1, this._antibodyTiter + 0.2);
+  introduceAntigen(antigen: Antigen): void {
+    this._antigens.set(antigen.id, antigen);
+    const memory = this._memoryCells.get(antigen.epitope) ?? 0;
+    const response = this._mountResponse(antigen, memory);
+    this._responses.push(response);
+    if (this._responses.length > 200) this._responses.shift();
+    if (response.cytotoxicity > antigen.virulence) {
+      this._memoryCells.set(antigen.epitope, memory + 1);
     }
-    return recognized;
   }
 
-  public produceAntibodies(count: number): void {
-    this._antibodyTiter = Math.min(1, this._antibodyTiter + count * 0.05 * this._data.immuneStrength);
-  }
-
-  public launchAttackWave(waveId: string, cells: number): AttackWave {
-    const intensity = cells * this._data.immuneStrength * this._antibodyTiter;
-    const damage = Math.min(this._parasiteHP, intensity * 0.3);
-    this._parasiteHP -= damage;
-    const repelled = damage < intensity * 0.1;
-    if (repelled) {
-      this._collateralDamage += intensity * 0.05;
-    }
-    this._data.inflammationLevel = Math.min(1, this._data.inflammationLevel + 0.1);
-    const wave: AttackWave = { waveId, intensity, cellsDeployed: cells, damageDealt: damage, repelled };
-    this._waves.push(wave);
-    return wave;
-  }
-
-  public escalateInflammation(): void {
-    this._data.inflammationLevel = Math.min(1, this._data.inflammationLevel + 0.15);
-    this._collateralDamage += 0.5;
-  }
-
-  public suppressInflammation(amount: number): void {
-    this._data.inflammationLevel = Math.max(0, this._data.inflammationLevel - amount);
-    this._collateralDamage = Math.max(0, this._collateralDamage - amount * 0.3);
-  }
-
-  public developTolerance(): void {
-    this._data.toleranceLevel = Math.min(1, this._data.toleranceLevel + 0.05);
-    this._antibodyTiter = Math.max(0, this._antibodyTiter - 0.1);
-  }
-
-  public isCleared(): boolean {
-    return this._parasiteHP <= 0;
-  }
-
-  public rejectionReport(): Record<string, unknown> {
-    const successful = this._waves.filter((w) => !w.repelled).length;
+  private _mountResponse(antigen: Antigen, memory: number): ImmuneResponse {
+    const recognition = Math.max(0, 1 - this._computeHammingDistance(antigen.epitope, 'self') / antigen.epitope.length);
+    const cytokineLevel = antigen.virulence * recognition * (1 + memory * 0.5);
+    const antibodyTiter = cytokineLevel * this._clonalExpansionRate;
+    const cytotoxicity = antibodyTiter * recognition;
     return {
-      hostId: this.hostId,
-      target: this._data.parasiteTarget,
-      immuneStrength: this._data.immuneStrength.toFixed(3),
-      toleranceLevel: this._data.toleranceLevel.toFixed(3),
-      antibodyTiter: this._antibodyTiter.toFixed(3),
-      inflammationLevel: this._data.inflammationLevel.toFixed(3),
-      parasiteRemaining: this._parasiteHP.toFixed(1),
-      attackWaves: this._waves.length,
-      successfulWaves: successful,
-      collateralDamage: this._collateralDamage.toFixed(2),
-      cleared: this.isCleared(),
+      antigenId: antigen.id,
+      cytokineLevel,
+      antibodyTiter,
+      cytotoxicity,
+      timestamp: Date.now(),
+    };
+  }
+
+  private _computeHammingDistance(a: string, b: string): number {
+    const key = `${a}:${b}`;
+    if (this._hammingDistanceCache.has(key)) return this._hammingDistanceCache.get(key)!;
+    const maxLen = Math.max(a.length, b.length);
+    let dist = 0;
+    for (let i = 0; i < maxLen; i++) {
+      if (a[i] !== b[i]) dist++;
+    }
+    this._hammingDistanceCache.set(key, dist);
+    return dist;
+  }
+
+  getResponse(antigenId: string): ImmuneResponse | null {
+    return this._responses.find(r => r.antigenId === antigenId) ?? null;
+  }
+
+  getResponsesForEpitope(epitope: string): ImmuneResponse[] {
+    const antigenIds = Array.from(this._antigens.values()).filter(a => a.epitope === epitope).map(a => a.id);
+    return this._responses.filter(r => antigenIds.includes(r.antigenId));
+  }
+
+  averageCytotoxicity(): number {
+    if (this._responses.length === 0) return 0;
+    return this._responses.reduce((acc, r) => acc + r.cytotoxicity, 0) / this._responses.length;
+  }
+
+  totalCytokineStorm(): number {
+    return this._responses.reduce((acc, r) => acc + r.cytokineLevel, 0);
+  }
+
+  isCytokineStorm(): boolean {
+    return this.totalCytokineStorm() > this._cytokineThreshold * this._antigens.size;
+  }
+
+  memoryStrength(epitope: string): number {
+    return this._memoryCells.get(epitope) ?? 0;
+  }
+
+  setClonalExpansionRate(rate: number): void {
+    this._clonalExpansionRate = Math.max(0, Math.min(1, rate));
+  }
+
+  setCytokineThreshold(threshold: number): void {
+    this._cytokineThreshold = Math.max(0, threshold);
+  }
+
+  get antigenCount(): number {
+    return this._antigens.size;
+  }
+
+  get memoryCount(): number {
+    return this._memoryCells.size;
+  }
+
+  rejectionReport(): Record<string, unknown> {
+    return {
+      antigenCount: this._antigens.size,
+      responseCount: this._responses.length,
+      memoryCount: this._memoryCells.size,
+      averageCytotoxicity: this.averageCytotoxicity().toFixed(4),
+      totalCytokineStorm: this.totalCytokineStorm().toFixed(4),
+      isCytokineStorm: this.isCytokineStorm(),
+      cytokineThreshold: this._cytokineThreshold,
+      clonalExpansionRate: this._clonalExpansionRate.toFixed(3),
+      state: this._state,
     };
   }
 }

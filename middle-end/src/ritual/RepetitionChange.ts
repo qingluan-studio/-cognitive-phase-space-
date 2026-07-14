@@ -1,129 +1,131 @@
-/**
- * 重复即变化模块：通过重复产生渐变，
- * 每次重复都引入微小变化，最终累积成显著的形态转变。
- */
-
-export interface RepetitionCycle {
-  id: string;
-  baseValue: number;
-  currentValue: number;
-  repetitions: number;
-  variationPerCycle: number;
-  direction: 'ascending' | 'descending' | 'oscillating';
-}
-
-export interface VariationRecord {
-  cycleId: string;
+export interface RepetitionState {
+  value: number;
   iteration: number;
-  delta: number;
-  newValue: number;
-  recordedAt: number;
+  period: number;
+  lyapunov: number;
+  bifurcation: number;
 }
 
 export class RepetitionChange {
-  private _cycles: Map<string, RepetitionCycle> = new Map();
-  private _variations: VariationRecord[] = [];
-  private _defaultVariation = 0.01;
-  private _maxRepetitions = 1000;
-  private _oscillationAmplitude = 0.05;
+  private _states: RepetitionState[] = [];
+  private _current: RepetitionState = { value: 0.5, iteration: 0, period: 1, lyapunov: 0, bifurcation: 0 };
+  private _history: number[] = [];
+  private _state: Record<string, unknown> = {};
+  private _r: number = 3.5;
+  private _maxIterations: number = 1000;
 
-  startCycle(cycle: RepetitionCycle): void {
-    if (cycle.variationPerCycle === 0) cycle.variationPerCycle = this._defaultVariation;
-    this._cycles.set(cycle.id, cycle);
+  constructor(initialR: number = 3.5) {
+    this._r = initialR;
   }
 
-  repeatOnce(cycleId: string): VariationRecord | null {
-    const cycle = this._cycles.get(cycleId);
-    if (!cycle) return null;
-    if (cycle.repetitions >= this._maxRepetitions) return null;
-    cycle.repetitions++;
-    let delta: number;
-    switch (cycle.direction) {
-      case 'ascending':
-        delta = cycle.variationPerCycle;
-        break;
-      case 'descending':
-        delta = -cycle.variationPerCycle;
-        break;
-      case 'oscillating':
-        delta = Math.sin(cycle.repetitions * 0.5) * this._oscillationAmplitude;
-        break;
-      default:
-        delta = 0;
+  get currentValue(): number {
+    return this._current.value;
+  }
+
+  get iteration(): number {
+    return this._current.iteration;
+  }
+
+  get lyapunov(): number {
+    return this._current.lyapunov;
+  }
+
+  iterate(steps: number): RepetitionState[] {
+    const result: RepetitionState[] = [];
+    for (let i = 0; i < steps; i++) {
+      const nextValue = this._r * this._current.value * (1 - this._current.value);
+      this._current.iteration++;
+      this._current.value = nextValue;
+      this._history.push(nextValue);
+      if (this._history.length > this._maxIterations) {
+        this._history.shift();
+      }
+      const period = this._detectPeriod();
+      const lyapunov = this._computeLyapunov();
+      const bifurcation = this._detectBifurcation();
+      this._current.period = period;
+      this._current.lyapunov = lyapunov;
+      this._current.bifurcation = bifurcation;
+      result.push({ ...this._current });
     }
-    cycle.currentValue += delta;
-    const record: VariationRecord = {
-      cycleId,
-      iteration: cycle.repetitions,
-      delta,
-      newValue: cycle.currentValue,
-      recordedAt: Date.now(),
+    return result;
+  }
+
+  private _detectPeriod(): number {
+    const h = this._history;
+    if (h.length < 10) return 1;
+    for (let p = 1; p <= 20; p++) {
+      let match = true;
+      for (let i = h.length - 1; i >= h.length - 10 && i - p >= 0; i--) {
+        if (Math.abs(h[i] - h[i - p]) > 1e-6) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return p;
+    }
+    return 1;
+  }
+
+  private _computeLyapunov(): number {
+    if (this._history.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < this._history.length; i++) {
+      const x = this._history[i - 1];
+      const derivative = Math.abs(this._r * (1 - 2 * x));
+      if (derivative > 0) sum += Math.log2(derivative);
+    }
+    return sum / (this._history.length - 1);
+  }
+
+  private _detectBifurcation(): number {
+    if (this._history.length < 20) return 0;
+    const recent = this._history.slice(-20);
+    const unique = new Set(recent.map((v) => Math.round(v * 1000) / 1000));
+    return unique.size;
+  }
+
+  setR(r: number): void {
+    this._r = Math.max(0, Math.min(4, r));
+    this._state.rUpdated = r;
+  }
+
+  reset(value: number = 0.5): void {
+    this._current = { value, iteration: 0, period: 1, lyapunov: 0, bifurcation: 0 };
+    this._history = [];
+  }
+
+  bifurcationDiagram(rStart: number, rEnd: number, steps: number, settle: number = 500, collect: number = 100): { r: number; values: number[] }[] {
+    const result: { r: number; values: number[] }[] = [];
+    for (let i = 0; i < steps; i++) {
+      const r = rStart + ((rEnd - rStart) * i) / (steps - 1);
+      let x = 0.5;
+      for (let j = 0; j < settle; j++) {
+        x = r * x * (1 - x);
+      }
+      const values: number[] = [];
+      for (let j = 0; j < collect; j++) {
+        x = r * x * (1 - x);
+        values.push(x);
+      }
+      result.push({ r, values });
+    }
+    return result;
+  }
+
+  isChaotic(): boolean {
+    return this._current.lyapunov > 0;
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      currentValue: this._current.value,
+      iteration: this._current.iteration,
+      period: this._current.period,
+      lyapunov: this._current.lyapunov,
+      bifurcation: this._current.bifurcation,
+      r: this._r,
+      state: this._state,
     };
-    this._variations.push(record);
-    if (this._variations.length > 500) this._variations.shift();
-    return record;
-  }
-
-  repeatMany(cycleId: string, count: number): VariationRecord[] {
-    const records: VariationRecord[] = [];
-    for (let i = 0; i < count; i++) {
-      const record = this.repeatOnce(cycleId);
-      if (!record) break;
-      records.push(record);
-    }
-    return records;
-  }
-
-  measureTotalChange(cycleId: string): number {
-    const cycle = this._cycles.get(cycleId);
-    if (!cycle) return 0;
-    return cycle.currentValue - cycle.baseValue;
-  }
-
-  measureChangeRate(cycleId: string): number {
-    const cycle = this._cycles.get(cycleId);
-    if (!cycle || cycle.repetitions === 0) return 0;
-    return this.measureTotalChange(cycleId) / cycle.repetitions;
-  }
-
-  detectEmergence(cycleId: string): boolean {
-    const cycle = this._cycles.get(cycleId);
-    if (!cycle) return false;
-    const totalChange = Math.abs(this.measureTotalChange(cycleId));
-    return totalChange > Math.abs(cycle.baseValue) * 0.5;
-  }
-
-  setDefaultVariation(value: number): void {
-    this._defaultVariation = value;
-  }
-
-  setOscillationAmplitude(value: number): void {
-    this._oscillationAmplitude = Math.max(0, value);
-  }
-
-  resetCycle(cycleId: string): boolean {
-    const cycle = this._cycles.get(cycleId);
-    if (!cycle) return false;
-    cycle.currentValue = cycle.baseValue;
-    cycle.repetitions = 0;
-    return true;
-  }
-
-  getCycle(cycleId: string): RepetitionCycle | null {
-    return this._cycles.get(cycleId) ?? null;
-  }
-
-  getVariationsByCycle(cycleId: string): VariationRecord[] {
-    return this._variations.filter(v => v.cycleId === cycleId);
-  }
-
-  get cycleCount(): number {
-    return this._cycles.size;
-  }
-
-  get totalRepetitions(): number {
-    let total = 0;
-    for (const cycle of this._cycles.values()) total += cycle.repetitions;
-    return total;
   }
 }

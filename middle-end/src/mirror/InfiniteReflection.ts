@@ -1,98 +1,163 @@
-/**
- * 无限反射：两个模块互相反射，生成无穷深度。
- * 通过模块间的递归互反射产生无限的镜像深度，每一层都包含上一层的镜像。
- */
-
-export interface ReflectionLayer {
+export interface Reflection {
   depth: number;
-  observer: string;
-  reflected: string;
-  content: string;
+  amplitude: number;
+  phaseShift: number;
+  sourceId: string;
 }
 
-export interface ReflectionChain {
-  id: string;
-  layers: ReflectionLayer[];
+export type ReflectionChain = {
+  totalDepth: number;
+  totalAmplitude: number;
+  infiniteLimit: boolean;
+};
+
+export interface InfiniteConfig {
+  reflectivity: number;
+  absorption: number;
   maxDepth: number;
-  terminated: boolean;
-  createdAt: number;
 }
 
 export class InfiniteReflection {
+  private _config: InfiniteConfig;
+  private _reflections: Reflection[] = [];
   private _chains: ReflectionChain[] = [];
-  private _maxDepth = 32;
-  private _oscillationCount = 0;
+  private _state: Record<string, unknown> = {};
+  private _geometricSeriesSum: number = 0;
+  private _fourierTransform: number[] = [];
+  private _impulseResponse: number[] = [];
 
-  reflect(observer: string, target: string, initialContent: string): ReflectionChain {
-    const layers: ReflectionLayer[] = [];
-    let currentContent = initialContent;
-    let currentObserver = observer;
-    let currentReflected = target;
-    let terminated = false;
+  constructor(config: InfiniteConfig) {
+    this._config = config;
+  }
 
-    for (let depth = 0; depth < this._maxDepth; depth++) {
-      layers.push({
-        depth,
-        observer: currentObserver,
-        reflected: currentReflected,
-        content: currentContent,
-      });
-      const next = this._reflectOnce(currentObserver, currentReflected, currentContent);
-      if (next === currentContent) {
-        this._oscillationCount++;
-        terminated = true;
-        break;
+  get reflectionCount(): number {
+    return this._reflections.length;
+  }
+
+  get totalAmplitude(): number {
+    return this._reflections.reduce((acc, r) => acc + r.amplitude, 0);
+  }
+
+  get geometricSeriesSum(): number {
+    return this._geometricSeriesSum;
+  }
+
+  private _computeGeometricSum(): void {
+    const r = this._config.reflectivity;
+    if (r >= 1) {
+      this._geometricSeriesSum = Infinity;
+    } else {
+      this._geometricSeriesSum = 1 / (1 - r);
+    }
+  }
+
+  private _computeImpulseResponse(): void {
+    this._impulseResponse = [];
+    const N = 16;
+    for (let n = 0; n < N; n++) {
+      this._impulseResponse.push(Math.pow(this._config.reflectivity, n));
+    }
+  }
+
+  private _computeFourier(): void {
+    const N = this._impulseResponse.length;
+    if (N === 0) return;
+    this._fourierTransform = [];
+    for (let k = 0; k < N; k++) {
+      let real = 0;
+      let imag = 0;
+      for (let n = 0; n < N; n++) {
+        const angle = (-2 * Math.PI * k * n) / N;
+        real += this._impulseResponse[n] * Math.cos(angle);
+        imag += this._impulseResponse[n] * Math.sin(angle);
       }
-      currentContent = next;
-      [currentObserver, currentReflected] = [currentReflected, currentObserver];
+      this._fourierTransform.push(Math.sqrt(real * real + imag * imag) / N);
     }
+  }
 
-    const chain: ReflectionChain = {
-      id: `chain-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      layers,
-      maxDepth: this._maxDepth,
-      terminated,
-      createdAt: Date.now(),
+  emit(sourceId: string, amplitude: number): Reflection {
+    const reflection: Reflection = {
+      depth: 0,
+      amplitude,
+      phaseShift: 0,
+      sourceId,
     };
-    this._chains.push(chain);
-    if (this._chains.length > 50) this._chains.shift();
-    return chain;
+    this._reflections.push(reflection);
+    this._computeGeometricSum();
+    this._computeImpulseResponse();
+    this._computeFourier();
+    return reflection;
   }
 
-  private _reflectOnce(observer: string, target: string, content: string): string {
-    const prefix = `${observer} sees ${target} seeing:`;
-    if (content.startsWith(prefix)) {
-      return content;
+  step(): Reflection | null {
+    const last = this._reflections[this._reflections.length - 1];
+    if (!last || last.depth >= this._config.maxDepth) return null;
+    const amplitude = last.amplitude * this._config.reflectivity * (1 - this._config.absorption);
+    const phaseShift = last.phaseShift + Math.PI;
+    const reflection: Reflection = {
+      depth: last.depth + 1,
+      amplitude,
+      phaseShift,
+      sourceId: last.sourceId,
+    };
+    this._reflections.push(reflection);
+    if (this._reflections.length > this._config.maxDepth * 2) {
+      this._reflections.shift();
     }
-    return `${prefix} "${content}"`;
+    return reflection;
   }
 
-  measureDepth(chainId: string): number {
-    const chain = this._chains.find(c => c.id === chainId);
-    return chain ? chain.layers.length : 0;
-  }
-
-  truncate(chainId: string, maxLayers: number): ReflectionChain | null {
-    const chain = this._chains.find(c => c.id === chainId);
-    if (!chain) return null;
-    chain.layers = chain.layers.slice(0, maxLayers);
-    chain.terminated = true;
+  trace(): ReflectionChain {
+    const totalDepth = this._reflections[this._reflections.length - 1]?.depth || 0;
+    const totalAmplitude = this.totalAmplitude;
+    const infiniteLimit = this._config.reflectivity >= 1;
+    const chain: ReflectionChain = { totalDepth, totalAmplitude, infiniteLimit };
+    this._chains.push(chain);
+    if (this._chains.length > 20) this._chains.shift();
     return chain;
   }
 
-  setMaxDepth(depth: number): void {
-    this._maxDepth = Math.max(1, depth);
+  converge(): number {
+    if (this._config.reflectivity >= 1) return Infinity;
+    return this._geometricSeriesSum;
   }
 
-  getChains(): ReflectionChain[] {
-    return [...this._chains];
+  isDivergent(): boolean {
+    return this._config.reflectivity >= 1;
   }
 
-  get oscillationCount(): number {
-    return this._oscillationCount;
+  attenuationAt(depth: number): number {
+    return Math.pow(this._config.reflectivity * (1 - this._config.absorption), depth);
   }
 
-  get chainCount(): number {
-    return this._chains.length;
+  dominantFrequency(): number {
+    if (this._fourierTransform.length === 0) return 0;
+    let peakIdx = 0;
+    for (let i = 1; i < this._fourierTransform.length; i++) {
+      if (this._fourierTransform[i] > this._fourierTransform[peakIdx]) {
+        peakIdx = i;
+      }
+    }
+    return peakIdx;
+  }
+
+  reset(): void {
+    this._reflections = [];
+    this._chains = [];
+    this._geometricSeriesSum = 0;
+    this._fourierTransform = [];
+    this._impulseResponse = [];
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      reflections: this._reflections.length,
+      totalAmplitude: this.totalAmplitude.toFixed(4),
+      chains: this._chains.length,
+      state: this._state,
+      geometricSum: this._geometricSeriesSum === Infinity ? 'Infinity' : this._geometricSeriesSum.toFixed(4),
+      divergent: this.isDivergent(),
+    };
   }
 }

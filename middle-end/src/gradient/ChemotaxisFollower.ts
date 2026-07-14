@@ -1,115 +1,152 @@
-/**
- * ChemotaxisFollower - 趋化性跟随者
- * 沿信息浓度梯度移动，自动趋向高浓度区域或远离低浓度区域，
- * 模拟生物对化学信号的定向运动。
- */
-
-export interface ChemotaxisFollowerData {
-  readonly followerId: string;
-  position: number;
-  sensitivity: number;
-  speed: number;
-  attractant: boolean;
+export interface ConcentrationSample {
+  x: number;
+  y: number;
+  concentration: number;
+  gradientMagnitude: number;
 }
 
-export interface GradientReading {
-  position: number;
-  concentration: number;
-  gradient: number;
+export type ChemotaxisStep = {
+  dx: number;
+  dy: number;
+  gain: number;
+  aligned: boolean;
+};
+
+export interface ChemotaxisConfig {
+  stepSize: number;
+  adaptationGain: number;
+  saturationLevel: number;
+  noiseAmplitude: number;
 }
 
 export class ChemotaxisFollower {
-  private _data: ChemotaxisFollowerData;
-  private _readings: GradientReading[] = [];
-  private _distanceTraveled: number = 0;
-  private _lastGradient: number = 0;
-  private _field: (pos: number) => number;
+  private _config: ChemotaxisConfig;
+  private _samples: ConcentrationSample[] = [];
+  private _position: [number, number] = [0, 0];
+  private _state: Record<string, unknown> = {};
+  private _kellerSegelHistory: number[] = [];
+  private _receptorOccupancy: number = 0;
+  private _runTumbleBias: number = 0.5;
 
-  constructor(data: ChemotaxisFollowerData, field: (pos: number) => number) {
-    this._data = { ...data };
-    this._field = field;
+  constructor(config: ChemotaxisConfig) {
+    this._config = config;
   }
 
-  get followerId(): string {
-    return this._data.followerId;
+  get sampleCount(): number {
+    return this._samples.length;
   }
 
-  get position(): number {
-    return this._data.position;
+  get position(): readonly [number, number] {
+    return this._position;
   }
 
-  get distanceTraveled(): number {
-    return this._distanceTraveled;
+  get runTumbleBias(): number {
+    return this._runTumbleBias;
   }
 
-  public sense(): GradientReading {
-    const concentration = this._field(this._data.position);
-    const ahead = this._field(this._data.position + 0.1);
-    const gradient = (ahead - concentration) / 0.1;
-    this._lastGradient = gradient;
-    const reading: GradientReading = { position: this._data.position, concentration, gradient };
-    this._readings.push(reading);
-    if (this._readings.length > 40) {
-      this._readings.shift();
+  private _kellerSegelEquation(c: number, chi: number, mu: number): number {
+    return chi * c - mu * c * c;
+  }
+
+  private _updateReceptorOccupancy(concentration: number): void {
+    const kd = 1;
+    this._receptorOccupancy = concentration / (kd + concentration);
+    this._runTumbleBias = this._receptorOccupancy / (1 + this._receptorOccupancy);
+  }
+
+  sample(x: number, y: number, concentration: number): ConcentrationSample {
+    const gradientMagnitude = this._samples.length > 0
+      ? Math.abs(concentration - this._samples[this._samples.length - 1].concentration)
+      : 0;
+    const sample: ConcentrationSample = { x, y, concentration, gradientMagnitude };
+    this._samples.push(sample);
+    if (this._samples.length > 50) this._samples.shift();
+    this._updateReceptorOccupancy(concentration);
+    const ks = this._kellerSegelEquation(concentration, this._config.adaptationGain, 0.1);
+    this._kellerSegelHistory.push(ks);
+    if (this._kellerSegelHistory.length > 30) this._kellerSegelHistory.shift();
+    return sample;
+  }
+
+  computeGradient(): ChemotaxisStep {
+    if (this._samples.length < 2) {
+      return { dx: 0, dy: 0, gain: 0, aligned: false };
     }
-    return reading;
+    const current = this._samples[this._samples.length - 1];
+    const previous = this._samples[this._samples.length - 2];
+    const dc = current.concentration - previous.concentration;
+    const dx = current.x - previous.x;
+    const dy = current.y - previous.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) + 0.001;
+    const gradX = (dc * dx) / dist;
+    const gradY = (dc * dy) / dist;
+    const gain = Math.min(this._config.saturationLevel, Math.abs(dc) * this._config.adaptationGain);
+    const step: ChemotaxisStep = {
+      dx: (gradX / (Math.abs(gradX) + Math.abs(gradY) + 0.001)) * this._config.stepSize,
+      dy: (gradY / (Math.abs(gradX) + Math.abs(gradY) + 0.001)) * this._config.stepSize,
+      gain,
+      aligned: dc > 0,
+    };
+    this._position[0] += step.dx + (Math.random() - 0.5) * this._config.noiseAmplitude;
+    this._position[1] += step.dy + (Math.random() - 0.5) * this._config.noiseAmplitude;
+    this._state.lastStep = step;
+    return step;
   }
 
-  public move(): number {
-    const reading = this.sense();
-    const direction = this._data.attractant
-      ? Math.sign(reading.gradient)
-      : -Math.sign(reading.gradient);
-    const step = direction * this._data.speed * this._data.sensitivity;
-    const newPos = this._data.position + step;
-    this._distanceTraveled += Math.abs(step);
-    this._data.position = newPos;
-    return newPos;
-  }
-
-  public adjustSensitivity(delta: number): void {
-    this._data.sensitivity = Math.max(0, Math.min(2, this._data.sensitivity + delta));
-  }
-
-  public setSpeed(speed: number): void {
-    this._data.speed = Math.max(0, speed);
-  }
-
-  public toggleAttractant(): void {
-    this._data.attractant = !this._data.attractant;
-  }
-
-  public detectPlateau(): boolean {
-    if (this._readings.length < 5) {
-      return false;
+  run(): ChemotaxisStep {
+    const step = this.computeGradient();
+    if (this._runTumbleBias > 0.6) {
+      step.dx *= 2;
+      step.dy *= 2;
     }
-    const recent = this._readings.slice(-5);
-    const gradients = recent.map((r) => Math.abs(r.gradient));
-    const maxGrad = Math.max(...gradients);
-    return maxGrad < 0.01;
+    return step;
   }
 
-  public reverseField(newField: (pos: number) => number): void {
-    this._field = newField;
-    this._readings = [];
+  tumble(): ChemotaxisStep {
+    const angle = Math.random() * 2 * Math.PI;
+    const step: ChemotaxisStep = {
+      dx: Math.cos(angle) * this._config.stepSize,
+      dy: Math.sin(angle) * this._config.stepSize,
+      gain: 0,
+      aligned: false,
+    };
+    this._position[0] += step.dx;
+    this._position[1] += step.dy;
+    return step;
   }
 
-  public jumpTo(position: number): void {
-    this._data.position = position;
-    this._readings = [];
+  averageConcentration(): number {
+    if (this._samples.length === 0) return 0;
+    return this._samples.reduce((acc, s) => acc + s.concentration, 0) / this._samples.length;
   }
 
-  public followerReport(): Record<string, unknown> {
+  pathLength(): number {
+    let length = 0;
+    for (let i = 1; i < this._samples.length; i++) {
+      const dx = this._samples[i].x - this._samples[i - 1].x;
+      const dy = this._samples[i].y - this._samples[i - 1].y;
+      length += Math.sqrt(dx * dx + dy * dy);
+    }
+    return length;
+  }
+
+  reset(): void {
+    this._samples = [];
+    this._position = [0, 0];
+    this._kellerSegelHistory = [];
+    this._receptorOccupancy = 0;
+    this._runTumbleBias = 0.5;
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
     return {
-      followerId: this.followerId,
-      position: this._data.position.toFixed(3),
-      sensitivity: this._data.sensitivity.toFixed(3),
-      speed: this._data.speed.toFixed(3),
-      attractant: this._data.attractant,
-      distanceTraveled: this._distanceTraveled.toFixed(2),
-      lastGradient: this._lastGradient.toFixed(4),
-      readingCount: this._readings.length,
-      plateaued: this.detectPlateau(),
+      samples: this._samples.length,
+      position: this._position,
+      averageConcentration: this.averageConcentration(),
+      state: this._state,
+      runTumbleBias: this._runTumbleBias.toFixed(4),
+      pathLength: this.pathLength().toFixed(2),
     };
   }
 }

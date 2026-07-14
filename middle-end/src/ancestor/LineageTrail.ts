@@ -1,8 +1,3 @@
-/**
- * 谱系追踪：记录每个模块的演变世系。
- * 通过父子关系构建模块谱系树，可追溯任意模块的祖先链与后代分支。
- */
-
 export interface LineageNode {
   id: string;
   parentId: string | null;
@@ -21,6 +16,8 @@ export class LineageTrail {
   private _nodes: Map<string, LineageNode> = new Map();
   private _childrenIndex: Map<string, Set<string>> = new Map();
   private _maxGenerations = 100;
+  private _adjacencyMatrix: Map<string, Map<string, number>> = new Map();
+  private _centralityScores: Map<string, number> = new Map();
 
   registerNode(node: LineageNode): void {
     this._nodes.set(node.id, node);
@@ -30,6 +27,7 @@ export class LineageTrail {
       }
       this._childrenIndex.get(node.parentId)!.add(node.id);
     }
+    this._buildAdjacency();
   }
 
   query(nodeId: string): LineageQueryResult | null {
@@ -74,7 +72,24 @@ export class LineageTrail {
       const target = this._nodes.get(toId);
       return target ? target.generation - from.generation : -1;
     }
-    return -1;
+    return this._shortestPath(fromId, toId);
+  }
+
+  computeBetweennessCentrality(nodeId: string): number {
+    if (this._centralityScores.has(nodeId)) return this._centralityScores.get(nodeId)!;
+    const allNodes = Array.from(this._nodes.keys());
+    let betweenness = 0;
+    for (let s = 0; s < allNodes.length; s++) {
+      for (let t = s + 1; t < allNodes.length; t++) {
+        const paths = this._allShortestPaths(allNodes[s], allNodes[t]);
+        const total = paths.length;
+        const through = paths.filter(p => p.includes(nodeId)).length;
+        if (total > 0) betweenness += through / total;
+      }
+    }
+    const score = betweenness / (allNodes.length * (allNodes.length - 1) / 2);
+    this._centralityScores.set(nodeId, score);
+    return score;
   }
 
   getNode(id: string): LineageNode | null {
@@ -91,5 +106,67 @@ export class LineageTrail {
 
   get nodeCount(): number {
     return this._nodes.size;
+  }
+
+  private _buildAdjacency(): void {
+    this._adjacencyMatrix.clear();
+    for (const [id, node] of this._nodes) {
+      this._adjacencyMatrix.set(id, new Map());
+      if (node.parentId) {
+        this._adjacencyMatrix.get(id)!.set(node.parentId, 1);
+      }
+      const children = this._childrenIndex.get(id);
+      if (children) {
+        for (const child of children) {
+          this._adjacencyMatrix.get(id)!.set(child, 1);
+        }
+      }
+    }
+  }
+
+  private _shortestPath(fromId: string, toId: string): number {
+    const dist = new Map<string, number>();
+    const queue: string[] = [fromId];
+    dist.set(fromId, 0);
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      const d = dist.get(curr)!;
+      const neighbors = this._adjacencyMatrix.get(curr);
+      if (!neighbors) continue;
+      for (const [neighbor] of neighbors) {
+        if (!dist.has(neighbor)) {
+          dist.set(neighbor, d + 1);
+          queue.push(neighbor);
+        }
+        if (neighbor === toId) return dist.get(neighbor)!;
+      }
+    }
+    return -1;
+  }
+
+  private _allShortestPaths(fromId: string, toId: string): string[][] {
+    const results: string[][] = [];
+    const queue: { node: string; path: string[] }[] = [{ node: fromId, path: [fromId] }];
+    let minLen = Infinity;
+    while (queue.length > 0) {
+      const { node, path } = queue.shift()!;
+      if (path.length > minLen) continue;
+      if (node === toId) {
+        if (path.length < minLen) {
+          minLen = path.length;
+          results.length = 0;
+        }
+        results.push(path);
+        continue;
+      }
+      const neighbors = this._adjacencyMatrix.get(node);
+      if (!neighbors) continue;
+      for (const [neighbor] of neighbors) {
+        if (!path.includes(neighbor)) {
+          queue.push({ node: neighbor, path: [...path, neighbor] });
+        }
+      }
+    }
+    return results;
   }
 }

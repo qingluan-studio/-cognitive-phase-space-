@@ -1,8 +1,3 @@
-/**
- * 回声记忆模块：刚发生的事件立即在记忆中产生短暂回响。
- * 用于建模感知缓冲区中的瞬时残留信号。
- */
-
 export interface EchoicTrace {
   id: number;
   stimulus: number;
@@ -28,6 +23,9 @@ export class EchoicMemory {
   private _nextId: number = 0;
   private _clock: number = 0;
   private _meta: Record<string, unknown> = {};
+  private _autocorrelation: number[] = [];
+  private _powerSpectrum: number[] = [];
+  private _fftSize: number = 16;
 
   constructor(config: EchoicMemoryConfig) {
     this._config = config;
@@ -39,6 +37,72 @@ export class EchoicMemory {
 
   get clock(): number {
     return this._clock;
+  }
+
+  get spectralCentroid(): number {
+    return this._computeSpectralCentroid();
+  }
+
+  private _computeDFT(signal: number[]): { real: number[]; imag: number[] } {
+    const N = signal.length;
+    const real: number[] = [];
+    const imag: number[] = [];
+    for (let k = 0; k < N; k++) {
+      let r = 0;
+      let i = 0;
+      for (let n = 0; n < N; n++) {
+        const angle = (-2 * Math.PI * k * n) / N;
+        r += signal[n] * Math.cos(angle);
+        i += signal[n] * Math.sin(angle);
+      }
+      real.push(r / N);
+      imag.push(i / N);
+    }
+    return { real, imag };
+  }
+
+  private _updateSpectrum(): void {
+    const strengths = this._traces.map((t) => t.strength);
+    while (strengths.length < this._fftSize) strengths.unshift(0);
+    const sliced = strengths.slice(-this._fftSize);
+    const dft = this._computeDFT(sliced);
+    this._powerSpectrum = [];
+    for (let i = 0; i < dft.real.length; i++) {
+      this._powerSpectrum.push(dft.real[i] * dft.real[i] + dft.imag[i] * dft.imag[i]);
+    }
+  }
+
+  private _computeSpectralCentroid(): number {
+    if (this._powerSpectrum.length === 0) return 0;
+    let numerator = 0;
+    let denominator = 0;
+    for (let i = 0; i < this._powerSpectrum.length; i++) {
+      numerator += i * this._powerSpectrum[i];
+      denominator += this._powerSpectrum[i];
+    }
+    return denominator > 0 ? numerator / denominator : 0;
+  }
+
+  private _computeAutocorrelation(): void {
+    const strengths = this._traces.map((t) => t.strength);
+    if (strengths.length < 2) {
+      this._autocorrelation = [];
+      return;
+    }
+    const mean = strengths.reduce((a, b) => a + b, 0) / strengths.length;
+    const N = strengths.length;
+    this._autocorrelation = [];
+    for (let lag = 0; lag < Math.min(N, 8); lag++) {
+      let num = 0;
+      let den = 0;
+      for (let i = 0; i < N - lag; i++) {
+        num += (strengths[i] - mean) * (strengths[i + lag] - mean);
+      }
+      for (let i = 0; i < N; i++) {
+        den += (strengths[i] - mean) * (strengths[i] - mean);
+      }
+      this._autocorrelation.push(den > 0 ? num / den : 0);
+    }
   }
 
   receive(stimulus: number): EchoicTrace {
@@ -53,6 +117,8 @@ export class EchoicMemory {
       this._traces.shift();
     }
     this._meta.lastReceived = trace.id;
+    this._updateSpectrum();
+    this._computeAutocorrelation();
     return trace;
   }
 
@@ -63,6 +129,8 @@ export class EchoicMemory {
       trace.strength = Math.pow(0.5, age / this._config.halfLife);
     }
     this._traces = this._traces.filter((t) => t.strength > 0.05);
+    this._updateSpectrum();
+    this._computeAutocorrelation();
   }
 
   computeDecay(): MemoryDecay {
@@ -99,6 +167,8 @@ export class EchoicMemory {
   flush(): void {
     this._traces = [];
     this._meta.flushedAt = this._clock;
+    this._powerSpectrum = [];
+    this._autocorrelation = [];
   }
 
   report(): Record<string, unknown> {
@@ -107,6 +177,8 @@ export class EchoicMemory {
       clock: this._clock,
       averageStrength: this.averageStrength(),
       meta: this._meta,
+      spectralCentroid: this.spectralCentroid.toFixed(4),
+      autocorrelation: this._autocorrelation,
     };
   }
 }

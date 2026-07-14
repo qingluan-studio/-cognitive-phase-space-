@@ -1,86 +1,138 @@
-/**
- * 超真实检查：判断是否已步入比真实更真实的拟像。
- * 通过比较仿真层与原作的清晰度、亮度和细节饱和度，判断是否进入超真实领域。
- */
-
-export interface RealitySignature {
+export interface HyperrealLayer {
   id: string;
-  sharpness: number;
-  saturation: number;
-  detailDensity: number;
-  isOriginal: boolean;
+  realness: number;
+  simulationDepth: number;
+  hyperreal: boolean;
 }
 
-export interface HyperrealityReport {
-  targetId: string;
-  baselineId: string;
-  hyperrealScore: number;
-  verdict: 'real' | 'simulation' | 'hyperreal';
-  generatedAt: number;
+export type HyperrealityIndex = {
+  totalLayers: number;
+  averageRealness: number;
+  hyperrealCount: number;
+};
+
+export interface HyperrealityConfig {
+  threshold: number;
+  nestingLimit: number;
+  decayRate: number;
 }
 
 export class HyperrealityCheck {
-  private _signatures: Map<string, RealitySignature> = new Map();
-  private _reports: HyperrealityReport[] = [];
-  private _hyperrealThreshold = 0.7;
+  private _config: HyperrealityConfig;
+  private _layers: HyperrealLayer[] = [];
+  private _index: HyperrealityIndex | null = null;
+  private _state: Record<string, unknown> = {};
+  private _semioticSquare: number[][] = [[1, 0], [0, 1]];
+  private _simulationMatrix: number[][] = [];
+  private _baudrillardCode: number = 0;
 
-  registerSignature(sig: RealitySignature): void {
-    this._signatures.set(sig.id, sig);
+  constructor(config: HyperrealityConfig) {
+    this._config = config;
   }
 
-  private _realismScore(sig: RealitySignature): number {
-    return (sig.sharpness + sig.saturation + sig.detailDensity) / 3;
+  get layerCount(): number {
+    return this._layers.length;
   }
 
-  check(targetId: string, baselineId: string): HyperrealityReport | null {
-    const target = this._signatures.get(targetId);
-    const baseline = this._signatures.get(baselineId);
-    if (!target || !baseline) return null;
-    const targetScore = this._realismScore(target);
-    const baselineScore = this._realismScore(baseline);
-    const ratio = baselineScore > 0 ? targetScore / baselineScore : 0;
-    const hyperrealScore = Math.max(0, Math.min(1, ratio - 0.5));
-    const verdict: HyperrealityReport['verdict'] =
-      hyperrealScore >= this._hyperrealThreshold ? 'hyperreal'
-        : target.isOriginal ? 'real' : 'simulation';
-    const report: HyperrealityReport = {
-      targetId,
-      baselineId,
-      hyperrealScore,
-      verdict,
-      generatedAt: Date.now(),
-    };
-    this._reports.push(report);
-    if (this._reports.length > 100) this._reports.shift();
-    return report;
+  get baudrillardCode(): number {
+    return this._baudrillardCode;
   }
 
-  flagHyperreal(): RealitySignature[] {
-    const flagged: RealitySignature[] = [];
-    const origs = Array.from(this._signatures.values()).filter(s => s.isOriginal);
-    if (origs.length === 0) return flagged;
-    const baseline = origs[0];
-    for (const sig of this._signatures.values()) {
-      if (sig.isOriginal) continue;
-      const report = this.check(sig.id, baseline.id);
-      if (report && report.verdict === 'hyperreal') flagged.push(sig);
+  private _updateSemioticSquare(): void {
+    const n = this._layers.length;
+    if (n < 2) return;
+    const last = this._layers[n - 1];
+    const prev = this._layers[n - 2];
+    this._semioticSquare[0][0] = last.realness;
+    this._semioticSquare[0][1] = 1 - last.realness;
+    this._semioticSquare[1][0] = prev.realness;
+    this._semioticSquare[1][1] = 1 - prev.realness;
+  }
+
+  private _updateSimulationMatrix(): void {
+    const n = this._layers.length;
+    this._simulationMatrix = [];
+    for (let i = 0; i < n; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < n; j++) {
+        const diff = Math.abs(this._layers[i].realness - this._layers[j].realness);
+        row.push(1 - diff);
+      }
+      this._simulationMatrix.push(row);
     }
-    return flagged;
   }
 
-  setThreshold(value: number): void {
-    this._hyperrealThreshold = Math.max(0, Math.min(1, value));
+  addLayer(id: string, realness: number): HyperrealLayer {
+    const simulationDepth = this._layers.length;
+    const hyperreal = realness > this._config.threshold;
+    const layer: HyperrealLayer = { id, realness, simulationDepth, hyperreal };
+    this._layers.push(layer);
+    if (this._layers.length > this._config.nestingLimit) {
+      this._layers.shift();
+    }
+    this._updateSemioticSquare();
+    this._updateSimulationMatrix();
+    this._baudrillardCode = this._layers.reduce((acc, l) => acc + l.realness * Math.exp(-l.simulationDepth * this._config.decayRate), 0);
+    return layer;
   }
 
-  getReports(limit: number = 50): HyperrealityReport[] {
-    return this._reports.slice(-limit);
+  computeIndex(): HyperrealityIndex {
+    const totalLayers = this._layers.length;
+    const averageRealness = totalLayers > 0 ? this._layers.reduce((acc, l) => acc + l.realness, 0) / totalLayers : 0;
+    const hyperrealCount = this._layers.filter((l) => l.hyperreal).length;
+    this._index = { totalLayers, averageRealness, hyperrealCount };
+    return this._index;
   }
 
-  getSignature(id: string): RealitySignature | null {
-    return this._signatures.get(id) ?? null;
+  isHyperreal(): boolean {
+    return this._layers.some((l) => l.hyperreal);
   }
 
-  get signatureCount(): number {
-    return this._signatures.size;
+  collapseLayer(id: string): boolean {
+    const idx = this._layers.findIndex((l) => l.id === id);
+    if (idx === -1) return false;
+    this._layers.splice(idx, 1);
+    this._updateSimulationMatrix();
+    return true;
+  }
+
+  deepestLayer(): HyperrealLayer | null {
+    return this._layers.reduce((best, l) => (l.simulationDepth > best.simulationDepth ? l : best));
+  }
+
+  computeEigenvalues(): number[] {
+    if (this._simulationMatrix.length < 2) return [];
+    const a = this._simulationMatrix[0][0];
+    const b = this._simulationMatrix[0][1];
+    const c = this._simulationMatrix[1][0];
+    const d = this._simulationMatrix[1][1];
+    const trace = a + d;
+    const det = a * d - b * c;
+    const discriminant = Math.sqrt(trace * trace - 4 * det);
+    return [(trace + discriminant) / 2, (trace - discriminant) / 2];
+  }
+
+  traceSemiotic(): number {
+    return this._semioticSquare[0][0] + this._semioticSquare[1][1];
+  }
+
+  reset(): void {
+    this._layers = [];
+    this._index = null;
+    this._semioticSquare = [[1, 0], [0, 1]];
+    this._simulationMatrix = [];
+    this._baudrillardCode = 0;
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      layers: this._layers.length,
+      hyperreal: this.isHyperreal(),
+      index: this._index,
+      state: this._state,
+      baudrillardCode: this._baudrillardCode.toFixed(4),
+      traceSemiotic: this.traceSemiotic().toFixed(4),
+    };
   }
 }

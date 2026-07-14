@@ -1,92 +1,165 @@
-/**
- * 超立方折叠：将数据向第四维折叠，突破三维信息密度极限。
- * 把三维数据结构向第四维空间折叠，突破三维的信息密度
- * 上限，从而在等价体积内容纳更高密度信息。
- */
-
-export interface FoldOperation {
-  id: string;
-  dimension: number;
-  dataKeys: string[];
-  foldedAt: number;
-  compressionRatio: number;
+export interface TesseractVertex {
+  id: number;
+  coordinates: number[];
+  projected: number[];
 }
 
-export interface Hypercell {
-  id: string;
-  coords4d: number[];
-  payload: Record<string, unknown>;
+export interface FoldOperation {
+  axis: number[];
+  angle: number;
+  sequence: number;
 }
 
 export class TesseractFold {
-  private _folds: FoldOperation[] = [];
-  private _cells: Map<string, Hypercell> = new Map();
-  private _currentDimension: number = 3;
-  private _maxDimension: number = 4;
+  private _vertices: TesseractVertex[] = [];
+  private _operations: FoldOperation[] = [];
+  private _rotationMatrix: number[][] = [];
+  private _sequenceCounter: number = 0;
+  private _hypervolumeCache: number = 0;
+  private _stereographicRadius: number = 1;
 
-  /** 把数据沿第四维折叠一次。 */
-  fold(dataKeys: string[]): FoldOperation {
-    if (this._currentDimension >= this._maxDimension) {
-      this._currentDimension = 3;
+  constructor() {
+    this._buildTesseract();
+  }
+
+  get vertexCount(): number {
+    return this._vertices.length;
+  }
+
+  get operationCount(): number {
+    return this._operations.length;
+  }
+
+  private _buildTesseract(): void {
+    this._vertices = [];
+    for (let i = 0; i < 16; i++) {
+      const x = i & 1 ? 1 : -1;
+      const y = i & 2 ? 1 : -1;
+      const z = i & 4 ? 1 : -1;
+      const w = i & 8 ? 1 : -1;
+      this._vertices.push({
+        id: i,
+        coordinates: [x, y, z, w],
+        projected: [x, y, z],
+      });
     }
-    this._currentDimension++;
-    const compressionRatio = this._currentDimension / 3;
-    const op: FoldOperation = {
-      id: `fold-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      dimension: this._currentDimension,
-      dataKeys,
-      foldedAt: Date.now(),
-      compressionRatio,
+    this._hypervolumeCache = this._computeHypervolume();
+  }
+
+  private _computeHypervolume(): number {
+    const edge = 2;
+    return edge * edge * edge * edge;
+  }
+
+  fold(axis: number[], angle: number): FoldOperation {
+    const normalized = this._normalize(axis);
+    const operation: FoldOperation = {
+      axis: normalized,
+      angle,
+      sequence: this._sequenceCounter++,
     };
-    this._folds.push(op);
-    return op;
+    this._operations.push(operation);
+    this._applyRotation(normalized, angle);
+    return operation;
   }
 
-  /** 把已折叠的数据展开回三维。 */
-  unfold(foldId: string): boolean {
-    const op = this._folds.find(f => f.id === foldId);
-    if (!op) return false;
-    this._currentDimension = Math.max(3, this._currentDimension - 1);
-    return true;
+  private _normalize(v: number[]): number[] {
+    const mag = Math.sqrt(v.reduce((a, b) => a + b * b, 0));
+    return mag > 0 ? v.map(c => c / mag) : v;
   }
 
-  /** 在四维超立方体中存入一个超胞。 */
-  storeHypercell(cell: Hypercell): Hypercell {
-    this._cells.set(cell.id, cell);
-    return cell;
+  private _applyRotation(axis: number[], angle: number): void {
+    const q = this._axisAngleToQuaternion(axis, angle);
+    for (const vertex of this._vertices) {
+      const rotated = this._quaternionRotate(vertex.coordinates, q);
+      vertex.coordinates = rotated;
+      vertex.projected = this._stereographicProject(rotated);
+    }
   }
 
-  /** 取出四维超胞。 */
-  getHypercell(id: string): Hypercell | null {
-    return this._cells.get(id) ?? null;
+  private _axisAngleToQuaternion(axis: number[], angle: number): number[] {
+    const half = angle / 2;
+    const s = Math.sin(half);
+    return [Math.cos(half), axis[0] * s, axis[1] * s, axis[2] * s];
   }
 
-  /** 沿第四维压缩数据：返回压缩比。 */
-  compress(payload: Record<string, unknown>): number {
-    const keys = Object.keys(payload);
-    const op = this.fold(keys);
-    return op.compressionRatio;
+  private _quaternionRotate(v: number[], q: number[]): number[] {
+    if (v.length < 3) return v;
+    const x = v[0];
+    const y = v[1];
+    const z = v[2];
+    const qw = q[0];
+    const qx = q[1];
+    const qy = q[2];
+    const qz = q[3];
+    const rx = x * (1 - 2 * qy * qy - 2 * qz * qz) + y * (2 * qx * qy - 2 * qz * qw) + z * (2 * qx * qz + 2 * qy * qw);
+    const ry = x * (2 * qx * qy + 2 * qz * qw) + y * (1 - 2 * qx * qx - 2 * qz * qz) + z * (2 * qy * qz - 2 * qx * qw);
+    const rz = x * (2 * qx * qz - 2 * qy * qw) + y * (2 * qy * qz + 2 * qx * qw) + z * (1 - 2 * qx * qx - 2 * qy * qy);
+    return [rx, ry, rz, v[3] ?? 0];
   }
 
-  /** 沿第四维展开数据。 */
-  expand(foldId: string): boolean {
-    return this.unfold(foldId);
+  private _stereographicProject(v4: number[]): number[] {
+    const w = v4[3] ?? 0;
+    const denom = this._stereographicRadius - w + 0.001;
+    return [v4[0] / denom, v4[1] / denom, v4[2] / denom];
   }
 
-  get currentDimension(): number {
-    return this._currentDimension;
+  getVertex(id: number): TesseractVertex | null {
+    return this._vertices.find(v => v.id === id) ?? null;
   }
 
-  get folds(): FoldOperation[] {
-    return [...this._folds];
+  getEdgeLength(): number {
+    if (this._vertices.length < 2) return 0;
+    const a = this._vertices[0].coordinates;
+    const b = this._vertices[1].coordinates;
+    return Math.sqrt(a.reduce((sum, c, i) => sum + (c - b[i]) ** 2, 0));
   }
 
-  get cellCount(): number {
-    return this._cells.size;
+  getHypervolume(): number {
+    return this._hypervolumeCache;
   }
 
-  /** 估算当前信息密度上限。 */
-  get densityLimit(): number {
-    return Math.pow(2, this._currentDimension);
+  projectTo3D(): number[][] {
+    return this._vertices.map(v => [...v.projected]);
+  }
+
+  unfold(): void {
+    this._operations = [];
+    this._sequenceCounter = 0;
+    this._buildTesseract();
+  }
+
+  getOperationHistory(): FoldOperation[] {
+    return [...this._operations];
+  }
+
+  computeHypersphereVolume(radius: number): number {
+    return 0.5 * Math.PI * Math.PI * Math.pow(radius, 4);
+  }
+
+  computeHypersphereSurfaceArea(radius: number): number {
+    return 2 * Math.PI * Math.PI * Math.pow(radius, 3);
+  }
+
+  setStereographicRadius(r: number): void {
+    this._stereographicRadius = Math.max(0.1, r);
+    for (const vertex of this._vertices) {
+      vertex.projected = this._stereographicProject(vertex.coordinates);
+    }
+  }
+
+  computeDistanceIn4D(a: number, b: number): number {
+    const va = this._vertices.find(v => v.id === a);
+    const vb = this._vertices.find(v => v.id === b);
+    if (!va || !vb) return 0;
+    return Math.sqrt(va.coordinates.reduce((sum, c, i) => sum + (c - vb.coordinates[i]) ** 2, 0));
+  }
+
+  getRotationMatrix(): number[][] {
+    return this._rotationMatrix;
+  }
+
+  computeTesseractDiagonal(): number {
+    return Math.sqrt(4 + 4 + 4 + 4);
   }
 }

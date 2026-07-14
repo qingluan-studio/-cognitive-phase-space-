@@ -1,9 +1,3 @@
-/**
- * LimitCyclePath - 极限环路径
- * 系统状态沿重复的周期轨道运动，无论初始条件如何最终
- * 都会收敛到同一闭合环路上，形成稳定的振荡行为。
- */
-
 export interface LimitCyclePathData {
   readonly cycleId: string;
   centerX: number;
@@ -26,6 +20,9 @@ export class LimitCyclePath {
   private _trajectory: CyclePoint[] = [];
   private _cycleCount: number = 0;
   private _lastAngle: number = 0;
+  private _poincareMap: number[] = [];
+  private _floquetMultiplier: number = 1;
+  private _stabilityMatrix: number[][] = [[0, 0], [0, 0]];
 
   constructor(data: LimitCyclePathData, startPosition: { x: number; y: number }) {
     this._data = { ...data };
@@ -49,6 +46,10 @@ export class LimitCyclePath {
     return this._cycleCount;
   }
 
+  get floquetMultiplier(): number {
+    return this._floquetMultiplier;
+  }
+
   public advance(): CyclePoint {
     this._lastAngle = this._currentAngle;
     this._currentAngle += this._data.angularVelocity;
@@ -63,7 +64,13 @@ export class LimitCyclePath {
     this._position.y = this._data.centerY + newRadius * Math.sin(this._currentAngle);
     if (this._currentAngle - this._lastAngle > 0 && this._currentAngle % (2 * Math.PI) < this._lastAngle % (2 * Math.PI)) {
       this._cycleCount++;
+      this._poincareMap.push(newRadius);
+      if (this._poincareMap.length > 50) {
+        this._poincareMap.shift();
+      }
+      this._updateFloquet();
     }
+    this._updateStabilityMatrix(newRadius, targetRadius);
     const point: CyclePoint = {
       x: this._position.x,
       y: this._position.y,
@@ -75,6 +82,26 @@ export class LimitCyclePath {
       this._trajectory.shift();
     }
     return point;
+  }
+
+  private _updateFloquet(): void {
+    const n = this._poincareMap.length;
+    if (n < 2) return;
+    const r0 = this._poincareMap[n - 2];
+    const r1 = this._poincareMap[n - 1];
+    const dr = r1 - this._data.radius;
+    const dr0 = r0 - this._data.radius;
+    if (Math.abs(dr0) > 1e-9) {
+      this._floquetMultiplier = dr / dr0;
+    }
+  }
+
+  private _updateStabilityMatrix(radius: number, target: number): void {
+    const error = radius - target;
+    this._stabilityMatrix[0][0] = 0.9;
+    this._stabilityMatrix[0][1] = -this._data.angularVelocity * error;
+    this._stabilityMatrix[1][0] = this._data.angularVelocity * error;
+    this._stabilityMatrix[1][1] = 0.9;
   }
 
   public runCycles(count: number): CyclePoint[] {
@@ -114,6 +141,20 @@ export class LimitCyclePath {
     return Math.max(0, 1 - maxError / this._data.radius);
   }
 
+  public computePhaseResponseCurve(perturbations: number): number[] {
+    const prc: number[] = [];
+    const originalAngle = this._currentAngle;
+    for (let i = 0; i < perturbations; i++) {
+      const phase = (i / perturbations) * 2 * Math.PI;
+      this._currentAngle = phase;
+      this.advance();
+      const shift = (this._currentAngle - phase - this._data.angularVelocity + 2 * Math.PI) % (2 * Math.PI);
+      prc.push(shift);
+    }
+    this._currentAngle = originalAngle;
+    return prc;
+  }
+
   public isOnCycle(): boolean {
     return this.measureStability() > 0.9;
   }
@@ -131,6 +172,8 @@ export class LimitCyclePath {
       trajectoryLength: this._trajectory.length,
       stability: this.measureStability().toFixed(3),
       onCycle: this.isOnCycle(),
+      floquetMultiplier: this._floquetMultiplier.toFixed(4),
+      poincareMapSize: this._poincareMap.length,
     };
   }
 }

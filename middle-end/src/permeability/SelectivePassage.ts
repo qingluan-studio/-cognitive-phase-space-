@@ -1,119 +1,123 @@
-/**
- * SelectivePassage - 选择性通道
- * 只允许符合特定条件的信息通过，依据内容签名、优先级、
- * 来源可信度等多维标准进行过滤决策。
- */
-
-export interface SelectivePassageData {
-  readonly passageId: string;
-  allowedCategories: string[];
-  minPriority: number;
-  trustedSources: string[];
+export interface PassageCriteria {
+  weight: number;
+  threshold: number;
+  priority: number;
+  invert: boolean;
 }
 
-export interface PassageItem {
-  readonly itemId: string;
-  category: string;
-  priority: number;
-  source: string;
-  contentSize: number;
+export interface PassageRecord {
+  id: string;
+  payload: Record<string, unknown>;
+  score: number;
+  allowed: boolean;
+  informationGain: number;
 }
 
 export class SelectivePassage {
-  private _data: SelectivePassageData;
-  private _passedItems: PassageItem[] = [];
-  private _rejectedItems: PassageItem[] = [];
-  private _throughput: number = 0;
-  private _rejectionRate: number = 0;
+  private _criteria: Map<string, PassageCriteria> = new Map();
+  private _records: PassageRecord[] = [];
+  private _state: Record<string, unknown> = {};
+  private _bayesianPrior: number = 0.5;
 
-  constructor(data: SelectivePassageData) {
-    this._data = {
-      ...data,
-      allowedCategories: [...data.allowedCategories],
-      trustedSources: [...data.trustedSources],
-    };
+  constructor() {}
+
+  get criteriaCount(): number {
+    return this._criteria.size;
   }
 
-  get passageId(): string {
-    return this._data.passageId;
+  get recordCount(): number {
+    return this._records.length;
   }
 
-  get passedCount(): number {
-    return this._passedItems.length;
+  addCriterion(name: string, weight: number, threshold: number, priority: number = 1, invert: boolean = false): void {
+    this._criteria.set(name, { weight, threshold, priority, invert });
   }
 
-  get rejectedCount(): number {
-    return this._rejectedItems.length;
-  }
-
-  public evaluate(item: PassageItem): boolean {
-    const categoryOk = this._data.allowedCategories.includes(item.category);
-    const priorityOk = item.priority >= this._data.minPriority;
-    const sourceTrusted = this._data.trustedSources.includes(item.source);
-    const passes = categoryOk && priorityOk && sourceTrusted;
-    if (passes) {
-      this._passedItems.push({ ...item });
-      this._throughput += item.contentSize;
-    } else {
-      this._rejectedItems.push({ ...item });
+  evaluate(id: string, payload: Record<string, unknown>): PassageRecord {
+    let score = 0;
+    let totalWeight = 0;
+    let allowedCount = 0;
+    let totalCriteria = 0;
+    for (const [name, criterion] of this._criteria) {
+      const value = payload[name] as number ?? 0;
+      const passes = criterion.invert ? value < criterion.threshold : value >= criterion.threshold;
+      const weighted = passes ? criterion.weight * criterion.priority : 0;
+      score += weighted;
+      totalWeight += criterion.weight * criterion.priority;
+      if (passes) allowedCount++;
+      totalCriteria++;
     }
-    this._updateRejectionRate();
-    return passes;
+    const normalizedScore = totalWeight > 0 ? score / totalWeight : 0;
+    const likelihood = allowedCount / (totalCriteria || 1);
+    const posterior = (likelihood * this._bayesianPrior) / ((likelihood * this._bayesianPrior) + (1 - likelihood) * (1 - this._bayesianPrior) + 1e-10);
+    const allowed = posterior > 0.6;
+    const informationGain = -Math.log2(posterior + 1e-10);
+    const record: PassageRecord = { id, payload: { ...payload }, score: normalizedScore, allowed, informationGain };
+    this._records.push(record);
+    if (this._records.length > 50) this._records.shift();
+    this._bayesianPrior = 0.9 * this._bayesianPrior + 0.1 * posterior;
+    return record;
   }
 
-  private _updateRejectionRate(): void {
-    const total = this._passedItems.length + this._rejectedItems.length;
-    this._rejectionRate = total === 0 ? 0 : this._rejectedItems.length / total;
+  filterPayloads(payloads: Record<string, unknown>[]): PassageRecord[] {
+    return payloads.map((p, i) => this.evaluate(`auto_${i}`, p));
   }
 
-  public addCategory(category: string): void {
-    if (!this._data.allowedCategories.includes(category)) {
-      this._data.allowedCategories.push(category);
+  topPassages(limit: number): PassageRecord[] {
+    return [...this._records].sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+
+  bottomPassages(limit: number): PassageRecord[] {
+    return [...this._records].sort((a, b) => a.score - b.score).slice(0, limit);
+  }
+
+  averageScore(): number {
+    if (this._records.length === 0) return 0;
+    return this._records.reduce((s, r) => s + r.score, 0) / this._records.length;
+  }
+
+  passageEntropy(): number {
+    const allowed = this._records.filter((r) => r.allowed).length;
+    const p = allowed / (this._records.length || 1);
+    if (p === 0 || p === 1) return 0;
+    return -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
+  }
+
+  anpWeights(): Record<string, number> {
+    const result: Record<string, number> = {};
+    let total = 0;
+    for (const [name, criterion] of this._criteria) {
+      const w = criterion.weight * criterion.priority;
+      result[name] = w;
+      total += w;
     }
-  }
-
-  public trustSource(source: string): void {
-    if (!this._data.trustedSources.includes(source)) {
-      this._data.trustedSources.push(source);
+    for (const name of Object.keys(result)) {
+      result[name] = total > 0 ? result[name] / total : 0;
     }
+    return result;
   }
 
-  public setMinPriority(priority: number): void {
-    this._data.minPriority = Math.max(0, Math.min(10, priority));
+  updateCriterion(name: string, delta: number): void {
+    const c = this._criteria.get(name);
+    if (c) c.weight = Math.max(0, Math.min(1, c.weight + delta));
   }
 
-  public flushHistory(): void {
-    this._passedItems = [];
-    this._rejectedItems = [];
-    this._throughput = 0;
-    this._rejectionRate = 0;
+  clearCriteria(): void {
+    this._criteria.clear();
+    this._bayesianPrior = 0.5;
   }
 
-  public bulkEvaluate(items: PassageItem[]): number {
-    let passed = 0;
-    items.forEach((item) => {
-      if (this.evaluate(item)) {
-        passed++;
-      }
-    });
-    return passed;
+  criteriaRedundancy(): number {
+    return Array.from(this._criteria.values()).filter((c) => c.weight < 0.1).length;
   }
 
-  public computeSelectivity(): number {
-    return 1 - this._rejectionRate;
-  }
-
-  public passageReport(): Record<string, unknown> {
+  report(): Record<string, unknown> {
     return {
-      passageId: this.passageId,
-      allowedCategories: this._data.allowedCategories.length,
-      trustedSources: this._data.trustedSources.length,
-      minPriority: this._data.minPriority,
-      passedCount: this.passedCount,
-      rejectedCount: this.rejectedCount,
-      throughput: this._throughput.toFixed(2),
-      rejectionRate: this._rejectionRate.toFixed(3),
-      selectivity: this.computeSelectivity().toFixed(3),
+      criteria: this._criteria.size,
+      records: this._records.length,
+      averageScore: this.averageScore(),
+      passageEntropy: this.passageEntropy(),
+      state: this._state,
     };
   }
 }

@@ -1,144 +1,184 @@
-/**
- * FieldCollapse - 场坍缩
- * 从叠加态变为确定态的过程，类似量子测量导致的波函数坍缩，
- * 多种可能性在观测瞬间缩减为单一确定结果。
- */
-
-export interface FieldCollapseData {
-  readonly collapseId: string;
-  superpositionStates: string[];
-  probabilityWeights: number[];
+export interface CollapseState {
+  amplitude: number;
+  probability: number;
   collapsed: boolean;
+  outcome: string;
 }
 
-export interface CollapseResult {
-  finalState: string;
-  probability: number;
+export type CollapseEvent = {
   timestamp: number;
-  observerId: string;
+  preState: CollapseState;
+  postState: CollapseState;
+  entropyDelta: number;
+};
+
+export interface CollapseConfig {
+  decoherenceRate: number;
+  basisCount: number;
+  threshold: number;
 }
 
 export class FieldCollapse {
-  private _data: FieldCollapseData;
-  private _collapsedState: string | null = null;
-  private _collapseHistory: CollapseResult[] = [];
-  private _measurementCount: number = 0;
-  private _decoherenceTime: number = 0;
+  private _config: CollapseConfig;
+  private _states: CollapseState[] = [];
+  private _events: CollapseEvent[] = [];
+  private _meta: Record<string, unknown> = {};
+  private _densityMatrix: number[][] = [];
+  private _vonNeumannEntropy: number = 0;
+  private _purity: number = 1;
 
-  constructor(data: FieldCollapseData) {
-    this._data = {
-      ...data,
-      superpositionStates: [...data.superpositionStates],
-      probabilityWeights: [...data.probabilityWeights],
-    };
+  constructor(config: CollapseConfig) {
+    this._config = config;
+    this._initStates();
   }
 
-  get collapseId(): string {
-    return this._data.collapseId;
+  get stateCount(): number {
+    return this._states.length;
   }
 
-  get collapsed(): boolean {
-    return this._data.collapsed;
+  get vonNeumannEntropy(): number {
+    return this._vonNeumannEntropy;
   }
 
-  get superpositionSize(): number {
-    return this._data.superpositionStates.length;
+  get purity(): number {
+    return this._purity;
   }
 
-  get collapsedState(): string | null {
-    return this._collapsedState;
-  }
-
-  public measure(observerId: string, timestamp: number): CollapseResult | null {
-    if (this._data.collapsed) {
-      return this._collapseHistory[this._collapseHistory.length - 1] ?? null;
+  private _initStates(): void {
+    this._states = [];
+    for (let i = 0; i < this._config.basisCount; i++) {
+      this._states.push({
+        amplitude: Math.sqrt(1 / this._config.basisCount),
+        probability: 1 / this._config.basisCount,
+        collapsed: false,
+        outcome: `basis-${i}`,
+      });
     }
-    this._measurementCount++;
-    const totalWeight = this._data.probabilityWeights.reduce((s, w) => s + w, 0);
-    if (totalWeight === 0) {
-      return null;
+    this._buildDensityMatrix();
+  }
+
+  private _buildDensityMatrix(): void {
+    const n = this._states.length;
+    this._densityMatrix = [];
+    for (let i = 0; i < n; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < n; j++) {
+        const rhoIJ = this._states[i].amplitude * this._states[j].amplitude;
+        row.push(rhoIJ);
+      }
+      this._densityMatrix.push(row);
     }
-    const roll = Math.random() * totalWeight;
-    let cumulative = 0;
-    let chosenIdx = 0;
-    for (let i = 0; i < this._data.probabilityWeights.length; i++) {
-      cumulative += this._data.probabilityWeights[i];
-      if (roll <= cumulative) {
-        chosenIdx = i;
-        break;
+  }
+
+  private _computeVonNeumannEntropy(): void {
+    let entropy = 0;
+    for (const s of this._states) {
+      if (s.probability > 0) {
+        entropy -= s.probability * Math.log2(s.probability);
       }
     }
-    this._collapsedState = this._data.superpositionStates[chosenIdx];
-    this._data.collapsed = true;
-    const probability = this._data.probabilityWeights[chosenIdx] / totalWeight;
-    const result: CollapseResult = {
-      finalState: this._collapsedState,
-      probability,
-      timestamp,
-      observerId,
+    this._vonNeumannEntropy = entropy;
+    let traceRho2 = 0;
+    const n = this._densityMatrix.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        traceRho2 += this._densityMatrix[i][j] * this._densityMatrix[j][i];
+      }
+    }
+    this._purity = traceRho2;
+  }
+
+  applyMeasurement(outcome: string): CollapseEvent {
+    const preState = { ...this._states[0] };
+    const entropyBefore = this._vonNeumannEntropy;
+    let found = false;
+    for (const s of this._states) {
+      if (s.outcome === outcome) {
+        s.probability = 1;
+        s.collapsed = true;
+        s.amplitude = 1;
+        found = true;
+      } else {
+        s.probability = 0;
+        s.collapsed = true;
+        s.amplitude = 0;
+      }
+    }
+    if (found) {
+      this._buildDensityMatrix();
+      this._computeVonNeumannEntropy();
+    }
+    const postState = { ...this._states[0] };
+    const event: CollapseEvent = {
+      timestamp: Date.now(),
+      preState,
+      postState,
+      entropyDelta: entropyBefore - this._vonNeumannEntropy,
     };
-    this._collapseHistory.push(result);
-    if (this._collapseHistory.length > 20) {
-      this._collapseHistory.shift();
+    this._events.push(event);
+    if (this._events.length > 30) this._events.shift();
+    this._meta.lastMeasurement = outcome;
+    return event;
+  }
+
+  decohere(dt: number): void {
+    const rate = this._config.decoherenceRate;
+    for (const s of this._states) {
+      if (!s.collapsed) {
+        s.amplitude *= Math.exp(-rate * dt);
+        s.probability = s.amplitude * s.amplitude;
+      }
     }
-    return result;
-  }
-
-  public adjustWeights(newWeights: number[]): void {
-    if (newWeights.length !== this._data.probabilityWeights.length) {
-      return;
+    const total = this._states.reduce((acc, s) => acc + s.probability, 0);
+    if (total > 0) {
+      for (const s of this._states) {
+        s.probability /= total;
+        s.amplitude = Math.sqrt(s.probability);
+      }
     }
-    this._data.probabilityWeights = [...newWeights];
+    this._buildDensityMatrix();
+    this._computeVonNeumannEntropy();
+    this._meta.lastDecoherence = dt;
   }
 
-  public addState(state: string, weight: number): void {
-    if (this._data.collapsed) {
-      return;
+  isCollapsed(): boolean {
+    return this._states.some((s) => s.collapsed);
+  }
+
+  dominantOutcome(): string | null {
+    let best: CollapseState | null = null;
+    for (const s of this._states) {
+      if (!best || s.probability > best.probability) {
+        best = s;
+      }
     }
-    this._data.superpositionStates.push(state);
-    this._data.probabilityWeights.push(weight);
+    return best ? best.outcome : null;
   }
 
-  public decohere(timeDelta: number): void {
-    this._decoherenceTime += timeDelta;
-    const decay = Math.exp(-this._decoherenceTime * 0.01);
-    this._data.probabilityWeights = this._data.probabilityWeights.map((w) => w * decay);
+  probabilityOf(outcome: string): number {
+    const s = this._states.find((x) => x.outcome === outcome);
+    return s ? s.probability : 0;
   }
 
-  public reconstitute(): void {
-    this._data.collapsed = false;
-    this._collapsedState = null;
-    this._decoherenceTime = 0;
-    const uniform = 1 / this._data.superpositionStates.length;
-    this._data.probabilityWeights = this._data.superpositionStates.map(() => uniform);
+  totalEvents(): number {
+    return this._events.length;
   }
 
-  public biasState(state: string, biasAmount: number): void {
-    const idx = this._data.superpositionStates.indexOf(state);
-    if (idx >= 0) {
-      this._data.probabilityWeights[idx] += biasAmount;
-    }
+  reset(): void {
+    this._initStates();
+    this._events = [];
+    this._meta = {};
   }
 
-  public getStateProbability(state: string): number {
-    const idx = this._data.superpositionStates.indexOf(state);
-    if (idx < 0) {
-      return 0;
-    }
-    const total = this._data.probabilityWeights.reduce((s, w) => s + w, 0);
-    return total === 0 ? 0 : this._data.probabilityWeights[idx] / total;
-  }
-
-  public collapseReport(): Record<string, unknown> {
+  report(): Record<string, unknown> {
     return {
-      collapseId: this.collapseId,
-      collapsed: this._data.collapsed,
-      collapsedState: this._collapsedState,
-      superpositionSize: this.superpositionSize,
-      measurementCount: this._measurementCount,
-      decoherenceTime: this._decoherenceTime.toFixed(2),
-      collapseHistory: this._collapseHistory.length,
-      stateWeights: this._data.probabilityWeights.map((w) => w.toFixed(3)),
+      states: this._states.length,
+      collapsed: this.isCollapsed(),
+      dominant: this.dominantOutcome(),
+      events: this._events.length,
+      meta: this._meta,
+      vonNeumannEntropy: this._vonNeumannEntropy.toFixed(4),
+      purity: this._purity.toFixed(4),
     };
   }
 }

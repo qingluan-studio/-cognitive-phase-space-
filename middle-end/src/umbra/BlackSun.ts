@@ -1,8 +1,3 @@
-/**
- * 黑太阳模块：发出暗光的悖论天体，反向于常规发光体。
- * 用于刻画系统中以吸收/反向方式产生信号的悖论实体。
- */
-
 export interface DarkEmission {
   id: number;
   negativeLuminance: number;
@@ -28,6 +23,8 @@ export class BlackSun {
   private _nextId: number = 0;
   private _spectrum: DarkSpectrum | null = null;
   private _state: Record<string, unknown> = {};
+  private _planckCache: Map<number, number> = new Map();
+  private _hawkingTemperature: number = 0.001;
 
   constructor(config: BlackSunConfig) {
     this._config = config;
@@ -41,9 +38,19 @@ export class BlackSun {
     return this._config.coreAbsorption;
   }
 
+  private _planckFunction(lambda: number, T: number): number {
+    const h = 6.626e-34;
+    const c = 3e8;
+    const k = 1.381e-23;
+    const exponent = (h * c) / (lambda * 1e-9 * k * T);
+    if (exponent > 50) return 0;
+    return (2 * h * c * c) / Math.pow(lambda * 1e-9, 5) / (Math.exp(exponent) - 1);
+  }
+
   emitDark(wavelength: number): DarkEmission {
-    const negativeLuminance =
-      -this._config.coreAbsorption * Math.exp(-Math.pow(wavelength - 500, 2) / (2 * this._config.spectralWidth ** 2));
+    const gaussian = -Math.exp(-Math.pow(wavelength - 500, 2) / (2 * this._config.spectralWidth ** 2));
+    const planckFactor = this._planckFunction(wavelength, this._hawkingTemperature);
+    const negativeLuminance = -this._config.coreAbsorption * gaussian - planckFactor * 1e40;
     const emission: DarkEmission = {
       id: this._nextId++,
       negativeLuminance,
@@ -54,6 +61,7 @@ export class BlackSun {
     if (this._emissions.length > this._config.maxEmissions) {
       this._emissions.shift();
     }
+    this._planckCache.set(emission.id, planckFactor);
     return emission;
   }
 
@@ -96,6 +104,7 @@ export class BlackSun {
 
   reset(): void {
     this._emissions = [];
+    this._planckCache.clear();
     this._state.resetAt = Date.now();
   }
 
@@ -105,5 +114,25 @@ export class BlackSun {
       spectrum: this._spectrum,
       state: this._state,
     };
+  }
+
+  computeWienDisplacement(): number {
+    const b = 2.898e6;
+    return this._hawkingTemperature > 0 ? b / this._hawkingTemperature : 0;
+  }
+
+  setHawkingTemperature(T: number): void {
+    this._hawkingTemperature = Math.max(1e-6, T);
+  }
+
+  computeSpectralEntropy(): number {
+    const total = this.totalAbsorbed();
+    if (total === 0) return 0;
+    let entropy = 0;
+    for (const e of this._emissions) {
+      const p = e.absorbed / total;
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    return entropy;
   }
 }

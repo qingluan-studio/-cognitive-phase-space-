@@ -1,109 +1,122 @@
-/**
- * LichenComposite - 地衣复合体模块
- * 模拟藻类与真菌的结合体，二者不可分离，共同构成一个完整生命体，
- * 藻类提供光合产物，真菌提供结构与水分保持。
- */
-
-export interface LichenCompositeData {
-  readonly compositeId: string;
-  photobiont: string;
-  mycobiont: string;
-  surfaceArea: number;
-  moistureLevel: number;
-  cohesionFactor: number;
+export interface LichenLayer {
+  id: string;
+  type: 'photobiont' | 'mycobiont';
+  photosynthesisRate: number;
+  waterPotential: number;
+  osmoticPressure: number;
+  growthRate: number;
 }
 
-export interface PhotosynthesisOutput {
-  carbonFixed: number;
-  oxygenReleased: number;
-  carbohydrate: number;
+export interface EnvironmentalCondition {
+  irradiance: number;
+  humidity: number;
+  temperature: number;
 }
 
 export class LichenComposite {
-  private _data: LichenCompositeData;
-  private _lightExposure: number = 0;
-  private _growthAccumulator: number = 0;
-  private _desiccationRisk: number = 0;
-  private _mineralStore: Record<string, number> = {};
+  private _layers: Map<string, LichenLayer> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _waterContent: number = 0.5;
+  private _compositeGrowth: number = 0;
+  private _piCurve: { irradiance: number; rate: number }[] = [];
 
-  constructor(data: LichenCompositeData) {
-    this._data = { ...data };
+  constructor() {}
+
+  get layerCount(): number {
+    return this._layers.size;
   }
 
-  get compositeId(): string {
-    return this._data.compositeId;
+  get waterContent(): number {
+    return this._waterContent;
   }
 
-  get components(): readonly [string, string] {
-    return [this._data.photobiont, this._data.mycobiont];
+  addLayer(id: string, type: 'photobiont' | 'mycobiont', baseRate: number, waterPotential: number): void {
+    const osmoticPressure = -waterPotential * 0.1;
+    const growthRate = type === 'photobiont' ? baseRate : baseRate * 0.5;
+    this._layers.set(id, { id, type, photosynthesisRate: baseRate, waterPotential, osmoticPressure, growthRate });
   }
 
-  get cohesion(): number {
-    return this._data.cohesionFactor;
-  }
-
-  get moisture(): number {
-    return this._data.moistureLevel;
-  }
-
-  public absorbLight(intensity: number, duration: number): PhotosynthesisOutput {
-    this._lightExposure = intensity;
-    const effective = intensity * duration * (this._data.moistureLevel / 100);
-    const carbonFixed = effective * 0.45;
-    const oxygenReleased = effective * 0.33;
-    const carbohydrate = effective * 0.22;
-    this._growthAccumulator += carbohydrate;
-    return { carbonFixed, oxygenReleased, carbohydrate };
-  }
-
-  public absorbWater(amount: number): void {
-    this._data.moistureLevel = Math.min(100, this._data.moistureLevel + amount);
-    this._desiccationRisk = Math.max(0, this._desiccationRisk - amount * 0.5);
-  }
-
-  public retainMoisture(): number {
-    const retained = this._data.moistureLevel * this._data.cohesionFactor * 0.1;
-    this._data.moistureLevel = Math.max(0, this._data.moistureLevel - retained * 0.3);
-    return retained;
-  }
-
-  public accumulateMineral(name: string, amount: number): void {
-    this._mineralStore[name] = (this._mineralStore[name] ?? 0) + amount;
-  }
-
-  public grow(): number {
-    if (this._growthAccumulator < 1) {
-      return 0;
+  computePiCurve(maxIrradiance: number, steps: number): { irradiance: number; rate: number }[] {
+    const curve: { irradiance: number; rate: number }[] = [];
+    const photobionts = Array.from(this._layers.values()).filter((l) => l.type === 'photobiont');
+    const pmax = photobionts.reduce((s, l) => s + l.photosynthesisRate, 0) / (photobionts.length || 1);
+    const alpha = 0.05;
+    for (let i = 0; i < steps; i++) {
+      const irradiance = (maxIrradiance * i) / (steps - 1);
+      const rate = pmax * (1 - Math.exp(-alpha * irradiance / (pmax || 1)));
+      curve.push({ irradiance, rate });
     }
-    const growth = this._growthAccumulator * 0.05;
-    this._data.surfaceArea += growth;
-    this._growthAccumulator *= 0.5;
-    return growth;
+    this._piCurve = curve;
+    return curve;
   }
 
-  public endureDrought(): void {
-    this._desiccationRisk = Math.min(1, this._desiccationRisk + 0.3);
-    this._data.moistureLevel = Math.max(0, this._data.moistureLevel - 10);
-    if (this._desiccationRisk > 0.7) {
-      this._data.cohesionFactor = Math.max(0.1, this._data.cohesionFactor - 0.05);
+  updateWaterContent(humidity: number, time: number): void {
+    const equilibrium = humidity;
+    const tau = 10;
+    this._waterContent = equilibrium + (this._waterContent - equilibrium) * Math.exp(-time / tau);
+    for (const layer of this._layers.values()) {
+      layer.waterPotential = -this._waterContent * 2;
+      layer.osmoticPressure = -layer.waterPotential * 0.1;
+      if (layer.type === 'photobiont') {
+        layer.photosynthesisRate = layer.growthRate * Math.min(1, this._waterContent / 0.3);
+      }
     }
   }
 
-  public canSeparate(): boolean {
-    return this._data.cohesionFactor < 0.2;
+  osmoticAdjustment(layerId: string, deltaSolute: number): void {
+    const layer = this._layers.get(layerId);
+    if (!layer) return;
+    layer.osmoticPressure += deltaSolute * 0.1;
+    layer.waterPotential = -layer.osmoticPressure * 10;
   }
 
-  public diagnose(): Record<string, unknown> {
+  compositeGrowthRate(): number {
+    const photobionts = Array.from(this._layers.values()).filter((l) => l.type === 'photobiont');
+    const mycobionts = Array.from(this._layers.values()).filter((l) => l.type === 'mycobiont');
+    const photoRate = photobionts.reduce((s, l) => s + l.photosynthesisRate, 0) / (photobionts.length || 1);
+    const mycoRate = mycobionts.reduce((s, l) => s + l.growthRate, 0) / (mycobionts.length || 1);
+    this._compositeGrowth = Math.sqrt(photoRate * mycoRate);
+    return this._compositeGrowth;
+  }
+
+  waterUseEfficiency(): number {
+    const photoRate = Array.from(this._layers.values())
+      .filter((l) => l.type === 'photobiont')
+      .reduce((s, l) => s + l.photosynthesisRate, 0);
+    return this._waterContent > 0 ? photoRate / this._waterContent : 0;
+  }
+
+  photosyntheticEfficiency(irradiance: number): number {
+    const photobionts = Array.from(this._layers.values()).filter((l) => l.type === 'photobiont');
+    if (photobionts.length === 0) return 0;
+    const pmax = photobionts.reduce((s, l) => s + l.photosynthesisRate, 0) / photobionts.length;
+    const alpha = 0.05;
+    return pmax > 0 ? (pmax * (1 - Math.exp(-alpha * irradiance / pmax))) / irradiance : 0;
+  }
+
+  desiccationRecovery(rate: number): number {
+    const recovery = 1 - Math.exp(-rate * this._waterContent);
+    for (const layer of this._layers.values()) {
+      if (layer.type === 'photobiont') {
+        layer.photosynthesisRate = layer.growthRate * recovery;
+      }
+    }
+    return recovery;
+  }
+
+  osmoticPotential(): number {
+    const layers = Array.from(this._layers.values());
+    if (layers.length === 0) return 0;
+    return layers.reduce((s, l) => s + l.osmoticPressure, 0) / layers.length;
+  }
+
+  report(): Record<string, unknown> {
     return {
-      compositeId: this.compositeId,
-      photobiont: this._data.photobiont,
-      mycobiont: this._data.mycobiont,
-      surfaceArea: this._data.surfaceArea.toFixed(2),
-      moisture: this._data.moistureLevel.toFixed(1),
-      cohesion: this._data.cohesionFactor.toFixed(3),
-      desiccationRisk: this._desiccationRisk.toFixed(3),
-      minerals: Object.keys(this._mineralStore).length,
-      separable: this.canSeparate(),
+      layers: this._layers.size,
+      waterContent: this._waterContent,
+      compositeGrowth: this.compositeGrowthRate(),
+      wue: this.waterUseEfficiency(),
+      state: this._state,
     };
   }
 }

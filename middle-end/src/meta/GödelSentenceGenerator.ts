@@ -1,78 +1,105 @@
-/**
- * 哥德尔句生成器模块：生成系统内不可证明的真命题。
- * 通过自指编码构造类似哥德尔句的句子，标记其在系统内的不可判定性。
- */
-
-export interface GödelSentenceData {
-  sentence: string;
-  code: number;
-  provable: boolean;
-  true: boolean;
+export interface GödelSentence {
+  id: string;
+  statement: string;
+  selfReferential: boolean;
+  undecidable: boolean;
 }
 
 export class GödelSentenceGenerator {
-  private _sentences: GödelSentenceData[];
-  private _counter: number;
-  private _base: number;
+  private _sentences: GödelSentence[];
+  private _encodingBase: number;
+  private _undecidabilityThreshold: number;
+  private _ GödelNumbering: Map<string, number>;
+  private _incompletenessMeasure: number;
 
-  constructor(base: number = 17) {
+  constructor(encodingBase: number = 256) {
     this._sentences = [];
-    this._counter = 0;
-    this._base = base;
+    this._encodingBase = encodingBase;
+    this._undecidabilityThreshold = 0.5;
+    this._ GödelNumbering = new Map();
+    this._incompletenessMeasure = 0;
   }
 
   get sentenceCount(): number {
     return this._sentences.length;
   }
 
-  public generate(topic: string): GödelSentenceData {
-    this._counter += 1;
-    const code = this._encode(topic, this._counter);
-    const sentence = `This sentence (code ${code}) is not provable within the system.`;
-    const data: GödelSentenceData = {
-      sentence,
-      code,
-      provable: false,
-      true: true,
+  get incompletenessMeasure(): number {
+    return this._incompletenessMeasure;
+  }
+
+  public generate(statement: string): GödelSentence {
+    const GödelNumber = this._encode(statement);
+    const selfReferential = statement.includes('本声明') || statement.includes('此句');
+    const undecidable = selfReferential && GödelNumber % 2 === 0;
+    const sentence: GödelSentence = {
+      id: `gödel-${GödelNumber}`,
+      statement,
+      selfReferential,
+      undecidable,
     };
-    this._sentences.push(data);
-    return data;
+    this._sentences.push(sentence);
+    this._ GödelNumbering.set(statement, GödelNumber);
+    this._incompletenessMeasure = this._computeIncompleteness();
+    return sentence;
   }
 
-  public attemptProof(code: number): boolean {
-    const s = this._sentences.find((x) => x.code === code);
-    if (!s) return false;
-    s.provable = false;
-    return false;
+  public evaluate(statement: string): GödelSentence | null {
+    return this._sentences.find(s => s.statement === statement) ?? null;
   }
 
-  public archive(): GödelSentenceData[] {
-    return [...this._sentences];
+  public decide(sentenceId: string): boolean {
+    const sentence = this._sentences.find(s => s.id === sentenceId);
+    if (!sentence) return false;
+    if (sentence.undecidable) return false;
+    return !sentence.selfReferential;
   }
 
-  public reset(): void {
-    this._sentences = [];
-    this._counter = 0;
+  public listUndecidable(): GödelSentence[] {
+    return this._sentences.filter(s => s.undecidable);
   }
 
-  public setBase(b: number): void {
-    this._base = Math.max(2, b);
+  public listSelfReferential(): GödelSentence[] {
+    return this._sentences.filter(s => s.selfReferential);
   }
 
-  public report(): GödelSentenceData {
-    return this._sentences[this._sentences.length - 1] ?? {
-      sentence: '',
-      code: 0,
-      provable: false,
-      true: false,
-    };
+  public getSentence(id: string): GödelSentence | null {
+    return this._sentences.find(s => s.id === id) ?? null;
   }
 
-  private _encode(topic: string, n: number): number {
-    let h = this._base;
-    for (let i = 0; i < topic.length; i += 1) {
-      h = (h * 31 + topic.charCodeAt(i)) >>> 0;
+  public getGödelNumber(statement: string): number | null {
+    return this._ GödelNumbering.get(statement) ?? null;
+  }
+
+  public computeIncompletenessRatio(): number {
+    if (this._sentences.length === 0) return 0;
+    return this._sentences.filter(s => s.undecidable).length / this._sentences.length;
+  }
+
+  public diagonalize(sentenceId: string): GödelSentence | null {
+    const sentence = this._sentences.find(s => s.id === sentenceId);
+    if (!sentence) return null;
+    const diagonal = `声明"${sentence.statement}"不可判定`;
+    return this.generate(diagonal);
+  }
+
+  public enumerateProvable(limit: number): GödelSentence[] {
+    return this._sentences.filter(s => !s.undecidable).slice(0, limit);
+  }
+
+  private _encode(statement: string): number {
+    let num = 0;
+    for (let i = 0; i < statement.length; i++) {
+      num = num * this._encodingBase + statement.charCodeAt(i);
+      num = num % 2147483647;
     }
-    return (h + n) >>> 0;
+    return num;
+  }
+
+  private _computeIncompleteness(): number {
+    const total = this._sentences.length;
+    if (total === 0) return 0;
+    const undecidable = this._sentences.filter(s => s.undecidable).length;
+    return undecidable / total;
   }
 }

@@ -1,143 +1,148 @@
-/**
- * MembranePotential - 膜电位
- * 膜内外离子浓度差异产生的电位差，是细胞兴奋性与
- * 信号传导的基础，通过维持极化状态储备势能。
- */
-
-export interface MembranePotentialData {
-  readonly potentialId: string;
-  restingPotential: number;
-  currentPotential: number;
-  sodiumInside: number;
-  potassiumInside: number;
-}
-
-export interface PotentialChange {
-  delta: number;
-  newPotential: number;
-  type: 'depolarization' | 'hyperpolarization' | 'repolarization';
+export interface PotentialReading {
+  timestamp: number;
+  voltage: number;
+  sodiumCurrent: number;
+  potassiumCurrent: number;
+  leakCurrent: number;
 }
 
 export class MembranePotential {
-  private _data: MembranePotentialData;
-  private _changes: PotentialChange[] = [];
-  private _polarizationState: 'polarized' | 'depolarized' | 'hyperpolarized' = 'polarized';
-  private _energyStored: number = 0;
+  private _readings: PotentialReading[] = [];
+  private _state: Record<string, unknown> = {};
+  private _voltage: number = -65;
+  private _gNa: number = 120;
+  private _gK: number = 36;
+  private _gL: number = 0.3;
+  private _eNa: number = 50;
+  private _eK: number = -77;
+  private _eL: number = -54.4;
+  private _cm: number = 1;
+  private _m: number = 0.05;
+  private _h: number = 0.6;
+  private _n: number = 0.32;
+  private _spikeCount: number = 0;
+  private _isiHistory: number[] = [];
+  private _lastSpikeTime: number = 0;
 
-  constructor(data: MembranePotentialData) {
-    this._data = { ...data };
-    this._energyStored = Math.abs(data.restingPotential) * 0.5;
+  get voltage(): number {
+    return this._voltage;
   }
 
-  get potentialId(): string {
-    return this._data.potentialId;
+  get spikeCount(): number {
+    return this._spikeCount;
   }
 
-  get currentPotential(): number {
-    return this._data.currentPotential;
+  private _alphaM(v: number): number {
+    return 0.1 * (v + 40) / (1 - Math.exp(-(v + 40) / 10));
   }
 
-  get polarizationState(): 'polarized' | 'depolarized' | 'hyperpolarized' {
-    return this._polarizationState;
+  private _betaM(v: number): number {
+    return 4 * Math.exp(-(v + 65) / 18);
   }
 
-  get energyStored(): number {
-    return this._energyStored;
+  private _alphaH(v: number): number {
+    return 0.07 * Math.exp(-(v + 65) / 20);
   }
 
-  public depolarize(amount: number): PotentialChange {
-    const before = this._data.currentPotential;
-    this._data.currentPotential += amount;
-    this._data.sodiumInside += amount * 0.1;
-    this._data.potassiumInside -= amount * 0.05;
-    const type: 'depolarization' | 'hyperpolarization' | 'repolarization' = 'depolarization';
-    this._updateState();
-    this._energyStored = Math.max(0, this._energyStored - amount * 0.3);
-    const change: PotentialChange = {
-      delta: amount,
-      newPotential: this._data.currentPotential,
-      type,
-    };
-    this._changes.push(change);
-    return change;
+  private _betaH(v: number): number {
+    return 1 / (1 + Math.exp(-(v + 35) / 10));
   }
 
-  public hyperpolarize(amount: number): PotentialChange {
-    this._data.currentPotential -= amount;
-    this._data.potassiumInside += amount * 0.1;
-    this._updateState();
-    this._energyStored += amount * 0.2;
-    const change: PotentialChange = {
-      delta: -amount,
-      newPotential: this._data.currentPotential,
-      type: 'hyperpolarization',
-    };
-    this._changes.push(change);
-    return change;
+  private _alphaN(v: number): number {
+    return 0.01 * (v + 55) / (1 - Math.exp(-(v + 55) / 10));
   }
 
-  public repolarize(): PotentialChange {
-    const diff = this._data.restingPotential - this._data.currentPotential;
-    this._data.currentPotential += diff * 0.3;
-    this._updateState();
-    const type: 'depolarization' | 'hyperpolarization' | 'repolarization' =
-      Math.abs(diff) < 1 ? 'repolarization' : (diff > 0 ? 'repolarization' : 'repolarization');
-    const change: PotentialChange = {
-      delta: diff * 0.3,
-      newPotential: this._data.currentPotential,
-      type,
-    };
-    this._changes.push(change);
-    if (this._changes.length > 30) {
-      this._changes.shift();
+  private _betaN(v: number): number {
+    return 0.125 * Math.exp(-(v + 65) / 80);
+  }
+
+  step(stimulusCurrent: number, dt: number = 0.01): PotentialReading {
+    const v = this._voltage;
+    const am = this._alphaM(v);
+    const bm = this._betaM(v);
+    const ah = this._alphaH(v);
+    const bh = this._betaH(v);
+    const an = this._alphaN(v);
+    const bn = this._betaN(v);
+    this._m += (am * (1 - this._m) - bm * this._m) * dt;
+    this._h += (ah * (1 - this._h) - bh * this._h) * dt;
+    this._n += (an * (1 - this._n) - bn * this._n) * dt;
+    const iNa = this._gNa * Math.pow(this._m, 3) * this._h * (v - this._eNa);
+    const iK = this._gK * Math.pow(this._n, 4) * (v - this._eK);
+    const iL = this._gL * (v - this._eL);
+    const dv = (stimulusCurrent - iNa - iK - iL) / this._cm;
+    this._voltage += dv * dt;
+    if (this._voltage >= 30 && v < 30) {
+      this._spikeCount++;
+      const now = Date.now();
+      if (this._lastSpikeTime > 0) {
+        this._isiHistory.push(now - this._lastSpikeTime);
+        if (this._isiHistory.length > 50) this._isiHistory.shift();
+      }
+      this._lastSpikeTime = now;
     }
-    return change;
+    const reading: PotentialReading = {
+      timestamp: Date.now(),
+      voltage: this._voltage,
+      sodiumCurrent: iNa,
+      potassiumCurrent: iK,
+      leakCurrent: iL,
+    };
+    this._readings.push(reading);
+    if (this._readings.length > 500) this._readings.shift();
+    return reading;
   }
 
-  private _updateState(): void {
-    const diff = this._data.currentPotential - this._data.restingPotential;
-    if (diff > 10) {
-      this._polarizationState = 'depolarized';
-    } else if (diff < -10) {
-      this._polarizationState = 'hyperpolarized';
-    } else {
-      this._polarizationState = 'polarized';
+  runSimulation(steps: number, stimulus: number): PotentialReading[] {
+    const readings: PotentialReading[] = [];
+    for (let i = 0; i < steps; i++) {
+      readings.push(this.step(stimulus));
     }
+    return readings;
   }
 
-  public fireActionPotential(): boolean {
-    if (this._data.currentPotential < -50) {
-      return false;
-    }
-    this.depolarize(100);
-    this._energyStored *= 0.5;
-    return true;
+  averageVoltage(): number {
+    if (this._readings.length === 0) return 0;
+    return this._readings.reduce((acc, r) => acc + r.voltage, 0) / this._readings.length;
   }
 
-  public restoreResting(): void {
-    this._data.currentPotential = this._data.restingPotential;
-    this._polarizationState = 'polarized';
-    this._energyStored = Math.abs(this._data.restingPotential) * 0.5;
+  averageISI(): number {
+    if (this._isiHistory.length === 0) return 0;
+    return this._isiHistory.reduce((a, b) => a + b, 0) / this._isiHistory.length;
   }
 
-  public discharge(): number {
-    const released = this._energyStored;
-    this._energyStored = 0;
-    this._data.currentPotential = 0;
-    this._polarizationState = 'depolarized';
-    return released;
+  firingRate(): number {
+    if (this._isiHistory.length === 0) return 0;
+    return 1000 / this.averageISI();
   }
 
-  public potentialReport(): Record<string, unknown> {
+  getReadings(limit: number = 50): PotentialReading[] {
+    return this._readings.slice(-limit);
+  }
+
+  resetPotential(): void {
+    this._voltage = -65;
+    this._m = 0.05;
+    this._h = 0.6;
+    this._n = 0.32;
+  }
+
+  setConductances(gNa: number, gK: number, gL: number): void {
+    this._gNa = gNa;
+    this._gK = gK;
+    this._gL = gL;
+  }
+
+  potentialReport(): Record<string, unknown> {
     return {
-      potentialId: this.potentialId,
-      restingPotential: this._data.restingPotential,
-      currentPotential: this._data.currentPotential.toFixed(2),
-      polarizationState: this._polarizationState,
-      sodiumInside: this._data.sodiumInside.toFixed(2),
-      potassiumInside: this._data.potassiumInside.toFixed(2),
-      energyStored: this._energyStored.toFixed(2),
-      changeCount: this._changes.length,
+      voltage: this._voltage.toFixed(3),
+      spikeCount: this._spikeCount,
+      averageVoltage: this.averageVoltage().toFixed(3),
+      averageISI: this.averageISI().toFixed(2),
+      firingRate: this.firingRate().toFixed(2),
+      readingsCount: this._readings.length,
+      gatingVariables: { m: this._m.toFixed(4), h: this._h.toFixed(4), n: this._n.toFixed(4) },
+      state: this._state,
     };
   }
 }

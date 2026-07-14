@@ -1,131 +1,132 @@
-/**
- * ActiveTransport - 主动运输
- * 消耗能量逆浓度梯度传输物质，通过载体蛋白与ATP供能，
- * 将物质从低浓度侧运送到高浓度侧，维持系统的非平衡态。
- */
-
-export interface ActiveTransportData {
-  readonly transporterId: string;
-  cargoType: string;
+export interface TransportRecord {
+  id: string;
+  substrate: string;
+  concentrationInside: number;
+  concentrationOutside: number;
+  atpAvailable: number;
   pumpRate: number;
-  atpReserve: number;
-  concentrationIn: number;
-  concentrationOut: number;
 }
 
-export interface TransportCycle {
-  cargoMoved: number;
-  energySpent: number;
-  againstGradient: boolean;
-  successful: boolean;
+export interface TransportEvent {
+  recordId: string;
+  moleculesMoved: number;
+  atpConsumed: number;
+  electrochemicalGradient: number;
+  timestamp: number;
 }
 
 export class ActiveTransport {
-  private _data: ActiveTransportData;
-  private _cycles: TransportCycle[] = [];
-  private _totalTransported: number = 0;
-  private _totalEnergySpent: number = 0;
-  private _carrierSaturation: number = 0;
+  private _records: Map<string, TransportRecord> = new Map();
+  private _events: TransportEvent[] = [];
+  private _state: Record<string, unknown> = {};
+  private _maxPumpRate: number = 100;
+  private _atpCostPerMolecule: number = 1;
+  private _faradayConstant: number = 96485;
+  private _membranePotential: number = -70;
+  private _transportEfficiency: number = 0;
 
-  constructor(data: ActiveTransportData) {
-    this._data = { ...data };
+  registerPump(record: TransportRecord): void {
+    this._records.set(record.id, record);
   }
 
-  get transporterId(): string {
-    return this._data.transporterId;
-  }
-
-  get atpReserve(): number {
-    return this._data.atpReserve;
-  }
-
-  get gradientDirection(): 'inbound' | 'outbound' | 'equilibrium' {
-    if (this._data.concentrationIn > this._data.concentrationOut) {
-      return 'outbound';
-    }
-    if (this._data.concentrationIn < this._data.concentrationOut) {
-      return 'inbound';
-    }
-    return 'equilibrium';
-  }
-
-  public pump(cycles: number): TransportCycle[] {
-    const results: TransportCycle[] = [];
-    for (let i = 0; i < cycles; i++) {
-      const cycle = this._executeSinglePump();
-      results.push(cycle);
-      if (!cycle.successful) {
-        break;
-      }
-    }
-    return results;
-  }
-
-  private _executeSinglePump(): TransportCycle {
-    const energyPerCycle = 1;
-    if (this._data.atpReserve < energyPerCycle) {
-      return { cargoMoved: 0, energySpent: 0, againstGradient: false, successful: false };
-    }
-    const againstGradient = this._data.concentrationIn < this._data.concentrationOut;
-    const efficiency = againstGradient ? 0.6 : 0.9;
-    const cargoMoved = this._data.pumpRate * efficiency * (1 - this._carrierSaturation);
-    this._data.atpReserve -= energyPerCycle;
-    this._data.concentrationIn += cargoMoved * 0.1;
-    this._data.concentrationOut -= cargoMoved * 0.1;
-    this._carrierSaturation = Math.min(1, this._carrierSaturation + 0.05);
-    this._totalTransported += cargoMoved;
-    this._totalEnergySpent += energyPerCycle;
-    const cycle: TransportCycle = {
-      cargoMoved,
-      energySpent: energyPerCycle,
-      againstGradient,
-      successful: true,
+  pump(recordId: string, dt: number = 1): TransportEvent | null {
+    const record = this._records.get(recordId);
+    if (!record) return null;
+    const km = 5;
+    const vMax = this._maxPumpRate;
+    const substrateAvailable = record.concentrationOutside;
+    const velocity = (vMax * substrateAvailable) / (km + substrateAvailable);
+    const moleculesMoved = Math.min(velocity * dt, record.atpAvailable / this._atpCostPerMolecule);
+    const atpConsumed = moleculesMoved * this._atpCostPerMolecule;
+    if (atpConsumed > record.atpAvailable) return null;
+    record.atpAvailable -= atpConsumed;
+    record.concentrationInside += moleculesMoved * 0.01;
+    record.concentrationOutside -= moleculesMoved * 0.01;
+    const gradient = this._computeElectrochemicalGradient(record);
+    const event: TransportEvent = {
+      recordId,
+      moleculesMoved,
+      atpConsumed,
+      electrochemicalGradient: gradient,
+      timestamp: Date.now(),
     };
-    this._cycles.push(cycle);
-    if (this._cycles.length > 40) {
-      this._cycles.shift();
-    }
-    return cycle;
+    this._events.push(event);
+    if (this._events.length > 200) this._events.shift();
+    this._updateEfficiency();
+    return event;
   }
 
-  public replenishATP(amount: number): void {
-    this._data.atpReserve += amount;
+  private _computeElectrochemicalGradient(record: TransportRecord): number {
+    const valence = 1;
+    const deltaC = record.concentrationOutside - record.concentrationInside;
+    const chemical = this._gasConstant() * this._temperature() * Math.log(record.concentrationOutside / (record.concentrationInside + 1e-9));
+    const electrical = valence * this._faradayConstant * this._membranePotential;
+    return deltaC * (chemical + electrical);
   }
 
-  public recoverCarriers(): void {
-    this._carrierSaturation = Math.max(0, this._carrierSaturation - 0.3);
+  private _gasConstant(): number {
+    return 8.314;
   }
 
-  public adjustPumpRate(factor: number): void {
-    this._data.pumpRate = Math.max(0, this._data.pumpRate * factor);
+  private _temperature(): number {
+    return 310;
   }
 
-  public computeEfficiency(): number {
-    if (this._totalEnergySpent === 0) {
-      return 0;
-    }
-    return this._totalTransported / this._totalEnergySpent;
+  private _updateEfficiency(): void {
+    if (this._events.length === 0) return;
+    const recent = this._events.slice(-20);
+    const totalMoved = recent.reduce((s, e) => s + e.moleculesMoved, 0);
+    const totalAtp = recent.reduce((s, e) => s + e.atpConsumed, 0);
+    this._transportEfficiency = totalAtp > 0 ? totalMoved / totalAtp : 0;
   }
 
-  public isBalanced(): boolean {
-    const ratio = this._data.concentrationIn / (this._data.concentrationOut + 0.001);
-    return ratio > 0.9 && ratio < 1.1;
+  getRecord(id: string): TransportRecord | null {
+    return this._records.get(id) ?? null;
   }
 
-  public transportReport(): Record<string, unknown> {
+  totalMoleculesMoved(): number {
+    return this._events.reduce((s, e) => s + e.moleculesMoved, 0);
+  }
+
+  totalAtpConsumed(): number {
+    return this._events.reduce((s, e) => s + e.atpConsumed, 0);
+  }
+
+  averageGradient(): number {
+    if (this._events.length === 0) return 0;
+    return this._events.reduce((s, e) => s + e.electrochemicalGradient, 0) / this._events.length;
+  }
+
+  setMaxPumpRate(rate: number): void {
+    this._maxPumpRate = Math.max(0, rate);
+  }
+
+  setAtpCost(cost: number): void {
+    this._atpCostPerMolecule = Math.max(0.1, cost);
+  }
+
+  setMembranePotential(potential: number): void {
+    this._membranePotential = potential;
+  }
+
+  get transportEfficiency(): number {
+    return this._transportEfficiency;
+  }
+
+  get eventCount(): number {
+    return this._events.length;
+  }
+
+  transportReport(): Record<string, unknown> {
     return {
-      transporterId: this.transporterId,
-      cargoType: this._data.cargoType,
-      atpReserve: this._data.atpReserve.toFixed(2),
-      pumpRate: this._data.pumpRate.toFixed(3),
-      gradientDirection: this.gradientDirection,
-      concentrationIn: this._data.concentrationIn.toFixed(2),
-      concentrationOut: this._data.concentrationOut.toFixed(2),
-      totalTransported: this._totalTransported.toFixed(2),
-      totalEnergySpent: this._totalEnergySpent.toFixed(2),
-      efficiency: this.computeEfficiency().toFixed(3),
-      carrierSaturation: this._carrierSaturation.toFixed(3),
-      balanced: this.isBalanced(),
+      pumpCount: this._records.size,
+      eventCount: this._events.length,
+      totalMoleculesMoved: this.totalMoleculesMoved().toFixed(2),
+      totalAtpConsumed: this.totalAtpConsumed().toFixed(2),
+      averageGradient: this.averageGradient().toFixed(4),
+      transportEfficiency: this._transportEfficiency.toFixed(4),
+      membranePotential: this._membranePotential.toFixed(2),
+      state: this._state,
     };
   }
 }

@@ -1,115 +1,145 @@
-/**
- * TensionVector - 张力向量
- * 内部张力场的指向，描述系统中各点承受的拉伸/压缩应力，
- * 张力梯度驱动结构的形变与重组。
- */
-
-export interface TensionVectorData {
-  readonly vectorId: string;
-  magnitude: number;
+export interface VectorComponent {
   direction: number;
-  anchorPoint: number[];
+  magnitude: number;
+  origin: string;
 }
 
-export interface TensionReading {
-  point: number[];
-  tension: number;
-  direction: number;
+export type TensionResult = {
+  netX: number;
+  netY: number;
+  totalMagnitude: number;
+  equilibrium: boolean;
+};
+
+export interface TensionConfig {
+  maxVectors: number;
+  equilibriumThreshold: number;
+  damping: number;
 }
 
 export class TensionVector {
-  private _data: TensionVectorData;
-  private _readings: TensionReading[] = [];
-  private _strainAccumulator: number = 0;
-  private _yieldPoint: number = 100;
-  private _fractured: boolean = false;
+  private _config: TensionConfig;
+  private _vectors: VectorComponent[] = [];
+  private _result: TensionResult | null = null;
+  private _state: Record<string, unknown> = {};
+  private _stressTensor: number[][] = [[0, 0], [0, 0]];
+  private _principalStresses: number[] = [];
+  private _vonMisesStress: number = 0;
 
-  constructor(data: TensionVectorData) {
-    this._data = { ...data, anchorPoint: [...data.anchorPoint] };
+  constructor(config: TensionConfig) {
+    this._config = config;
   }
 
-  get vectorId(): string {
-    return this._data.vectorId;
+  get vectorCount(): number {
+    return this._vectors.length;
   }
 
-  get magnitude(): number {
-    return this._data.magnitude;
+  get vonMisesStress(): number {
+    return this._vonMisesStress;
   }
 
-  get direction(): number {
-    return this._data.direction;
+  get principalStresses(): readonly number[] {
+    return this._principalStresses;
   }
 
-  get fractured(): boolean {
-    return this._fractured;
-  }
-
-  public applyForce(force: number, angle: number): number {
-    if (this._fractured) {
-      return 0;
+  private _updateStressTensor(): void {
+    this._stressTensor = [[0, 0], [0, 0]];
+    for (const v of this._vectors) {
+      const fx = v.magnitude * Math.cos(v.direction);
+      const fy = v.magnitude * Math.sin(v.direction);
+      this._stressTensor[0][0] += fx * fx;
+      this._stressTensor[0][1] += fx * fy;
+      this._stressTensor[1][0] += fy * fx;
+      this._stressTensor[1][1] += fy * fy;
     }
-    const projected = force * Math.cos(angle - this._data.direction);
-    this._data.magnitude += projected;
-    this._strainAccumulator += Math.abs(projected);
-    if (this._strainAccumulator > this._yieldPoint) {
-      this._fractured = true;
+    const trace = this._stressTensor[0][0] + this._stressTensor[1][1];
+    const det = this._stressTensor[0][0] * this._stressTensor[1][1] - this._stressTensor[0][1] * this._stressTensor[1][0];
+    const discriminant = Math.sqrt(trace * trace - 4 * det);
+    this._principalStresses = [(trace + discriminant) / 2, (trace - discriminant) / 2];
+    const s1 = this._principalStresses[0];
+    const s2 = this._principalStresses[1];
+    this._vonMisesStress = Math.sqrt(s1 * s1 - s1 * s2 + s2 * s2);
+  }
+
+  addVector(direction: number, magnitude: number, origin: string): VectorComponent {
+    const vector: VectorComponent = { direction, magnitude, origin };
+    this._vectors.push(vector);
+    if (this._vectors.length > this._config.maxVectors) {
+      this._vectors.shift();
     }
-    return this._data.magnitude;
+    this._updateStressTensor();
+    return vector;
   }
 
-  public measureAt(point: number[]): TensionReading {
-    const dx = point[0] - this._data.anchorPoint[0];
-    const dy = (point[1] ?? 0) - (this._data.anchorPoint[1] ?? 0);
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const tension = this._data.magnitude / (distance + 1);
-    const direction = Math.atan2(dy, dx);
-    const reading: TensionReading = { point: [...point], tension, direction };
-    this._readings.push(reading);
-    if (this._readings.length > 30) {
-      this._readings.shift();
+  computeResult(): TensionResult {
+    let netX = 0;
+    let netY = 0;
+    for (const v of this._vectors) {
+      netX += v.magnitude * Math.cos(v.direction);
+      netY += v.magnitude * Math.sin(v.direction);
     }
-    return reading;
+    const totalMagnitude = Math.sqrt(netX * netX + netY * netY);
+    const equilibrium = totalMagnitude < this._config.equilibriumThreshold;
+    this._result = { netX, netY, totalMagnitude, equilibrium };
+    return this._result;
   }
 
-  public rotate(deltaAngle: number): void {
-    this._data.direction = (this._data.direction + deltaAngle) % (2 * Math.PI);
+  isEquilibrium(): boolean {
+    return this.computeResult().equilibrium;
   }
 
-  public relax(amount: number): void {
-    this._data.magnitude = Math.max(0, this._data.magnitude - amount);
-    this._strainAccumulator = Math.max(0, this._strainAccumulator - amount * 0.5);
+  damp(factor: number): void {
+    for (const v of this._vectors) {
+      v.magnitude *= factor * this._config.damping;
+    }
+    this._updateStressTensor();
   }
 
-  public setYieldPoint(point: number): void {
-    this._yieldPoint = Math.max(0, point);
+  dominantVector(): VectorComponent | null {
+    if (this._vectors.length === 0) return null;
+    return this._vectors.reduce((best, v) => (v.magnitude > best.magnitude ? v : best));
   }
 
-  public moveTo(newAnchor: number[]): void {
-    this._data.anchorPoint = [...newAnchor];
+  opposingPairs(): [VectorComponent, VectorComponent][] {
+    const pairs: [VectorComponent, VectorComponent][] = [];
+    for (let i = 0; i < this._vectors.length; i++) {
+      for (let j = i + 1; j < this._vectors.length; j++) {
+        const diff = Math.abs(this._vectors[i].direction - this._vectors[j].direction);
+        if (Math.abs(diff - Math.PI) < 0.2) {
+          pairs.push([this._vectors[i], this._vectors[j]]);
+        }
+      }
+    }
+    return pairs;
   }
 
-  public resolve(): number {
-    const resolved = this._data.magnitude;
-    this._data.magnitude = 0;
-    this._strainAccumulator = 0;
-    this._fractured = false;
-    return resolved;
+  computeStrainEnergy(): number {
+    if (this._principalStresses.length < 2) return 0;
+    const e = 1;
+    const nu = 0.3;
+    const s1 = this._principalStresses[0];
+    const s2 = this._principalStresses[1];
+    return (1 / (2 * e)) * (s1 * s1 + s2 * s2 - 2 * nu * s1 * s2);
   }
 
-  public computeStressField(points: number[][]): TensionReading[] {
-    return points.map((p) => this.measureAt(p));
+  reset(): void {
+    this._vectors = [];
+    this._result = null;
+    this._stressTensor = [[0, 0], [0, 0]];
+    this._principalStresses = [];
+    this._vonMisesStress = 0;
+    this._state = {};
   }
 
-  public tensionReport(): Record<string, unknown> {
+  report(): Record<string, unknown> {
     return {
-      vectorId: this.vectorId,
-      magnitude: this._data.magnitude.toFixed(3),
-      direction: this._data.direction.toFixed(3),
-      anchorPoint: this._data.anchorPoint.map((v) => v.toFixed(2)),
-      strainAccumulator: this._strainAccumulator.toFixed(2),
-      yieldPoint: this._yieldPoint,
-      fractured: this._fractured,
-      readingCount: this._readings.length,
+      vectors: this._vectors.length,
+      equilibrium: this.isEquilibrium(),
+      result: this._result,
+      state: this._state,
+      vonMisesStress: this._vonMisesStress.toFixed(4),
+      principalStresses: this._principalStresses.map((s) => s.toFixed(4)),
+      strainEnergy: this.computeStrainEnergy().toFixed(4),
     };
   }
 }

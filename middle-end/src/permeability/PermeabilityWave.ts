@@ -1,128 +1,134 @@
-/**
- * PermeabilityWave - 通透性波
- * 通透度随时间周期性变化，形成波动的边界状态，使系统
- * 在不同时刻表现出不同的开放/封闭特性。
- */
-
-export interface PermeabilityWaveData {
-  readonly waveId: string;
+export interface Wavefront {
+  position: number;
   amplitude: number;
   frequency: number;
-  basePermeability: number;
   phase: number;
+  envelope: number;
 }
 
-export interface WaveSample {
-  time: number;
-  permeability: number;
-  state: 'open' | 'closed' | 'transitional';
+export interface PermeabilityResult {
+  position: number;
+  transmission: number;
+  reflection: number;
+  absorption: number;
+  phaseShift: number;
 }
 
 export class PermeabilityWave {
-  private _data: PermeabilityWaveData;
-  private _samples: WaveSample[] = [];
-  private _currentPermeability: number;
-  private _waveCycles: number = 0;
+  private _wavefronts: Wavefront[] = [];
+  private _barrierPosition: number = 0.5;
+  private _barrierImpedance: number = 1;
+  private _results: PermeabilityResult[] = [];
+  private _fftCache: { real: number[]; imag: number[] } | null = null;
 
-  constructor(data: PermeabilityWaveData) {
-    this._data = { ...data };
-    this._currentPermeability = data.basePermeability;
-  }
-
-  get waveId(): string {
-    return this._data.waveId;
-  }
-
-  get currentPermeability(): number {
-    return this._currentPermeability;
-  }
-
-  get amplitude(): number {
-    return this._data.amplitude;
-  }
-
-  get frequency(): number {
-    return this._data.frequency;
-  }
-
-  public sample(time: number): WaveSample {
-    const wave = Math.sin(2 * Math.PI * this._data.frequency * time + this._data.phase);
-    const permeability = Math.max(
-      0,
-      Math.min(1, this._data.basePermeability + wave * this._data.amplitude)
-    );
-    this._currentPermeability = permeability;
-    let state: 'open' | 'closed' | 'transitional';
-    if (permeability > 0.7) {
-      state = 'open';
-    } else if (permeability < 0.3) {
-      state = 'closed';
-    } else {
-      state = 'transitional';
+  constructor(wavefrontCount: number) {
+    for (let i = 0; i < wavefrontCount; i++) {
+      this._wavefronts.push({
+        position: i / wavefrontCount,
+        amplitude: Math.random(),
+        frequency: 1 + i * 0.5,
+        phase: Math.random() * Math.PI * 2,
+        envelope: Math.exp(-i * 0.1),
+      });
     }
-    const sample: WaveSample = { time, permeability, state };
-    this._samples.push(sample);
-    if (this._samples.length > 100) {
-      this._samples.shift();
-    }
-    if (this._samples.length > 1) {
-      const prev = this._samples[this._samples.length - 2];
-      if (prev.state === 'open' && state === 'closed') {
-        this._waveCycles++;
+  }
+
+  get waveCount(): number {
+    return this._wavefronts.length;
+  }
+
+  get barrierPosition(): number {
+    return this._barrierPosition;
+  }
+
+  setBarrier(position: number, impedance: number): void {
+    this._barrierPosition = position;
+    this._barrierImpedance = impedance;
+  }
+
+  propagate(time: number): PermeabilityResult[] {
+    this._results = [];
+    for (const wave of this._wavefronts) {
+      const newPos = wave.position + wave.frequency * 0.01 * time;
+      wave.position = newPos % 1;
+      if (newPos >= this._barrierPosition) {
+        const z1 = 1;
+        const z2 = this._barrierImpedance;
+        const reflectionCoeff = (z2 - z1) / (z2 + z1);
+        const transmissionCoeff = (2 * z2) / (z2 + z1);
+        const transmission = Math.abs(transmissionCoeff) * wave.amplitude * wave.envelope;
+        const reflection = Math.abs(reflectionCoeff) * wave.amplitude * wave.envelope;
+        const absorption = 1 - transmission - reflection;
+        const phaseShift = Math.atan2(z1, z2);
+        this._results.push({
+          position: wave.position,
+          transmission,
+          reflection,
+          absorption: Math.max(0, absorption),
+          phaseShift,
+        });
       }
     }
-    return sample;
+    return this._results;
   }
 
-  public allowPassage(time: number, threshold: number): boolean {
-    const sample = this.sample(time);
-    return sample.permeability >= threshold;
-  }
-
-  public adjustAmplitude(delta: number): void {
-    this._data.amplitude = Math.max(0, Math.min(0.5, this._data.amplitude + delta));
-  }
-
-  public shiftPhase(delta: number): void {
-    this._data.phase = (this._data.phase + delta) % (2 * Math.PI);
-  }
-
-  public retuneFrequency(newFrequency: number): void {
-    this._data.frequency = Math.max(0.01, newFrequency);
-  }
-
-  public findPeakTimes(): number[] {
-    const peaks: number[] = [];
-    for (let i = 1; i < this._samples.length - 1; i++) {
-      const prev = this._samples[i - 1].permeability;
-      const curr = this._samples[i].permeability;
-      const next = this._samples[i + 1].permeability;
-      if (curr > prev && curr > next) {
-        peaks.push(this._samples[i].time);
-      }
+  spectralDecomposition(): { frequency: number[]; amplitude: number[] } {
+    const frequencies: number[] = [];
+    const amplitudes: number[] = [];
+    for (const wave of this._wavefronts) {
+      frequencies.push(wave.frequency);
+      amplitudes.push(wave.amplitude);
     }
-    return peaks;
+    return { frequency: frequencies, amplitude: amplitudes };
   }
 
-  public averagePermeability(): number {
-    if (this._samples.length === 0) {
-      return this._data.basePermeability;
+  envelopeDetection(): number {
+    return this._wavefronts.reduce((acc, w) => acc + Math.abs(w.amplitude * w.envelope), 0);
+  }
+
+  phaseLockLoop(targetPhase: number): number {
+    let error = 0;
+    for (const wave of this._wavefronts) {
+      error += Math.sin(targetPhase - wave.phase);
+      wave.phase += 0.1 * Math.sin(targetPhase - wave.phase);
     }
-    const sum = this._samples.reduce((s, sm) => s + sm.permeability, 0);
-    return sum / this._samples.length;
+    return error / (this._wavefronts.length || 1);
   }
 
-  public waveReport(): Record<string, unknown> {
+  computeFFT(): { real: number[]; imag: number[] } {
+    const n = this._wavefronts.length;
+    const real = this._wavefronts.map((w) => w.amplitude * Math.cos(w.phase));
+    const imag = this._wavefronts.map((w) => w.amplitude * Math.sin(w.phase));
+    this._fftCache = { real: [...real], imag: [...imag] };
+    return this._fftCache;
+  }
+
+  totalTransmission(): number {
+    return this._results.reduce((s, r) => s + r.transmission, 0);
+  }
+
+  totalReflection(): number {
+    return this._results.reduce((s, r) => s + r.reflection, 0);
+  }
+
+  coherenceLength(): number {
+    if (this._wavefronts.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < this._wavefronts.length; i++) {
+      sum += Math.abs(this._wavefronts[i].position - this._wavefronts[i - 1].position);
+    }
+    return sum / (this._wavefronts.length - 1);
+  }
+
+  report(): Record<string, unknown> {
     return {
-      waveId: this.waveId,
-      amplitude: this._data.amplitude.toFixed(3),
-      frequency: this._data.frequency.toFixed(3),
-      basePermeability: this._data.basePermeability.toFixed(3),
-      phase: this._data.phase.toFixed(3),
-      currentPermeability: this._currentPermeability.toFixed(3),
-      waveCycles: this._waveCycles,
-      sampleCount: this._samples.length,
-      averagePermeability: this.averagePermeability().toFixed(3),
+      waves: this._wavefronts.length,
+      barrier: this._barrierPosition,
+      impedance: this._barrierImpedance,
+      results: this._results.length,
+      transmission: this.totalTransmission(),
+      reflection: this.totalReflection(),
+      coherence: this.coherenceLength(),
     };
   }
 }

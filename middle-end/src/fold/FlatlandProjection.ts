@@ -1,113 +1,130 @@
-/**
- * 平国投影：将多维数据投影到二维表面。
- * 将高维数据结构投影到二维平面，损失部分维度信息但获得可视化与可比较的二维表示。
- */
-
-export type ProjectionMode = 'orthographic' | 'stereographic' | 'polar' | 'isometric';
-
-export interface ProjectionPlane {
-  width: number;
-  height: number;
-  mode: ProjectionMode;
-}
-
 export interface ProjectedPoint {
   x: number;
   y: number;
-  originalDimension: number;
-  preservedMagnitude: number;
+  originalZ: number;
+  distortion: number;
 }
 
-export interface ProjectionResult {
-  id: string;
-  plane: ProjectionPlane;
-  points: ProjectedPoint[];
-  fidelity: number;
-  createdAt: number;
+export type ProjectionBounds = {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+};
+
+export interface FlatlandConfig {
+  focalLength: number;
+  vanishingX: number;
+  vanishingY: number;
+  perspective: boolean;
 }
 
 export class FlatlandProjection {
-  private _results: ProjectionResult[] = [];
-  private _defaultPlane: ProjectionPlane = { width: 100, height: 100, mode: 'orthographic' };
+  private _config: FlatlandConfig;
+  private _points: ProjectedPoint[] = [];
+  private _bounds: ProjectionBounds | null = null;
+  private _state: Record<string, unknown> = {};
+  private _homographyMatrix: number[][] = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  private _vanishingPoint: [number, number] = [0, 0];
 
-  project(data: number[][], plane?: Partial<ProjectionPlane>): ProjectionResult {
-    const activePlane: ProjectionPlane = { ...this._defaultPlane, ...plane };
-    const points: ProjectedPoint[] = data.map((row, i) =>
-      this._projectRow(row, activePlane, i)
-    );
-    const fidelity = this._computeFidelity(data, points);
+  constructor(config: FlatlandConfig) {
+    this._config = config;
+  }
 
-    const result: ProjectionResult = {
-      id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      plane: activePlane,
-      points,
-      fidelity,
-      createdAt: Date.now(),
+  get pointCount(): number {
+    return this._points.length;
+  }
+
+  get averageDistortion(): number {
+    if (this._points.length === 0) return 0;
+    return this._points.reduce((acc, p) => acc + p.distortion, 0) / this._points.length;
+  }
+
+  private _applyHomography(x: number, y: number, z: number): [number, number] {
+    const H = this._homographyMatrix;
+    const w = H[2][0] * x + H[2][1] * y + H[2][2] * z + 0.001;
+    const px = (H[0][0] * x + H[0][1] * y + H[0][2] * z) / w;
+    const py = (H[1][0] * x + H[1][1] * y + H[1][2] * z) / w;
+    return [px, py];
+  }
+
+  private _computeDistortion(z: number): number {
+    return z / (this._config.focalLength + Math.abs(z));
+  }
+
+  project(x: number, y: number, z: number): ProjectedPoint {
+    let px = x;
+    let py = y;
+    if (this._config.perspective) {
+      const scale = this._config.focalLength / (this._config.focalLength + z);
+      px = this._config.vanishingX + (x - this._config.vanishingX) * scale;
+      py = this._config.vanishingY + (y - this._config.vanishingY) * scale;
+    }
+    const [hx, hy] = this._applyHomography(px, py, z);
+    const distortion = this._computeDistortion(z);
+    const point: ProjectedPoint = { x: hx, y: hy, originalZ: z, distortion };
+    this._points.push(point);
+    if (this._points.length > 100) this._points.shift();
+    this._state.lastProjected = { x, y, z };
+    return point;
+  }
+
+  computeBounds(): ProjectionBounds {
+    if (this._points.length === 0) {
+      return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    }
+    const xs = this._points.map((p) => p.x);
+    const ys = this._points.map((p) => p.y);
+    this._bounds = {
+      minX: Math.min(...xs),
+      maxX: Math.max(...xs),
+      minY: Math.min(...ys),
+      maxY: Math.max(...ys),
     };
-    this._results.push(result);
-    if (this._results.length > 100) this._results.shift();
+    return this._bounds;
+  }
+
+  setHomography(matrix: number[][]): void {
+    if (matrix.length === 3 && matrix[0].length === 3) {
+      this._homographyMatrix = matrix.map((row) => [...row]);
+    }
+  }
+
+  vanishingLine(angle: number): ProjectedPoint[] {
+    const result: ProjectedPoint[] = [];
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    for (let t = -10; t <= 10; t += 0.5) {
+      const x = this._config.vanishingX + t * cos;
+      const y = this._config.vanishingY + t * sin;
+      result.push({ x, y, originalZ: 0, distortion: 0 });
+    }
     return result;
   }
 
-  private _projectRow(row: number[], plane: ProjectionPlane, index: number): ProjectedPoint {
-    const cx = plane.width / 2;
-    const cy = plane.height / 2;
-    let x = cx;
-    let y = cy;
-    let preserved = 0;
-
-    switch (plane.mode) {
-      case 'orthographic': {
-        x = cx + (row[0] ?? 0) * 10;
-        y = cy + (row[1] ?? 0) * 10;
-        preserved = Math.min(2, row.length) / row.length;
-        break;
-      }
-      case 'stereographic': {
-        const r = Math.sqrt(row.reduce((s, v) => s + v * v, 0));
-        const theta = Math.atan2(row[1] ?? 0, row[0] ?? 1);
-        x = cx + r * Math.cos(theta) * 10;
-        y = cy + r * Math.sin(theta) * 10;
-        preserved = 1 / Math.max(1, row.length - 1);
-        break;
-      }
-      case 'polar': {
-        const r = row[0] ?? 0;
-        const theta = (index / Math.max(1, row.length)) * 2 * Math.PI;
-        x = cx + r * Math.cos(theta) * 10;
-        y = cy + r * Math.sin(theta) * 10;
-        preserved = 1 / row.length;
-        break;
-      }
-      case 'isometric': {
-        x = cx + ((row[0] ?? 0) - (row[1] ?? 0)) * 10;
-        y = cy + ((row[0] ?? 0) + (row[1] ?? 0)) / 2 * 10;
-        preserved = Math.min(2, row.length) / row.length;
-        break;
-      }
-    }
-
-    return { x, y, originalDimension: row.length, preservedMagnitude: preserved };
+  depthSort(): ProjectedPoint[] {
+    return [...this._points].sort((a, b) => b.originalZ - a.originalZ);
   }
 
-  private _computeFidelity(data: number[][], points: ProjectedPoint[]): number {
-    if (points.length === 0) return 0;
-    return points.reduce((s, p) => s + p.preservedMagnitude, 0) / points.length;
+  isDegenerate(): boolean {
+    const bounds = this.computeBounds();
+    return bounds.maxX - bounds.minX < 0.001 || bounds.maxY - bounds.minY < 0.001;
   }
 
-  setDefaultPlane(plane: Partial<ProjectionPlane>): void {
-    this._defaultPlane = { ...this._defaultPlane, ...plane };
+  reset(): void {
+    this._points = [];
+    this._bounds = null;
+    this._homographyMatrix = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    this._state = {};
   }
 
-  getResults(): ProjectionResult[] {
-    return [...this._results];
-  }
-
-  getResult(id: string): ProjectionResult | null {
-    return this._results.find(r => r.id === id) ?? null;
-  }
-
-  get resultCount(): number {
-    return this._results.length;
+  report(): Record<string, unknown> {
+    return {
+      points: this._points.length,
+      bounds: this._bounds,
+      averageDistortion: this.averageDistortion.toFixed(4),
+      state: this._state,
+      degenerate: this.isDegenerate(),
+    };
   }
 }

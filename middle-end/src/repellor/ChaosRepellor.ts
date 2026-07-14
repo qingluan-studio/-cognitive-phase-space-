@@ -1,123 +1,149 @@
-/**
- * ChaosRepellor - 混沌排斥子
- * 将系统状态推离混沌区域，作为混沌吸引子的对立面，
- * 防止系统坠入不可预测的混沌深渊。
- */
-
-export interface ChaosRepellorData {
-  readonly repellorId: string;
-  chaosCenter: { x: number; y: number };
-  repulsionStrength: number;
-  influenceRadius: number;
+export interface PhasePoint {
+  x: number;
+  y: number;
+  z: number;
+  time: number;
 }
 
-export interface RepulsionEffect {
-  position: { x: number; y: number };
-  force: { x: number; y: number };
-  magnitude: number;
-  withinRange: boolean;
+export interface RepellorParameters {
+  sigma: number;
+  rho: number;
+  beta: number;
+  dt: number;
 }
 
 export class ChaosRepellor {
-  private _data: ChaosRepellorData;
-  private _effects: RepulsionEffect[] = [];
-  private _repelledCount: number = 0;
-  private _avgDistance: number = 0;
-  private _intensity: number = 1;
+  private _params: RepellorParameters;
+  private _trajectory: PhasePoint[] = [];
+  private _state: Record<string, unknown> = {};
+  private _lyapunovExponent: number = 0;
+  private _fractalDimension: number = 0;
+  private _entropyRate: number = 0;
 
-  constructor(data: ChaosRepellorData) {
-    this._data = { ...data, chaosCenter: { ...data.chaosCenter } };
+  constructor(params: RepellorParameters) {
+    this._params = { ...params };
   }
 
-  get repellorId(): string {
-    return this._data.repellorId;
+  get trajectoryLength(): number {
+    return this._trajectory.length;
   }
 
-  get repulsionStrength(): number {
-    return this._data.repulsionStrength;
+  get lyapunovExponent(): number {
+    return this._lyapunovExponent;
   }
 
-  get influenceRadius(): number {
-    return this._data.influenceRadius;
-  }
-
-  public repel(position: { x: number; y: number }): RepulsionEffect {
-    const dx = position.x - this._data.chaosCenter.x;
-    const dy = position.y - this._data.chaosCenter.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    const withinRange = distance <= this._data.influenceRadius;
-    let force = { x: 0, y: 0 };
-    let magnitude = 0;
-    if (withinRange && distance > 0) {
-      const falloff = 1 - distance / this._data.influenceRadius;
-      magnitude = this._data.repulsionStrength * falloff * this._intensity;
-      force = { x: (dx / distance) * magnitude, y: (dy / distance) * magnitude };
-      this._repelledCount++;
-      this._avgDistance = this._avgDistance * 0.9 + distance * 0.1;
+  iterate(steps: number, start: { x: number; y: number; z: number }): PhasePoint[] {
+    let { x, y, z } = start;
+    const result: PhasePoint[] = [];
+    for (let i = 0; i < steps; i++) {
+      const dx = this._params.sigma * (y - x);
+      const dy = x * (this._params.rho - z) - y;
+      const dz = x * y - this._params.beta * z;
+      x += dx * this._params.dt;
+      y += dy * this._params.dt;
+      z += dz * this._params.dt;
+      const point: PhasePoint = { x, y, z, time: i * this._params.dt };
+      result.push(point);
+      this._trajectory.push(point);
     }
-    const effect: RepulsionEffect = {
-      position: { ...position },
-      force,
-      magnitude,
-      withinRange,
-    };
-    this._effects.push(effect);
-    if (this._effects.length > 50) {
-      this._effects.shift();
+    if (this._trajectory.length > 2000) {
+      this._trajectory.splice(0, this._trajectory.length - 2000);
     }
-    return effect;
+    this._computeLyapunov();
+    this._computeFractalDimension();
+    this._computeEntropyRate();
+    return result;
   }
 
-  public applyTo(position: { x: number; y: number }): { x: number; y: number } {
-    const effect = this.repel(position);
+  private _computeLyapunov(): void {
+    if (this._trajectory.length < 10) return;
+    let sum = 0;
+    for (let i = 1; i < this._trajectory.length; i++) {
+      const d0 = Math.sqrt(
+        Math.pow(this._trajectory[i - 1].x - this._trajectory[0].x, 2) +
+          Math.pow(this._trajectory[i - 1].y - this._trajectory[0].y, 2) +
+          Math.pow(this._trajectory[i - 1].z - this._trajectory[0].z, 2)
+      );
+      const d1 = Math.sqrt(
+        Math.pow(this._trajectory[i].x - this._trajectory[0].x, 2) +
+          Math.pow(this._trajectory[i].y - this._trajectory[0].y, 2) +
+          Math.pow(this._trajectory[i].z - this._trajectory[0].z, 2)
+      );
+      if (d0 > 0) sum += Math.log2(d1 / d0);
+    }
+    this._lyapunovExponent = sum / (this._trajectory.length * this._params.dt);
+  }
+
+  private _computeFractalDimension(): void {
+    const n = this._trajectory.length;
+    if (n < 10) return;
+    const scales = [1, 2, 4, 8];
+    const counts = scales.map((s) => {
+      const boxes = new Set<string>();
+      for (const p of this._trajectory) {
+        boxes.add(`${Math.floor(p.x / s)},${Math.floor(p.y / s)},${Math.floor(p.z / s)}`);
+      }
+      return boxes.size;
+    });
+    let slope = 0;
+    for (let i = 1; i < scales.length; i++) {
+      slope += Math.log2(counts[i] / counts[i - 1]) / Math.log2(scales[i - 1] / scales[i]);
+    }
+    this._fractalDimension = slope / (scales.length - 1);
+  }
+
+  private _computeEntropyRate(): void {
+    if (this._trajectory.length < 2) return;
+    const diffs = [];
+    for (let i = 1; i < this._trajectory.length; i++) {
+      diffs.push(
+        Math.sqrt(
+          Math.pow(this._trajectory[i].x - this._trajectory[i - 1].x, 2) +
+            Math.pow(this._trajectory[i].y - this._trajectory[i - 1].y, 2) +
+            Math.pow(this._trajectory[i].z - this._trajectory[i - 1].z, 2)
+        )
+      );
+    }
+    const total = diffs.reduce((s, v) => s + v, 0);
+    this._entropyRate = -diffs.reduce((s, v) => {
+      const p = v / total;
+      return p > 0 ? s + p * Math.log2(p) : s;
+    }, 0);
+  }
+
+  attractorCenter(): { x: number; y: number; z: number } {
+    if (this._trajectory.length === 0) return { x: 0, y: 0, z: 0 };
+    const sum = this._trajectory.reduce(
+      (acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y, z: acc.z + p.z }),
+      { x: 0, y: 0, z: 0 }
+    );
+    return { x: sum.x / this._trajectory.length, y: sum.y / this._trajectory.length, z: sum.z / this._trajectory.length };
+  }
+
+  isChaotic(): boolean {
+    return this._lyapunovExponent > 0;
+  }
+
+  periodDoublingBifurcation(rhoStart: number, rhoEnd: number, steps: number): { rho: number; lyapunov: number }[] {
+    const result: { rho: number; lyapunov: number }[] = [];
+    const saved = this._params.rho;
+    for (let i = 0; i < steps; i++) {
+      this._params.rho = rhoStart + ((rhoEnd - rhoStart) * i) / (steps - 1);
+      this._trajectory = [];
+      this.iterate(500, { x: 1, y: 1, z: 1 });
+      result.push({ rho: this._params.rho, lyapunov: this._lyapunovExponent });
+    }
+    this._params.rho = saved;
+    return result;
+  }
+
+  report(): Record<string, unknown> {
     return {
-      x: position.x + effect.force.x,
-      y: position.y + effect.force.y,
-    };
-  }
-
-  public strengthenRepulsion(delta: number): void {
-    this._data.repulsionStrength = Math.min(10, this._data.repulsionStrength + delta);
-  }
-
-  public expandRadius(delta: number): void {
-    this._data.influenceRadius = Math.max(0.1, this._data.influenceRadius + delta);
-  }
-
-  public moveChaosCenter(x: number, y: number): void {
-    this._data.chaosCenter = { x, y };
-  }
-
-  public setIntensity(intensity: number): void {
-    this._intensity = Math.max(0, Math.min(2, intensity));
-  }
-
-  public measureEffectiveness(): number {
-    if (this._effects.length === 0) {
-      return 0;
-    }
-    const repelled = this._effects.filter((e) => e.withinRange).length;
-    return repelled / this._effects.length;
-  }
-
-  public isProtecting(position: { x: number; y: number }): boolean {
-    const dx = position.x - this._data.chaosCenter.x;
-    const dy = position.y - this._data.chaosCenter.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    return distance > this._data.influenceRadius;
-  }
-
-  public repellorReport(): Record<string, unknown> {
-    return {
-      repellorId: this.repellorId,
-      chaosCenter: this._data.chaosCenter,
-      repulsionStrength: this._data.repulsionStrength.toFixed(3),
-      influenceRadius: this._data.influenceRadius.toFixed(3),
-      intensity: this._intensity.toFixed(3),
-      repelledCount: this._repelledCount,
-      avgDistance: this._avgDistance.toFixed(3),
-      effectiveness: this.measureEffectiveness().toFixed(3),
-      effectCount: this._effects.length,
+      trajectoryLength: this._trajectory.length,
+      lyapunov: this._lyapunovExponent,
+      fractalDimension: this._fractalDimension,
+      entropyRate: this._entropyRate,
+      state: this._state,
     };
   }
 }

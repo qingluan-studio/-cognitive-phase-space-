@@ -1,9 +1,3 @@
-/**
- * AttractorLandscape - 吸引子景观
- * 多个吸引子在状态空间中的分布，构成一张"景观地图"，
- * 系统根据初始位置落入不同的吸引子盆地。
- */
-
 export interface AttractorLandscapeData {
   readonly landscapeId: string;
   basins: Record<string, { x: number; y: number; strength: number; radius: number }>;
@@ -20,9 +14,14 @@ export class AttractorLandscape {
   private _assignments: BasinAssignment[] = [];
   private _basinBoundaries: Map<string, number> = new Map();
   private _totalPoints: number = 0;
+  private _voronoiCells: Map<string, { x: number; y: number }[]> = new Map();
+  private _entropyHistory: number[] = [];
+  private _adjacencyGraph: Map<string, Set<string>> = new Map();
+  private _basinWeights: Map<string, number> = new Map();
 
   constructor(data: AttractorLandscapeData) {
     this._data = { ...data, basins: { ...data.basins } };
+    this._buildAdjacencyGraph();
   }
 
   get landscapeId(): string {
@@ -33,13 +32,26 @@ export class AttractorLandscape {
     return Object.keys(this._data.basins).length;
   }
 
+  get totalPoints(): number {
+    return this._totalPoints;
+  }
+
+  get entropyHistory(): number[] {
+    return [...this._entropyHistory];
+  }
+
   public addBasin(name: string, x: number, y: number, strength: number, radius: number): void {
     this._data.basins[name] = { x, y, strength, radius };
+    this._basinWeights.set(name, strength * radius);
+    this._buildAdjacencyGraph();
   }
 
   public removeBasin(name: string): void {
     delete this._data.basins[name];
     this._basinBoundaries.delete(name);
+    this._voronoiCells.delete(name);
+    this._basinWeights.delete(name);
+    this._buildAdjacencyGraph();
   }
 
   public assignPoint(x: number, y: number): BasinAssignment {
@@ -73,13 +85,77 @@ export class AttractorLandscape {
     if (this._assignments.length > 100) {
       this._assignments.shift();
     }
+    this._updateEntropy();
     return assignment;
+  }
+
+  private _updateEntropy(): void {
+    const total = this._totalPoints;
+    if (total === 0) return;
+    let entropy = 0;
+    for (const count of this._basinBoundaries.values()) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    this._entropyHistory.push(entropy);
+    if (this._entropyHistory.length > 50) {
+      this._entropyHistory.shift();
+    }
+  }
+
+  private _buildAdjacencyGraph(): void {
+    this._adjacencyGraph.clear();
+    const names = Object.keys(this._data.basins);
+    for (const name of names) {
+      this._adjacencyGraph.set(name, new Set());
+    }
+    for (let i = 0; i < names.length; i++) {
+      for (let j = i + 1; j < names.length; j++) {
+        const a = this._data.basins[names[i]];
+        const b = this._data.basins[names[j]];
+        const dist = Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+        if (dist <= a.radius + b.radius) {
+          this._adjacencyGraph.get(names[i])?.add(names[j]);
+          this._adjacencyGraph.get(names[j])?.add(names[i]);
+        }
+      }
+    }
+  }
+
+  public computeVoronoiCell(basinName: string): { x: number; y: number }[] {
+    const target = this._data.basins[basinName];
+    if (!target) return [];
+    const cell: { x: number; y: number }[] = [];
+    const steps = 36;
+    for (let i = 0; i < steps; i++) {
+      const theta = (i / steps) * 2 * Math.PI;
+      let r = target.radius * 2;
+      for (const [name, basin] of Object.entries(this._data.basins)) {
+        if (name === basinName) continue;
+        const dx = target.x + r * Math.cos(theta) - basin.x;
+        const dy = target.y + r * Math.sin(theta) - basin.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        const bisect = (target.x + basin.x) / 2;
+        const bisectY = (target.y + basin.y) / 2;
+        const distToBisect = Math.sqrt(
+          (target.x + r * Math.cos(theta) - bisect) ** 2 +
+          (target.y + r * Math.sin(theta) - bisectY) ** 2
+        );
+        if (distToBisect < r * 0.5) {
+          r = Math.min(r, Math.sqrt((target.x - basin.x) ** 2 + (target.y - basin.y) ** 2) / 2);
+        }
+      }
+      cell.push({ x: target.x + r * Math.cos(theta), y: target.y + r * Math.sin(theta) });
+    }
+    this._voronoiCells.set(basinName, cell);
+    return cell;
   }
 
   public adjustBasinStrength(name: string, delta: number): void {
     const basin = this._data.basins[name];
     if (basin) {
       basin.strength = Math.max(0, Math.min(1, basin.strength + delta));
+      this._basinWeights.set(name, basin.strength * basin.radius);
     }
   }
 
@@ -87,6 +163,8 @@ export class AttractorLandscape {
     const basin = this._data.basins[name];
     if (basin) {
       basin.radius = Math.max(0.01, newRadius);
+      this._basinWeights.set(name, basin.strength * basin.radius);
+      this._buildAdjacencyGraph();
     }
   }
 
@@ -95,6 +173,7 @@ export class AttractorLandscape {
     if (basin) {
       basin.x = x;
       basin.y = y;
+      this._buildAdjacencyGraph();
     }
   }
 
@@ -117,6 +196,22 @@ export class AttractorLandscape {
     return candidates;
   }
 
+  public computeBasinEntropy(): number {
+    const total = this._totalPoints;
+    if (total === 0) return 0;
+    let entropy = 0;
+    for (const count of this._basinBoundaries.values()) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    return entropy;
+  }
+
+  public getNeighbors(basinName: string): string[] {
+    const set = this._adjacencyGraph.get(basinName);
+    return set ? Array.from(set) : [];
+  }
+
   public landscapeReport(): Record<string, unknown> {
     return {
       landscapeId: this.landscapeId,
@@ -130,6 +225,8 @@ export class AttractorLandscape {
       totalPointsAssigned: this._totalPoints,
       distribution: this.computeBasinDistribution(),
       recentAssignments: this._assignments.length,
+      basinEntropy: this.computeBasinEntropy().toFixed(4),
+      adjacencyPairs: Array.from(this._adjacencyGraph.entries()).map(([k, v]) => [k, Array.from(v)]),
     };
   }
 }

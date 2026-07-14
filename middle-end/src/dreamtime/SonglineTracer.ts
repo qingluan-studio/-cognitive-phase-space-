@@ -1,8 +1,3 @@
-/**
- * 歌之路追踪：沿着歌声路径遍历记忆。
- * 模拟原住民"歌之路"概念，沿歌声路径标识地点与记忆，每个节点同时承载地理与神话意义。
- */
-
 export interface SonglineNode {
   id: string;
   name: string;
@@ -23,10 +18,15 @@ export class SonglineTracer {
   private _results: TraceResult[] = [];
   private _startId: string | null = null;
   private _maxSteps = 1000;
+  private _transitionMatrix: Map<string, Map<string, number>> = new Map();
+  private _stationaryDistribution: Map<string, number> = new Map();
 
   addNode(node: SonglineNode): void {
     this._nodes.set(node.id, node);
     if (this._startId === null) this._startId = node.id;
+    if (!this._transitionMatrix.has(node.id)) {
+      this._transitionMatrix.set(node.id, new Map());
+    }
   }
 
   setStart(id: string): boolean {
@@ -47,7 +47,12 @@ export class SonglineTracer {
       visited.push(current.id);
       versesSung.push(current.verse);
       totalDistance += current.verse.length;
-      current = current.next ? this._nodes.get(current.next) ?? null : null;
+      if (current.next) {
+        this._updateTransition(current.id, current.next);
+        current = this._nodes.get(current.next) ?? null;
+      } else {
+        current = null;
+      }
       steps++;
     }
     const result: TraceResult = {
@@ -58,6 +63,7 @@ export class SonglineTracer {
     };
     this._results.push(result);
     if (this._results.length > 50) this._results.shift();
+    this._computeStationaryDistribution();
     return result;
   }
 
@@ -72,6 +78,7 @@ export class SonglineTracer {
     const from = this._nodes.get(fromId);
     if (!from || !this._nodes.has(toId)) return false;
     from.next = toId;
+    this._updateTransition(fromId, toId);
     return true;
   }
 
@@ -85,5 +92,75 @@ export class SonglineTracer {
 
   get nodeCount(): number {
     return this._nodes.size;
+  }
+
+  computeMarkovEntropy(): number {
+    let entropy = 0;
+    for (const [from, trans] of this._transitionMatrix) {
+      const total = Array.from(trans.values()).reduce((a, b) => a + b, 0);
+      if (total === 0) continue;
+      for (const count of trans.values()) {
+        const p = count / total;
+        if (p > 0) entropy -= p * Math.log2(p);
+      }
+    }
+    return entropy;
+  }
+
+  computeStationaryDistribution(): Map<string, number> {
+    return new Map(this._stationaryDistribution);
+  }
+
+  simulateRandomWalk(steps: number): string[] {
+    const path: string[] = [];
+    let current = this._startId ?? Array.from(this._nodes.keys())[0];
+    if (!current) return path;
+    for (let i = 0; i < steps; i++) {
+      path.push(current);
+      const trans = this._transitionMatrix.get(current);
+      if (!trans || trans.size === 0) break;
+      const total = Array.from(trans.values()).reduce((a, b) => a + b, 0);
+      const r = Math.random() * total;
+      let cum = 0;
+      let next = current;
+      for (const [to, count] of trans) {
+        cum += count;
+        if (r <= cum) {
+          next = to;
+          break;
+        }
+      }
+      current = next;
+    }
+    return path;
+  }
+
+  private _updateTransition(from: string, to: string): void {
+    const map = this._transitionMatrix.get(from);
+    if (map) {
+      map.set(to, (map.get(to) ?? 0) + 1);
+    }
+  }
+
+  private _computeStationaryDistribution(): void {
+    const n = this._nodes.size;
+    if (n === 0) return;
+    const ids = Array.from(this._nodes.keys());
+    const dist = new Map<string, number>();
+    for (const id of ids) dist.set(id, 1 / n);
+    for (let iter = 0; iter < 100; iter++) {
+      const newDist = new Map<string, number>();
+      for (const id of ids) newDist.set(id, 0);
+      for (const [from, trans] of this._transitionMatrix) {
+        const total = Array.from(trans.values()).reduce((a, b) => a + b, 0);
+        if (total === 0) continue;
+        for (const [to, count] of trans) {
+          newDist.set(to, (newDist.get(to) ?? 0) + (dist.get(from) ?? 0) * (count / total));
+        }
+      }
+      dist.clear();
+      for (const [id, v] of newDist) dist.set(id, v);
+    }
+    this._stationaryDistribution = dist;
   }
 }

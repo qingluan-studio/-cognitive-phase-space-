@@ -1,8 +1,3 @@
-/**
- * 氏族身份模块：模块根据图腾划分族群，相同图腾的模块互认同族，
- * 族群内部享有特权协作，族群间可能存在竞争或敌对。
- */
-
 export type ClanRelation = 'allied' | 'neutral' | 'rival' | 'hostile';
 
 export interface ClanMembership {
@@ -24,6 +19,8 @@ export class ClanIdentity {
   private _relations: InterclanRelation[] = [];
   private _clanPrivileges: Map<string, string[]> = new Map();
   private _maxRank = 10;
+  private _influenceScores: Map<string, number> = new Map();
+  private _adjacencyMatrix: Map<string, Map<string, number>> = new Map();
 
   joinClan(moduleId: string, clanTotem: string, initialRank: number = 1): ClanMembership {
     const membership: ClanMembership = {
@@ -33,13 +30,42 @@ export class ClanIdentity {
       rank: Math.min(initialRank, this._maxRank),
     };
     this._members.set(moduleId, membership);
+    this._updateInfluence(clanTotem);
     return membership;
+  }
+
+  private _updateInfluence(clanTotem: string): void {
+    const members = this.getClanMembers(clanTotem);
+    const totalRank = members.reduce((s, m) => s + m.rank, 0);
+    const count = members.length;
+    const influence = count > 0 ? totalRank * Math.log(count + 1) : 0;
+    this._influenceScores.set(clanTotem, influence);
+    this._rebuildAdjacency();
+  }
+
+  private _rebuildAdjacency(): void {
+    this._adjacencyMatrix.clear();
+    const clans = this.listAllClans();
+    for (const clan of clans) {
+      const row = new Map<string, number>();
+      for (const other of clans) {
+        if (clan === other) {
+          row.set(other, 0);
+        } else {
+          const relation = this.getRelation(clan, other);
+          const weight = relation === 'allied' ? 1 : relation === 'neutral' ? 0.3 : relation === 'rival' ? -0.5 : -1;
+          row.set(other, weight);
+        }
+      }
+      this._adjacencyMatrix.set(clan, row);
+    }
   }
 
   promote(moduleId: string, delta: number = 1): boolean {
     const member = this._members.get(moduleId);
     if (!member) return false;
     member.rank = Math.min(this._maxRank, member.rank + delta);
+    this._updateInfluence(member.clanTotem);
     return true;
   }
 
@@ -47,6 +73,7 @@ export class ClanIdentity {
     const member = this._members.get(moduleId);
     if (!member) return false;
     member.rank = Math.max(0, member.rank - delta);
+    this._updateInfluence(member.clanTotem);
     return true;
   }
 
@@ -66,6 +93,7 @@ export class ClanIdentity {
     } else {
       this._relations.push({ clanA, clanB, relation, setAt: Date.now() });
     }
+    this._rebuildAdjacency();
   }
 
   getRelation(clanA: string, clanB: string): ClanRelation {
@@ -108,7 +136,10 @@ export class ClanIdentity {
   }
 
   expel(moduleId: string): boolean {
-    return this._members.delete(moduleId);
+    const member = this._members.get(moduleId);
+    const result = this._members.delete(moduleId);
+    if (member) this._updateInfluence(member.clanTotem);
+    return result;
   }
 
   get memberCount(): number {
@@ -117,5 +148,22 @@ export class ClanIdentity {
 
   get clanCount(): number {
     return this.listAllClans().length;
+  }
+
+  getInfluence(clanTotem: string): number {
+    return this._influenceScores.get(clanTotem) ?? 0;
+  }
+
+  computeCentrality(clanTotem: string): number {
+    const row = this._adjacencyMatrix.get(clanTotem);
+    if (!row) return 0;
+    let sum = 0;
+    for (const w of row.values()) sum += Math.abs(w);
+    return sum;
+  }
+
+  rankClansByInfluence(): { clan: string; influence: number }[] {
+    const clans = this.listAllClans();
+    return clans.map(c => ({ clan: c, influence: this.getInfluence(c) })).sort((a, b) => b.influence - a.influence);
   }
 }

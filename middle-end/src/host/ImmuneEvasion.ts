@@ -1,132 +1,147 @@
-/**
- * ImmuneEvasion - 免疫逃逸
- * 寄生模块躲避宿主防御系统的多种策略，包括抗原变异、
- * 分子伪装、免疫抑制与隐藏在免疫豁免区等机制。
- */
-
-export interface ImmuneEvasionRecord {
-  readonly evasionId: string;
-  hostId: string;
-  antigenSignature: string;
-  mutationRate: number;
-  concealed: boolean;
+export interface AntigenVariant {
+  id: string;
+  sequence: string;
+  epitopePositions: number[];
+  recognitionProbability: number;
 }
 
-export interface ImmuneProbe {
-  probeId: string;
-  pattern: string;
-  sensitivity: number;
+export interface EvasionEvent {
+  variantId: string;
+  escapeMutation: string;
+  immuneRecognitionDrop: number;
+  timestamp: number;
 }
 
 export class ImmuneEvasion {
-  private _record: ImmuneEvasionRecord;
-  private _antigenHistory: string[] = [];
-  private _suppressedFactors: Set<string> = new Set();
-  private _detectionLevel: number = 0;
-  private _safeZones: string[] = [];
+  private _variants: Map<string, AntigenVariant> = new Map();
+  private _events: EvasionEvent[] = [];
+  private _state: Record<string, unknown> = {};
+  private _escapeMutationRate: number = 0.05;
+  private _immuneMemoryDecay: number = 0.01;
+  private _memoryPool: Map<string, number> = new Map();
+  private _variantEntropy: number = 0;
 
-  constructor(record: ImmuneEvasionRecord) {
-    this._record = { ...record };
-    this._antigenHistory.push(record.antigenSignature);
+  registerVariant(variant: AntigenVariant): void {
+    this._variants.set(variant.id, variant);
+    this._updateVariantEntropy();
   }
 
-  get evasionId(): string {
-    return this._record.evasionId;
-  }
-
-  get concealed(): boolean {
-    return this._record.concealed;
-  }
-
-  get detectionLevel(): number {
-    return this._detectionLevel;
-  }
-
-  public mutateAntigen(): string {
-    const current = this._record.antigenSignature;
-    const mutated = current
-      .split('')
-      .map((c) => (Math.random() < this._record.mutationRate ? this._shiftChar(c) : c))
-      .join('');
-    this._record.antigenSignature = mutated;
-    this._antigenHistory.push(mutated);
-    if (this._antigenHistory.length > 20) {
-      this._antigenHistory.shift();
-    }
-    this._detectionLevel = Math.max(0, this._detectionLevel - 0.15);
-    return mutated;
-  }
-
-  private _shiftChar(c: string): string {
-    const code = c.charCodeAt(0);
-    return String.fromCharCode(code + (Math.random() < 0.5 ? 1 : -1));
-  }
-
-  public mimicHost(hostPattern: string): void {
-    const similarity = this._computeSimilarity(this._record.antigenSignature, hostPattern);
-    this._detectionLevel = Math.max(0, this._detectionLevel * (1 - similarity));
-  }
-
-  private _computeSimilarity(a: string, b: string): number {
-    const len = Math.min(a.length, b.length);
-    if (len === 0) {
-      return 0;
-    }
-    let match = 0;
-    for (let i = 0; i < len; i++) {
-      if (a[i] === b[i]) {
-        match++;
+  mutate(variantId: string): AntigenVariant | null {
+    const variant = this._variants.get(variantId);
+    if (!variant) return null;
+    const chars = 'ACGT';
+    const seqArray = variant.sequence.split('');
+    for (const pos of variant.epitopePositions) {
+      if (Math.random() < this._escapeMutationRate) {
+        const oldChar = seqArray[pos];
+        let newChar = oldChar;
+        while (newChar === oldChar) {
+          newChar = chars[Math.floor(Math.random() * chars.length)];
+        }
+        seqArray[pos] = newChar;
       }
     }
-    return match / len;
+    const newSequence = seqArray.join('');
+    const newVariant: AntigenVariant = {
+      id: `${variantId}-mut-${Date.now()}`,
+      sequence: newSequence,
+      epitopePositions: variant.epitopePositions,
+      recognitionProbability: variant.recognitionProbability * 0.7,
+    };
+    this._variants.set(newVariant.id, newVariant);
+    const immuneDrop = variant.recognitionProbability - newVariant.recognitionProbability;
+    const event: EvasionEvent = {
+      variantId: newVariant.id,
+      escapeMutation: newSequence,
+      immuneRecognitionDrop: immuneDrop,
+      timestamp: Date.now(),
+    };
+    this._events.push(event);
+    if (this._events.length > 200) this._events.shift();
+    this._updateVariantEntropy();
+    return newVariant;
   }
 
-  public suppressFactor(factor: string): boolean {
-    if (this._suppressedFactors.has(factor)) {
-      return false;
+  private _updateVariantEntropy(): void {
+    const total = this._variants.size;
+    if (total === 0) {
+      this._variantEntropy = 0;
+      return;
     }
-    this._suppressedFactors.add(factor);
-    this._detectionLevel = Math.max(0, this._detectionLevel - 0.1);
-    return true;
-  }
-
-  public evadeProbe(probe: ImmuneProbe): boolean {
-    const match = this._computeSimilarity(this._record.antigenSignature, probe.pattern);
-    const detectProb = match * probe.sensitivity;
-    if (detectProb > 0.7) {
-      this._detectionLevel = Math.min(1, this._detectionLevel + 0.3);
-      return false;
+    const bins = 5;
+    const probs = Array.from(this._variants.values()).map(v => v.recognitionProbability);
+    const maxP = Math.max(...probs, 1);
+    const counts = new Array(bins).fill(0);
+    for (const p of probs) {
+      const idx = Math.min(bins - 1, Math.floor((p / maxP) * bins));
+      counts[idx]++;
     }
-    this._detectionLevel = Math.min(1, this._detectionLevel + detectProb * 0.1);
-    return true;
-  }
-
-  public hideInSafeZone(zone: string): void {
-    if (!this._safeZones.includes(zone)) {
-      this._safeZones.push(zone);
+    let entropy = 0;
+    for (const c of counts) {
+      if (c > 0) {
+        const prob = c / total;
+        entropy -= prob * Math.log2(prob);
+      }
     }
-    this._record.concealed = true;
-    this._detectionLevel = Math.max(0, this._detectionLevel - 0.2);
+    this._variantEntropy = entropy;
   }
 
-  public emerge(): void {
-    this._record.concealed = false;
-    this._detectionLevel = Math.min(1, this._detectionLevel + 0.1);
+  decayImmuneMemory(): void {
+    for (const [key, strength] of this._memoryPool) {
+      this._memoryPool.set(key, Math.max(0, strength - this._immuneMemoryDecay));
+    }
   }
 
-  public isCompromised(): boolean {
-    return this._detectionLevel > 0.75;
+  recognize(variantId: string): number {
+    const variant = this._variants.get(variantId);
+    if (!variant) return 0;
+    const memory = this._memoryPool.get(variant.sequence) ?? 0;
+    return variant.recognitionProbability * (1 + memory);
   }
 
-  public evasionReport(): Record<string, unknown> {
+  getVariant(id: string): AntigenVariant | null {
+    return this._variants.get(id) ?? null;
+  }
+
+  averageRecognition(): number {
+    if (this._variants.size === 0) return 0;
+    return Array.from(this._variants.values()).reduce((s, v) => s + v.recognitionProbability, 0) / this._variants.size;
+  }
+
+  getVariantsByRecognition(threshold: number): AntigenVariant[] {
+    return Array.from(this._variants.values()).filter(v => v.recognitionProbability < threshold);
+  }
+
+  setEscapeMutationRate(rate: number): void {
+    this._escapeMutationRate = Math.max(0, Math.min(1, rate));
+  }
+
+  setImmuneMemoryDecay(decay: number): void {
+    this._immuneMemoryDecay = Math.max(0, decay);
+  }
+
+  get variantCount(): number {
+    return this._variants.size;
+  }
+
+  get eventCount(): number {
+    return this._events.length;
+  }
+
+  get variantEntropy(): number {
+    return this._variantEntropy;
+  }
+
+  evasionReport(): Record<string, unknown> {
     return {
-      evasionId: this.evasionId,
-      concealed: this._record.concealed,
-      detectionLevel: this._detectionLevel.toFixed(3),
-      mutationCount: this._antigenHistory.length - 1,
-      suppressedFactors: this._suppressedFactors.size,
-      safeZones: this._safeZones.length,
-      compromised: this.isCompromised(),
+      variantCount: this._variants.size,
+      eventCount: this._events.length,
+      averageRecognition: this.averageRecognition().toFixed(4),
+      variantEntropy: this._variantEntropy.toFixed(4),
+      escapeMutationRate: this._escapeMutationRate.toFixed(4),
+      immuneMemoryDecay: this._immuneMemoryDecay.toFixed(4),
+      lowRecognitionVariants: this.getVariantsByRecognition(0.3).length,
+      state: this._state,
     };
   }
 }

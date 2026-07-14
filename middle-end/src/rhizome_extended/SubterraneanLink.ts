@@ -1,116 +1,190 @@
-/**
- * 地下链接模块：在不为人知的层级建立模块间的秘密连接，
- * 用于绕过表层路由，传输隐蔽信号与敏感资源。
- */
-
-export type LinkSecrecy = 'covert' | 'encrypted' | 'ephemeral';
-
-export interface SubterraneanRoute {
+export interface LinkNode {
   id: string;
-  endpoints: [string, string];
-  secrecy: LinkSecrecy;
-  latency: number;
-  active: boolean;
+  x: number;
+  y: number;
+  weight: number;
+  capacity: number;
+  flow: number;
 }
 
-export interface CovertMessage {
-  routeId: string;
-  payload: string;
-  sentAt: number;
-  acknowledged: boolean;
+export interface LinkEdge {
+  from: string;
+  to: string;
+  weight: number;
+  capacity: number;
+  flow: number;
 }
 
 export class SubterraneanLink {
-  private _routes: Map<string, SubterraneanRoute> = new Map();
-  private _messages: CovertMessage[] = [];
-  private _hidden = true;
-  private _maxLatency = 5000;
+  private _nodes: Map<string, LinkNode> = new Map();
+  private _edges: LinkEdge[] = [];
+  private _adjacency: Map<string, Map<string, number>> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _maxFlow: number = 0;
+  private _cliques: string[][] = [];
 
-  establishRoute(endpointA: string, endpointB: string, secrecy: LinkSecrecy): SubterraneanRoute {
-    const route: SubterraneanRoute = {
-      id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      endpoints: [endpointA, endpointB],
-      secrecy,
-      latency: Math.floor(Math.random() * this._maxLatency),
-      active: true,
-    };
-    this._routes.set(route.id, route);
-    return route;
+  constructor() {}
+
+  get nodeCount(): number {
+    return this._nodes.size;
   }
 
-  findRoute(a: string, b: string): SubterraneanRoute | null {
-    for (const route of this._routes.values()) {
-      if (!route.active) continue;
-      const [x, y] = route.endpoints;
-      if ((x === a && y === b) || (x === b && y === a)) return route;
+  get edgeCount(): number {
+    return this._edges.length;
+  }
+
+  addNode(id: string, x: number, y: number, capacity: number = 1): void {
+    this._nodes.set(id, { id, x, y, weight: 0, capacity, flow: 0 });
+    this._adjacency.set(id, new Map());
+  }
+
+  link(from: string, to: string, weight: number, capacity: number = 1): void {
+    if (!this._nodes.has(from) || !this._nodes.has(to)) return;
+    this._edges.push({ from, to, weight, capacity, flow: 0 });
+    this._adjacency.get(from)!.set(to, weight);
+    this._adjacency.get(to)!.set(from, weight);
+  }
+
+  shortestPath(start: string, end: string): { path: string[]; distance: number } {
+    const dist = new Map<string, number>();
+    const prev = new Map<string, string | null>();
+    const visited = new Set<string>();
+    for (const id of this._nodes.keys()) {
+      dist.set(id, Infinity);
+      prev.set(id, null);
     }
-    return null;
-  }
-
-  sendCovert(routeId: string, payload: string): CovertMessage | null {
-    const route = this._routes.get(routeId);
-    if (!route || !route.active) return null;
-    const msg: CovertMessage = {
-      routeId,
-      payload: this._obfuscate(payload),
-      sentAt: Date.now(),
-      acknowledged: false,
-    };
-    this._messages.push(msg);
-    if (this._messages.length > 300) this._messages.shift();
-    return msg;
-  }
-
-  private _obfuscate(text: string): string {
-    return text.split('').map(c => String.fromCharCode(c.charCodeAt(0) + 1)).join('');
-  }
-
-  private _deobfuscate(text: string): string {
-    return text.split('').map(c => String.fromCharCode(c.charCodeAt(0) - 1)).join('');
-  }
-
-  acknowledge(routeId: string, sentAt: number): boolean {
-    const msg = this._messages.find(m => m.routeId === routeId && m.sentAt === sentAt);
-    if (!msg) return false;
-    msg.acknowledged = true;
-    return true;
-  }
-
-  decrypt(message: CovertMessage): string {
-    return this._deobfuscate(message.payload);
-  }
-
-  severRoute(routeId: string): boolean {
-    const route = this._routes.get(routeId);
-    if (!route) return false;
-    route.active = false;
-    return true;
-  }
-
-  purgeEphemeral(): number {
-    let removed = 0;
-    for (const [id, route] of this._routes) {
-      if (route.secrecy === 'ephemeral') {
-        this._routes.delete(id);
-        removed++;
+    dist.set(start, 0);
+    while (visited.size < this._nodes.size) {
+      let u: string | null = null;
+      let minDist = Infinity;
+      for (const [id, d] of dist) {
+        if (!visited.has(id) && d < minDist) {
+          minDist = d;
+          u = id;
+        }
+      }
+      if (u === null) break;
+      visited.add(u);
+      for (const [v, w] of this._adjacency.get(u)!) {
+        if (!visited.has(v)) {
+          const alt = (dist.get(u) ?? Infinity) + w;
+          if (alt < (dist.get(v) ?? Infinity)) {
+            dist.set(v, alt);
+            prev.set(v, u);
+          }
+        }
       }
     }
-    return removed;
+    const path: string[] = [];
+    let curr: string | null = end;
+    while (curr) {
+      path.unshift(curr);
+      curr = prev.get(curr) ?? null;
+    }
+    return { path, distance: dist.get(end) ?? Infinity };
   }
 
-  listActiveRoutes(): SubterraneanRoute[] {
-    return Array.from(this._routes.values()).filter(r => r.active);
+  steinerTree(terminalIds: string[]): LinkEdge[] {
+    if (terminalIds.length <= 1) return [];
+    const mstEdges: LinkEdge[] = [];
+    const inTree = new Set<string>([terminalIds[0]]);
+    while (inTree.size < terminalIds.length) {
+      let bestEdge: LinkEdge | null = null;
+      let bestWeight = Infinity;
+      for (const edge of this._edges) {
+        const aIn = inTree.has(edge.from);
+        const bIn = inTree.has(edge.to);
+        if (aIn !== bIn && edge.weight < bestWeight) {
+          bestWeight = edge.weight;
+          bestEdge = edge;
+        }
+      }
+      if (!bestEdge) break;
+      mstEdges.push(bestEdge);
+      inTree.add(bestEdge.from);
+      inTree.add(bestEdge.to);
+    }
+    return mstEdges;
   }
 
-  getMessagesByRoute(routeId: string): CovertMessage[] {
-    return this._messages.filter(m => m.routeId === routeId);
+  fordFulkerson(source: string, sink: string): number {
+    let maxFlow = 0;
+    const residual = new Map<string, Map<string, number>>();
+    for (const edge of this._edges) {
+      if (!residual.has(edge.from)) residual.set(edge.from, new Map());
+      if (!residual.has(edge.to)) residual.set(edge.to, new Map());
+      residual.get(edge.from)!.set(edge.to, edge.capacity);
+      residual.get(edge.to)!.set(edge.from, 0);
+    }
+    const bfs = (): string[] | null => {
+      const parent = new Map<string, string | null>();
+      const queue: string[] = [source];
+      parent.set(source, null);
+      while (queue.length > 0) {
+        const u = queue.shift()!;
+        for (const [v, cap] of residual.get(u) ?? []) {
+          if (!parent.has(v) && cap > 0) {
+            parent.set(v, u);
+            if (v === sink) {
+              const path: string[] = [];
+              let curr: string | null = v;
+              while (curr) {
+                path.unshift(curr);
+                curr = parent.get(curr) ?? null;
+              }
+              return path;
+            }
+            queue.push(v);
+          }
+        }
+      }
+      return null;
+    };
+    while (true) {
+      const path = bfs();
+      if (!path) break;
+      let pathFlow = Infinity;
+      for (let i = 0; i < path.length - 1; i++) {
+        pathFlow = Math.min(pathFlow, residual.get(path[i])!.get(path[i + 1])!);
+      }
+      for (let i = 0; i < path.length - 1; i++) {
+        const u = path[i];
+        const v = path[i + 1];
+        residual.get(u)!.set(v, residual.get(u)!.get(v)! - pathFlow);
+        residual.get(v)!.set(u, (residual.get(v)!.get(u) ?? 0) + pathFlow);
+      }
+      maxFlow += pathFlow;
+    }
+    this._maxFlow = maxFlow;
+    return maxFlow;
   }
 
-  get routeCount(): number {
-    return this._routes.size;
+  findCliques(): string[][] {
+    const cliques: string[][] = [];
+    const bronKerbosch = (r: string[], p: Set<string>, x: Set<string>): void => {
+      if (p.size === 0 && x.size === 0) {
+        cliques.push([...r]);
+        return;
+      }
+      for (const v of Array.from(p)) {
+        const neighbors = new Set(this._adjacency.get(v)?.keys() ?? []);
+        bronKerbosch([...r, v], new Set(Array.from(p).filter((u) => neighbors.has(u))), new Set(Array.from(x).filter((u) => neighbors.has(u))));
+        p.delete(v);
+        x.add(v);
+      }
+    };
+    bronKerbosch([], new Set(this._nodes.keys()), new Set());
+    this._cliques = cliques;
+    return cliques;
   }
 
-  get isHidden(): boolean {
-    return this._hidden;
+  report(): Record<string, unknown> {
+    return {
+      nodes: this._nodes.size,
+      edges: this._edges.length,
+      maxFlow: this._maxFlow,
+      cliques: this._cliques.length,
+      state: this._state,
+    };
   }
 }

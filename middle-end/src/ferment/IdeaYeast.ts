@@ -1,97 +1,173 @@
-/**
- * 思想酵母：微小想法发酵膨胀，产生巨大效果。
- * 微小的种子想法在酵母作用下发酵膨胀，逐步成长为具有巨大影响力的思想。
- */
-
-export type FermentationStage = 'seed' | 'bubbling' | 'rising' | 'mature' | 'overflow';
-
-export interface YeastIdea {
+export interface YeastColony {
   id: string;
-  seed: string;
-  stage: FermentationStage;
-  volume: number;
-  yeastConcentration: number;
-  startedAt: number;
-  expansions: string[];
+  population: number;
+  carryingCapacity: number;
+  growthRate: number;
+  lagPhaseDuration: number;
+  age: number;
+}
+
+export interface GrowthSnapshot {
+  colonyId: string;
+  population: number;
+  growthRate: number;
+  nutrientAvailability: number;
+  timestamp: number;
 }
 
 export class IdeaYeast {
-  private _ideas: Map<string, YeastIdea> = new Map();
-  private _fermentationRate = 1.5;
-  private _overflowThreshold = 1000;
-  private _expansionTemplates: string[] = [
-    'What if we extend {seed} to all domains?',
-    '{seed} suggests a deeper principle.',
-    'Apply {seed} recursively for compounding effect.',
-    'Invert {seed} to find its complement.',
-  ];
+  private _colonies: Map<string, YeastColony> = new Map();
+  private _snapshots: GrowthSnapshot[] = [];
+  private _nutrientPool: number = 1000;
+  private _nutrientConsumptionRate: number = 0.1;
+  private _gompertzAsymptote: number = 1;
+  private _gompertzDecay: number = 0.1;
+  private _gompertzDisplacement: number = 1;
+  private _state: Record<string, unknown> = {};
+  private _diversityIndex: number = 0;
 
-  plant(seed: string): YeastIdea {
-    const idea: YeastIdea = {
-      id: `yeast-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      seed,
-      stage: 'seed',
-      volume: 1,
-      yeastConcentration: 0.1,
-      startedAt: Date.now(),
-      expansions: [],
+  get colonyCount(): number {
+    return this._colonies.size;
+  }
+
+  get totalPopulation(): number {
+    let sum = 0;
+    for (const c of this._colonies.values()) sum += c.population;
+    return sum;
+  }
+
+  get diversityIndex(): number {
+    return this._diversityIndex;
+  }
+
+  inoculate(id: string, initialPopulation: number, carryingCapacity: number, growthRate: number, lagPhase: number = 0): YeastColony {
+    const colony: YeastColony = {
+      id,
+      population: initialPopulation,
+      carryingCapacity,
+      growthRate,
+      lagPhaseDuration: lagPhase,
+      age: 0,
     };
-    this._ideas.set(idea.id, idea);
-    return idea;
+    this._colonies.set(id, colony);
+    this._updateDiversityIndex();
+    return colony;
   }
 
-  ferment(ideaId: string, cycles: number = 1): YeastIdea | null {
-    const idea = this._ideas.get(ideaId);
-    if (!idea || idea.stage === 'overflow') return null;
-    for (let i = 0; i < cycles; i++) {
-      idea.volume *= this._fermentationRate;
-      idea.yeastConcentration = Math.min(1, idea.yeastConcentration * 1.1);
-      idea.stage = this._determineStage(idea.volume);
-      idea.expansions.push(this._expand(idea.seed));
+  private _updateDiversityIndex(): void {
+    const total = this.totalPopulation;
+    if (total === 0) {
+      this._diversityIndex = 0;
+      return;
     }
-    return idea;
+    let shannon = 0;
+    for (const c of this._colonies.values()) {
+      const p = c.population / total;
+      if (p > 0) shannon -= p * Math.log2(p);
+    }
+    this._diversityIndex = shannon;
   }
 
-  private _determineStage(volume: number): FermentationStage {
-    if (volume >= this._overflowThreshold) return 'overflow';
-    if (volume >= 100) return 'mature';
-    if (volume >= 10) return 'rising';
-    if (volume > 1) return 'bubbling';
-    return 'seed';
+  step(dt: number = 1): GrowthSnapshot[] {
+    const snaps: GrowthSnapshot[] = [];
+    for (const colony of this._colonies.values()) {
+      colony.age += dt;
+      let nutrientAvailability = this._nutrientPool / (this._colonies.size * 100);
+      nutrientAvailability = Math.max(0, Math.min(1, nutrientAvailability));
+      let effectiveRate = 0;
+      if (colony.age > colony.lagPhaseDuration) {
+        const logistic = colony.growthRate * colony.population * (1 - colony.population / colony.carryingCapacity);
+        const gompertz = colony.carryingCapacity * Math.exp(-this._gompertzDecay * Math.exp(-this._gompertzAsymptote * (colony.age - this._gompertzDisplacement)));
+        effectiveRate = (logistic + gompertz * 0.01) * nutrientAvailability;
+      }
+      colony.population += effectiveRate * dt;
+      colony.population = Math.max(0, Math.min(colony.carryingCapacity * 2, colony.population));
+      this._nutrientPool -= colony.population * this._nutrientConsumptionRate * dt;
+      this._nutrientPool = Math.max(0, this._nutrientPool);
+      const snapshot: GrowthSnapshot = {
+        colonyId: colony.id,
+        population: colony.population,
+        growthRate: effectiveRate,
+        nutrientAvailability,
+        timestamp: Date.now(),
+      };
+      this._snapshots.push(snapshot);
+      if (this._snapshots.length > 200) this._snapshots.shift();
+      snaps.push(snapshot);
+    }
+    this._updateDiversityIndex();
+    return snaps;
   }
 
-  private _expand(seed: string): string {
-    const template = this._expansionTemplates[Math.floor(Math.random() * this._expansionTemplates.length)];
-    return template.replace('{seed}', seed);
+  addNutrient(amount: number): void {
+    this._nutrientPool += amount;
   }
 
-  addYeast(ideaId: string, amount: number): YeastIdea | null {
-    const idea = this._ideas.get(ideaId);
-    if (!idea) return null;
-    idea.yeastConcentration = Math.min(1, idea.yeastConcentration + amount);
-    return idea;
+  setConsumptionRate(rate: number): void {
+    this._nutrientConsumptionRate = Math.max(0, rate);
   }
 
-  harvest(ideaId: string): YeastIdea | null {
-    const idea = this._ideas.get(ideaId);
-    if (!idea) return null;
-    idea.stage = 'mature';
-    return idea;
+  setGompertzParameters(asymptote: number, decay: number, displacement: number): void {
+    this._gompertzAsymptote = asymptote;
+    this._gompertzDecay = decay;
+    this._gompertzDisplacement = displacement;
   }
 
-  setFermentationRate(rate: number): void {
-    this._fermentationRate = Math.max(1, rate);
+  getColony(id: string): YeastColony | null {
+    return this._colonies.get(id) ?? null;
   }
 
-  getMatureIdeas(): YeastIdea[] {
-    return Array.from(this._ideas.values()).filter(i => i.stage === 'mature' || i.stage === 'overflow');
+  dominantColony(): YeastColony | null {
+    let dominant: YeastColony | null = null;
+    for (const c of this._colonies.values()) {
+      if (!dominant || c.population > dominant.population) dominant = c;
+    }
+    return dominant;
   }
 
-  getIdeas(): YeastIdea[] {
-    return Array.from(this._ideas.values());
+  averagePopulation(): number {
+    if (this._colonies.size === 0) return 0;
+    return this.totalPopulation / this._colonies.size;
   }
 
-  get ideaCount(): number {
-    return this._ideas.size;
+  getSnapshots(limit: number = 50): GrowthSnapshot[] {
+    return this._snapshots.slice(-limit);
+  }
+
+  carryingCapacityUtilization(): number {
+    let totalCapacity = 0;
+    for (const c of this._colonies.values()) totalCapacity += c.carryingCapacity;
+    if (totalCapacity === 0) return 0;
+    return this.totalPopulation / totalCapacity;
+  }
+
+  isNutrientDepleted(): boolean {
+    return this._nutrientPool < 1;
+  }
+
+  extinctionRisk(): number {
+    const depleted = Array.from(this._colonies.values()).filter(c => c.population < 1).length;
+    return this._colonies.size > 0 ? depleted / this._colonies.size : 0;
+  }
+
+  clear(): void {
+    this._colonies.clear();
+    this._snapshots = [];
+    this._nutrientPool = 1000;
+    this._diversityIndex = 0;
+  }
+
+  yeastReport(): Record<string, unknown> {
+    return {
+      colonyCount: this._colonies.size,
+      totalPopulation: this.totalPopulation.toFixed(2),
+      averagePopulation: this.averagePopulation().toFixed(2),
+      diversityIndex: this._diversityIndex.toFixed(4),
+      nutrientPool: this._nutrientPool.toFixed(2),
+      carryingCapacityUtilization: this.carryingCapacityUtilization().toFixed(4),
+      extinctionRisk: this.extinctionRisk().toFixed(4),
+      nutrientDepleted: this.isNutrientDepleted(),
+      state: this._state,
+    };
   }
 }

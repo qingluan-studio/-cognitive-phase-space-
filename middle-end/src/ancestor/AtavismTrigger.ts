@@ -1,8 +1,3 @@
-/**
- * 返祖触发器：出现祖先特征的现象。
- * 在某些条件下，本应被现代模块覆盖的祖先特征会重新出现并暂时主导行为。
- */
-
 export interface AtavisticTrait {
   id: string;
   name: string;
@@ -23,10 +18,15 @@ export class AtavismTrigger {
   private _episodes: AtavismEpisode[] = [];
   private _triggerProbability = 0.2;
   private _maxEpisodes = 100;
+  private _markovTransition: Map<string, Map<string, number>> = new Map();
+  private _activationEntropy: number[] = [];
 
   registerTrait(trait: AtavisticTrait): void {
     trait.currentlyActive = false;
     this._traits.set(trait.id, trait);
+    if (!this._markovTransition.has(trait.id)) {
+      this._markovTransition.set(trait.id, new Map());
+    }
   }
 
   evaluate(condition: string): AtavismEpisode | null {
@@ -44,6 +44,9 @@ export class AtavismTrigger {
         };
         this._episodes.push(episode);
         if (this._episodes.length > this._maxEpisodes) this._episodes.shift();
+        this._updateMarkovChain(episode.traitId);
+        this._activationEntropy.push(episode.intensity);
+        if (this._activationEntropy.length > 50) this._activationEntropy.shift();
         return episode;
       }
     }
@@ -86,5 +89,35 @@ export class AtavismTrigger {
 
   get traitCount(): number {
     return this._traits.size;
+  }
+
+  computeActivationEntropy(): number {
+    if (this._activationEntropy.length === 0) return 0;
+    const mean = this._activationEntropy.reduce((a, b) => a + b, 0) / this._activationEntropy.length;
+    const variance = this._activationEntropy.reduce((s, v) => s + (v - mean) ** 2, 0) / this._activationEntropy.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
+  }
+
+  predictNextTrait(currentTraitId: string): string | null {
+    const transitions = this._markovTransition.get(currentTraitId);
+    if (!transitions || transitions.size === 0) return null;
+    let total = 0;
+    for (const v of transitions.values()) total += v;
+    const r = Math.random() * total;
+    let cum = 0;
+    for (const [id, prob] of transitions) {
+      cum += prob;
+      if (r <= cum) return id;
+    }
+    return null;
+  }
+
+  private _updateMarkovChain(traitId: string): void {
+    if (this._episodes.length < 2) return;
+    const prev = this._episodes[this._episodes.length - 2].traitId;
+    const trans = this._markovTransition.get(prev);
+    if (trans) {
+      trans.set(traitId, (trans.get(traitId) ?? 0) + 1);
+    }
   }
 }

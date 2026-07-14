@@ -1,111 +1,170 @@
-/**
- * 相干光束模块：所有成分同频同相叠加形成高强度信息流。
- * 用于建模高度同步、方向一致的协同信号。
- */
-
-export interface CoherentRay {
-  id: number;
+export interface BeamSegment {
   phase: number;
   amplitude: number;
+  pathLength: number;
+  coherent: boolean;
 }
 
-export type CoherenceMeasure = {
-  totalAmplitude: number;
-  coherence: number;
-  phaseSpread: number;
+export type InterferencePattern = {
+  maxima: number;
+  minima: number;
+  contrast: number;
 };
 
-export interface CoherentBeamConfig {
-  targetPhase: number;
+export interface BeamConfig {
   wavelength: number;
-  maxRays: number;
+  coherenceLength: number;
+  splitRatio: number;
 }
 
 export class CoherentBeam {
-  private _config: CoherentBeamConfig;
-  private _rays: CoherentRay[] = [];
-  private _nextId: number = 0;
-  private _coherence: CoherenceMeasure | null = null;
+  private _config: BeamConfig;
+  private _segments: BeamSegment[] = [];
+  private _pattern: InterferencePattern | null = null;
   private _state: Record<string, unknown> = {};
+  private _fourierAmplitudes: number[] = [];
+  private _visibility: number = 0;
+  private _opticalPathDifference: number = 0;
 
-  constructor(config: CoherentBeamConfig) {
+  constructor(config: BeamConfig) {
     this._config = config;
   }
 
-  get rayCount(): number {
-    return this._rays.length;
+  get segmentCount(): number {
+    return this._segments.length;
   }
 
-  get targetPhase(): number {
-    return this._config.targetPhase;
+  get visibility(): number {
+    return this._visibility;
   }
 
-  addRay(amplitude: number, phase: number): CoherentRay {
-    const ray: CoherentRay = { id: this._nextId++, amplitude, phase };
-    this._rays.push(ray);
-    if (this._rays.length > this._config.maxRays) {
-      this._rays.shift();
-    }
-    return ray;
+  get opticalPathDifference(): number {
+    return this._opticalPathDifference;
   }
 
-  measureCoherence(): CoherenceMeasure {
-    if (this._rays.length === 0) {
-      this._coherence = { totalAmplitude: 0, coherence: 0, phaseSpread: 0 };
-      return this._coherence;
+  private _computeFourier(): void {
+    const N = this._segments.length;
+    if (N === 0) return;
+    this._fourierAmplitudes = [];
+    for (let k = 0; k < N; k++) {
+      let real = 0;
+      let imag = 0;
+      for (let n = 0; n < N; n++) {
+        const angle = (-2 * Math.PI * k * n) / N;
+        real += this._segments[n].amplitude * Math.cos(this._segments[n].phase + angle);
+        imag += this._segments[n].amplitude * Math.sin(this._segments[n].phase + angle);
+      }
+      this._fourierAmplitudes.push(Math.sqrt(real * real + imag * imag) / N);
     }
-    let realSum = 0;
-    let imagSum = 0;
-    for (const r of this._rays) {
-      realSum += r.amplitude * Math.cos(r.phase);
-      imagSum += r.amplitude * Math.sin(r.phase);
-    }
-    const totalAmplitude = Math.sqrt(realSum * realSum + imagSum * imagSum);
-    const sumAmplitudes = this._rays.reduce((acc, r) => acc + r.amplitude, 0);
-    const coherence = sumAmplitudes > 0 ? totalAmplitude / sumAmplitudes : 0;
-    const phases = this._rays.map((r) => r.phase);
-    const phaseSpread = Math.max(...phases) - Math.min(...phases);
-    this._coherence = { totalAmplitude, coherence, phaseSpread };
-    return this._coherence;
   }
 
-  align(): void {
-    for (const r of this._rays) {
-      r.phase = this._config.targetPhase;
+  emit(phase: number, amplitude: number): BeamSegment {
+    const segment: BeamSegment = {
+      phase,
+      amplitude,
+      pathLength: 0,
+      coherent: true,
+    };
+    this._segments.push(segment);
+    if (this._segments.length > 40) this._segments.shift();
+    this._computeFourier();
+    return segment;
+  }
+
+  split(): [BeamSegment, BeamSegment] | null {
+    if (this._segments.length === 0) return null;
+    const last = this._segments[this._segments.length - 1];
+    const a: BeamSegment = {
+      phase: last.phase,
+      amplitude: last.amplitude * this._config.splitRatio,
+      pathLength: last.pathLength,
+      coherent: last.coherent,
+    };
+    const b: BeamSegment = {
+      phase: last.phase,
+      amplitude: last.amplitude * (1 - this._config.splitRatio),
+      pathLength: last.pathLength + this._config.wavelength * 0.25,
+      coherent: last.coherent,
+    };
+    this._segments.push(a, b);
+    this._opticalPathDifference = Math.abs(a.pathLength - b.pathLength);
+    return [a, b];
+  }
+
+  interfere(): InterferencePattern {
+    if (this._segments.length < 2) {
+      return { maxima: 0, minima: 0, contrast: 0 };
     }
-    this._state.alignedAt = Date.now();
+    const intensities: number[] = [];
+    for (let i = 0; i < this._segments.length; i++) {
+      for (let j = i + 1; j < this._segments.length; j++) {
+        const delta = this._segments[j].phase - this._segments[i].phase;
+        const pathDiff = this._segments[j].pathLength - this._segments[i].pathLength;
+        const coherent = Math.abs(pathDiff) < this._config.coherenceLength;
+        const interference = coherent
+          ? this._segments[i].amplitude * this._segments[i].amplitude +
+            this._segments[j].amplitude * this._segments[j].amplitude +
+            2 * this._segments[i].amplitude * this._segments[j].amplitude * Math.cos(delta)
+          : this._segments[i].amplitude * this._segments[i].amplitude +
+            this._segments[j].amplitude * this._segments[j].amplitude;
+        intensities.push(interference);
+      }
+    }
+    const maxI = intensities.length > 0 ? Math.max(...intensities) : 0;
+    const minI = intensities.length > 0 ? Math.min(...intensities) : 0;
+    this._visibility = maxI + minI > 0 ? (maxI - minI) / (maxI + minI) : 0;
+    const maxima = intensities.filter((i) => i > maxI * 0.9).length;
+    const minima = intensities.filter((i) => i < minI * 1.1).length;
+    this._pattern = { maxima, minima, contrast: this._visibility };
+    return this._pattern;
+  }
+
+  propagate(distance: number): void {
+    for (const seg of this._segments) {
+      seg.pathLength += distance;
+      seg.phase += (2 * Math.PI * distance) / this._config.wavelength;
+      if (seg.pathLength > this._config.coherenceLength) {
+        seg.coherent = false;
+      }
+    }
+  }
+
+  totalIntensity(): number {
+    return this._segments.reduce((acc, s) => acc + s.amplitude * s.amplitude, 0);
   }
 
   isCoherent(): boolean {
-    return this.measureCoherence().coherence > 0.9;
+    return this._segments.every((s) => s.coherent);
   }
 
-  dominantRay(): CoherentRay | null {
-    if (this._rays.length === 0) return null;
-    return this._rays.reduce((best, r) => (r.amplitude > best.amplitude ? r : best));
-  }
-
-  totalAmplitude(): number {
-    return this.measureCoherence().totalAmplitude;
-  }
-
-  phaseLock(target: number): void {
-    this._config.targetPhase = target;
-    this.align();
-  }
-
-  disperse(): void {
-    for (const r of this._rays) {
-      r.phase += (Math.random() - 0.5) * Math.PI;
+  computeSpectralWidth(): number {
+    if (this._fourierAmplitudes.length === 0) return 0;
+    const peak = Math.max(...this._fourierAmplitudes);
+    const halfMax = peak / 2;
+    let width = 0;
+    for (const amp of this._fourierAmplitudes) {
+      if (amp >= halfMax) width++;
     }
-    this._state.dispersedAt = Date.now();
+    return width;
+  }
+
+  reset(): void {
+    this._segments = [];
+    this._pattern = null;
+    this._fourierAmplitudes = [];
+    this._visibility = 0;
+    this._opticalPathDifference = 0;
+    this._state = {};
   }
 
   report(): Record<string, unknown> {
     return {
-      rayCount: this._rays.length,
-      coherence: this._coherence,
+      segments: this._segments.length,
+      totalIntensity: this.totalIntensity(),
+      pattern: this._pattern,
       state: this._state,
+      visibility: this._visibility.toFixed(4),
+      spectralWidth: this.computeSpectralWidth(),
     };
   }
 }

@@ -1,126 +1,125 @@
-/**
- * ScatteringBounce - 散射弹跳
- * 状态碰到排斥子时发生反弹，类似粒子在势垒上的散射，
- * 反弹角度与能量取决于入射条件与排斥子强度。
- */
-
-export interface ScatteringBounceData {
-  readonly bounceId: string;
-  repellorPosition: { x: number; y: number };
-  repellorStrength: number;
-  elasticity: number;
+export interface ScatteringParticle {
+  id: string;
+  mass: number;
+  charge: number;
+  position: { x: number; y: number };
+  velocity: { x: number; y: number };
 }
 
-export interface BounceEvent {
-  incoming: { x: number; y: number };
-  outgoing: { x: number; y: number };
-  velocity: number;
+export interface ScatteringEvent {
+  particleId: string;
+  angle: number;
+  crossSection: number;
+  momentumTransfer: number;
   energyLoss: number;
-  scatterAngle: number;
 }
 
 export class ScatteringBounce {
-  private _data: ScatteringBounceData;
-  private _events: BounceEvent[] = [];
-  private _totalBounces: number = 0;
-  private _totalEnergyLost: number = 0;
-  private _lastScatterAngle: number = 0;
+  private _particles: Map<string, ScatteringParticle> = new Map();
+  private _events: ScatteringEvent[] = [];
+  private _state: Record<string, unknown> = {};
+  private _coulombConstant: number = 8.9875517923e9;
 
-  constructor(data: ScatteringBounceData) {
-    this._data = { ...data, repellorPosition: { ...data.repellorPosition } };
+  constructor() {}
+
+  get particleCount(): number {
+    return this._particles.size;
   }
 
-  get bounceId(): string {
-    return this._data.bounceId;
+  get eventCount(): number {
+    return this._events.length;
   }
 
-  get repellorStrength(): number {
-    return this._data.repellorStrength;
+  addParticle(id: string, mass: number, charge: number, x: number, y: number, vx: number, vy: number): void {
+    this._particles.set(id, { id, mass, charge, position: { x, y }, velocity: { x: vx, y: vy } });
   }
 
-  get elasticity(): number {
-    return this._data.elasticity;
-  }
-
-  public collide(position: { x: number; y: number }, velocity: { x: number; y: number }): BounceEvent {
-    const dx = position.x - this._data.repellorPosition.x;
-    const dy = position.y - this._data.repellorPosition.y;
-    const distance = Math.sqrt(dx * dx + dy * dy);
-    if (distance === 0) {
-      return {
-        incoming: position,
-        outgoing: position,
-        velocity: 0,
-        energyLoss: 0,
-        scatterAngle: 0,
-      };
-    }
-    const normalX = dx / distance;
-    const normalY = dy / distance;
-    const dotProduct = velocity.x * normalX + velocity.y * normalY;
-    const incomingSpeed = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-    const reflectedX = velocity.x - 2 * dotProduct * normalX;
-    const reflectedY = velocity.y - 2 * dotProduct * normalY;
-    const outgoingSpeed = incomingSpeed * this._data.elasticity * this._data.repellorStrength;
-    const energyLoss = incomingSpeed ** 2 - outgoingSpeed ** 2;
-    const outgoingX = position.x + reflectedX * this._data.elasticity;
-    const outgoingY = position.y + reflectedY * this._data.elasticity;
-    const scatterAngle = Math.atan2(reflectedY, reflectedX) - Math.atan2(velocity.y, velocity.x);
-    this._lastScatterAngle = scatterAngle;
-    this._totalBounces++;
-    this._totalEnergyLost += Math.abs(energyLoss);
-    const event: BounceEvent = {
-      incoming: { ...position },
-      outgoing: { x: outgoingX, y: outgoingY },
-      velocity: outgoingSpeed,
-      energyLoss,
-      scatterAngle,
-    };
+  scatter(particleId: string, targetCharge: number, impactParameter: number): ScatteringEvent | null {
+    const p = this._particles.get(particleId);
+    if (!p) return null;
+    const v = Math.sqrt(p.velocity.x ** 2 + p.velocity.y ** 2);
+    if (v === 0) return null;
+    const k = this._coulombConstant;
+    const numerator = k * p.charge * targetCharge;
+    const denominator = p.mass * v * v;
+    const cotHalfTheta = (impactParameter * denominator) / numerator;
+    const theta = 2 * Math.atan(1 / Math.abs(cotHalfTheta));
+    const crossSection = Math.PI * impactParameter * impactParameter;
+    const pInitial = p.mass * v;
+    const pFinal = p.mass * v * Math.cos(theta);
+    const momentumTransfer = Math.abs(pFinal - pInitial);
+    const energyLoss = 0.5 * p.mass * v * v * (1 - Math.cos(theta) ** 2);
+    const event: ScatteringEvent = { particleId, angle: theta, crossSection, momentumTransfer, energyLoss };
     this._events.push(event);
-    if (this._events.length > 30) {
-      this._events.shift();
-    }
+    if (this._events.length > 50) this._events.shift();
     return event;
   }
 
-  public setElasticity(elasticity: number): void {
-    this._data.elasticity = Math.max(0, Math.min(1, elasticity));
+  differentialCrossSection(theta: number, particleId: string, targetCharge: number, energy: number): number {
+    const p = this._particles.get(particleId);
+    if (!p) return 0;
+    const k = this._coulombConstant;
+    const numerator = k * p.charge * targetCharge;
+    const denominator = 4 * energy;
+    return Math.pow(numerator / (4 * denominator * Math.sin(theta / 2) ** 2), 2);
   }
 
-  public adjustStrength(delta: number): void {
-    this._data.repellorStrength = Math.max(0.1, this._data.repellorStrength + delta);
+  totalCrossSection(particleId: string, maxImpact: number): number {
+    return Math.PI * maxImpact * maxImpact;
   }
 
-  public moveRepellor(x: number, y: number): void {
-    this._data.repellorPosition = { x, y };
-  }
-
-  public computeCrossSection(impactParameter: number): number {
-    return Math.PI * impactParameter ** 2 * this._data.repellorStrength;
-  }
-
-  public averageEnergyLoss(): number {
-    if (this._events.length === 0) {
-      return 0;
+  kineticEnergyDistribution(): Record<number, number> {
+    const dist: Record<number, number> = {};
+    for (const p of this._particles.values()) {
+      const ke = 0.5 * p.mass * (p.velocity.x ** 2 + p.velocity.y ** 2);
+      const bin = Math.floor(ke * 10) / 10;
+      dist[bin] = (dist[bin] ?? 0) + 1;
     }
-    return this._totalEnergyLost / this._totalBounces;
+    return dist;
   }
 
-  public isAbsorbed(incomingSpeed: number): boolean {
-    return incomingSpeed * this._data.elasticity < 0.1;
+  averageMomentumTransfer(): number {
+    if (this._events.length === 0) return 0;
+    return this._events.reduce((s, e) => s + e.momentumTransfer, 0) / this._events.length;
   }
 
-  public bounceReport(): Record<string, unknown> {
+  momentumDistribution(): Record<number, number> {
+    const dist: Record<number, number> = {};
+    for (const e of this._events) {
+      const bin = Math.floor(e.momentumTransfer * 10) / 10;
+      dist[bin] = (dist[bin] ?? 0) + 1;
+    }
+    return dist;
+  }
+
+  scatterAngleDistribution(): Record<number, number> {
+    const dist: Record<number, number> = {};
+    for (const e of this._events) {
+      const bin = Math.floor((e.angle * 180 / Math.PI) / 10) * 10;
+      dist[bin] = (dist[bin] ?? 0) + 1;
+    }
+    return dist;
+  }
+
+  totalScatteredEnergy(): number {
+    return this._events.reduce((s, e) => s + e.energyLoss, 0);
+  }
+
+  impactParameterDistribution(): Record<number, number> {
+    const dist: Record<number, number> = {};
+    for (const e of this._events) {
+      const bin = Math.floor(Math.sqrt(e.crossSection / Math.PI) * 10) / 10;
+      dist[bin] = (dist[bin] ?? 0) + 1;
+    }
+    return dist;
+  }
+
+  report(): Record<string, unknown> {
     return {
-      bounceId: this.bounceId,
-      repellorPosition: this._data.repellorPosition,
-      repellorStrength: this._data.repellorStrength.toFixed(3),
-      elasticity: this._data.elasticity.toFixed(3),
-      totalBounces: this._totalBounces,
-      totalEnergyLost: this._totalEnergyLost.toFixed(3),
-      averageEnergyLoss: this.averageEnergyLoss().toFixed(3),
-      lastScatterAngle: this._lastScatterAngle.toFixed(3),
-      eventCount: this._events.length,
+      particles: this._particles.size,
+      events: this._events.length,
+      avgMomentumTransfer: this.averageMomentumTransfer(),
+      state: this._state,
     };
   }
 }

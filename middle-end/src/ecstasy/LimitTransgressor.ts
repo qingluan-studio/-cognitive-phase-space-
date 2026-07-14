@@ -1,132 +1,163 @@
-/**
- * 界限逾越者模块：主动超越所有预设极限，
- * 持续推动边界外扩，将不可能变为可能。
- */
-
-export interface SystemLimit {
-  id: string;
-  name: string;
-  originalValue: number;
-  currentValue: number;
-  transgressed: boolean;
-  transgressionCount: number;
+export interface BoundaryViolation {
+  id: number;
+  boundary: string;
+  violatedValue: number;
+  originalLimit: number;
+  timestamp: number;
+  severity: number;
 }
 
-export interface TransgressionAct {
-  limitId: string;
-  attemptedValue: number;
-  achieved: boolean;
-  damage: number;
-  occurredAt: number;
+export interface BoundaryDefinition {
+  name: string;
+  limit: number;
+  hardness: 'hard' | 'soft';
+  gradientFunction: (x: number) => number;
 }
 
 export class LimitTransgressor {
-  private _limits: Map<string, SystemLimit> = new Map();
-  private _acts: TransgressionAct[] = [];
-  private _expansionRate = 0.1;
-  private _damagePerTransgression = 5;
-  private _maxExpansion = 10;
+  private _violations: BoundaryViolation[] = [];
+  private _nextId: number = 0;
+  private _boundaries: Map<string, BoundaryDefinition> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _kktMultipliers: Map<string, number> = new Map();
+  private _violationEntropy: number = 0;
+  private _gradientHistory: number[] = [];
 
-  defineLimit(limit: SystemLimit): void {
-    limit.currentValue = limit.originalValue;
-    limit.transgressed = false;
-    limit.transgressionCount = 0;
-    this._limits.set(limit.id, limit);
+  constructor() {
+    this._state.initializedAt = Date.now();
   }
 
-  attemptTransgress(limitId: string, value: number): TransgressionAct | null {
-    const limit = this._limits.get(limitId);
-    if (!limit) return null;
-    const achieved = value > limit.currentValue;
-    const damage = achieved ? this._damagePerTransgression * (value / limit.currentValue) : 0;
-    const act: TransgressionAct = {
-      limitId,
-      attemptedValue: value,
-      achieved,
-      damage,
-      occurredAt: Date.now(),
+  get violationCount(): number {
+    return this._violations.length;
+  }
+
+  get boundaryCount(): number {
+    return this._boundaries.size;
+  }
+
+  get violationEntropy(): number {
+    return this._violationEntropy;
+  }
+
+  defineBoundary(name: string, limit: number, hardness: 'hard' | 'soft', gradientFunction: (x: number) => number): void {
+    this._boundaries.set(name, { name, limit, hardness, gradientFunction });
+    this._kktMultipliers.set(name, 0);
+  }
+
+  assess(value: number, boundaryName: string): BoundaryViolation | null {
+    const boundary = this._boundaries.get(boundaryName);
+    if (!boundary) return null;
+    const diff = value - boundary.limit;
+    if (diff <= 0) {
+      this._kktMultipliers.set(boundaryName, 0);
+      return null;
+    }
+    const severity = boundary.gradientFunction(value) * diff;
+    const violation: BoundaryViolation = {
+      id: this._nextId++,
+      boundary: boundaryName,
+      violatedValue: value,
+      originalLimit: boundary.limit,
+      timestamp: Date.now(),
+      severity,
     };
-    this._acts.push(act);
-    if (this._acts.length > 300) this._acts.shift();
-    if (achieved) {
-      limit.transgressionCount++;
-      limit.transgressed = true;
-      limit.currentValue = value;
+    this._violations.push(violation);
+    if (this._violations.length > 200) this._violations.shift();
+    const multiplier = Math.max(0, this._kktMultipliers.get(boundaryName) ?? 0);
+    this._kktMultipliers.set(boundaryName, multiplier + severity * 0.1);
+    this._gradientHistory.push(boundary.gradientFunction(value));
+    if (this._gradientHistory.length > 100) this._gradientHistory.shift();
+    this._updateViolationEntropy();
+    return violation;
+  }
+
+  private _updateViolationEntropy(): void {
+    const counts: Record<string, number> = {};
+    for (const v of this._violations) {
+      counts[v.boundary] = (counts[v.boundary] ?? 0) + 1;
     }
-    return act;
-  }
-
-  expandLimit(limitId: string): boolean {
-    const limit = this._limits.get(limitId);
-    if (!limit) return false;
-    const newCap = limit.currentValue * (1 + this._expansionRate);
-    if (newCap > limit.originalValue * this._maxExpansion) return false;
-    limit.currentValue = newCap;
-    return true;
-  }
-
-  isTransgressed(limitId: string): boolean {
-    return this._limits.get(limitId)?.transgressed ?? false;
-  }
-
-  findMostTransgressed(): SystemLimit | null {
-    let max = 0;
-    let result: SystemLimit | null = null;
-    for (const limit of this._limits.values()) {
-      if (limit.transgressionCount > max) {
-        max = limit.transgressionCount;
-        result = limit;
-      }
+    const total = this._violations.length;
+    let entropy = 0;
+    for (const count of Object.values(counts)) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
     }
-    return result;
+    this._violationEntropy = entropy;
   }
 
-  computeTotalExpansion(): number {
-    let total = 0;
-    for (const limit of this._limits.values()) {
-      total += (limit.currentValue - limit.originalValue) / limit.originalValue;
-    }
-    return total;
+  computeLagrangian(boundaryName: string, value: number): number {
+    const boundary = this._boundaries.get(boundaryName);
+    if (!boundary) return 0;
+    const f = value * value;
+    const g = value - boundary.limit;
+    const lambda = this._kktMultipliers.get(boundaryName) ?? 0;
+    return f + lambda * g;
   }
 
-  resetLimit(limitId: string): boolean {
-    const limit = this._limits.get(limitId);
-    if (!limit) return false;
-    limit.currentValue = limit.originalValue;
-    limit.transgressed = false;
-    limit.transgressionCount = 0;
-    return true;
+  gradientAscentStep(boundaryName: string, currentValue: number, stepSize: number): number {
+    const boundary = this._boundaries.get(boundaryName);
+    if (!boundary) return currentValue;
+    return currentValue + stepSize * boundary.gradientFunction(currentValue);
   }
 
-  setExpansionRate(rate: number): void {
-    this._expansionRate = Math.max(0, rate);
+  checkComplementarySlackness(boundaryName: string): boolean {
+    const boundary = this._boundaries.get(boundaryName);
+    if (!boundary) return false;
+    const lambda = this._kktMultipliers.get(boundaryName) ?? 0;
+    const slack = Math.max(0, 0);
+    return Math.abs(lambda * slack) < 1e-6;
   }
 
-  setDamagePerTransgression(value: number): void {
-    this._damagePerTransgression = Math.max(0, value);
+  isLimitViolated(boundaryName: string): boolean {
+    return this._violations.some(v => v.boundary === boundaryName);
   }
 
-  getActsByLimit(limitId: string): TransgressionAct[] {
-    return this._acts.filter(a => a.limitId === limitId);
+  getViolationsForBoundary(boundaryName: string): BoundaryViolation[] {
+    return this._violations.filter(v => v.boundary === boundaryName);
   }
 
-  getSuccessfulTransgressions(): TransgressionAct[] {
-    return this._acts.filter(a => a.achieved);
+  mostSevereViolation(): BoundaryViolation | null {
+    if (this._violations.length === 0) return null;
+    return this._violations.reduce((worst, v) => (v.severity > worst.severity ? v : worst));
   }
 
-  listAllLimits(): SystemLimit[] {
-    return Array.from(this._limits.values());
+  averageSeverity(): number {
+    if (this._violations.length === 0) return 0;
+    return this._violations.reduce((acc, v) => acc + v.severity, 0) / this._violations.length;
   }
 
-  getLimit(limitId: string): SystemLimit | null {
-    return this._limits.get(limitId) ?? null;
+  getRecentViolations(limit: number = 50): BoundaryViolation[] {
+    return this._violations.slice(-limit);
   }
 
-  get limitCount(): number {
-    return this._limits.size;
+  getGradientMean(): number {
+    if (this._gradientHistory.length === 0) return 0;
+    return this._gradientHistory.reduce((a, b) => a + b, 0) / this._gradientHistory.length;
   }
 
-  get totalTransgressions(): number {
-    return this._acts.length;
+  resetBoundary(boundaryName: string): void {
+    this._kktMultipliers.set(boundaryName, 0);
+    this._violations = this._violations.filter(v => v.boundary !== boundaryName);
+    this._updateViolationEntropy();
+  }
+
+  clearAll(): void {
+    this._violations = [];
+    this._nextId = 0;
+    this._kktMultipliers.clear();
+    this._gradientHistory = [];
+    this._violationEntropy = 0;
+  }
+
+  transgressorReport(): Record<string, unknown> {
+    return {
+      violationCount: this._violations.length,
+      boundaryCount: this._boundaries.size,
+      state: this._state,
+      violationEntropy: this._violationEntropy.toFixed(4),
+      averageSeverity: this.averageSeverity().toFixed(3),
+      gradientMean: this.getGradientMean().toFixed(4),
+      kktMultipliers: Object.fromEntries(this._kktMultipliers),
+    };
   }
 }

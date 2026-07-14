@@ -1,134 +1,122 @@
-/**
- * OsmoticBalance - 渗透平衡
- * 维持膜两侧信息/物质密度的动态平衡，通过调节渗透压
- * 防止一侧过载或干涸，保持系统的稳定内环境。
- */
-
-export interface OsmoticBalanceData {
-  readonly balanceId: string;
-  soluteInside: number;
-  soluteOutside: number;
-  solventVolume: number;
+export interface Compartment {
+  id: string;
+  volume: number;
+  soluteConcentration: number;
   membranePermeability: number;
+  externalConcentration: number;
 }
 
-export interface OsmosisStep {
-  flowDirection: 'in' | 'out' | 'none';
-  volume: number;
-  pressureDelta: number;
+export interface OsmoticFlux {
+  from: string;
+  to: string;
+  waterFlux: number;
+  osmoticPressure: number;
+  timestamp: number;
 }
 
 export class OsmoticBalance {
-  private _data: OsmoticBalanceData;
-  private _steps: OsmosisStep[] = [];
-  private _osmoticPressure: number = 0;
-  private _lysisRisk: number = 0;
-  private _equilibriumReached: boolean = false;
+  private _compartments: Map<string, Compartment> = new Map();
+  private _fluxes: OsmoticFlux[] = [];
+  private _state: Record<string, unknown> = {};
+  private _gasConstant: number = 0.0821;
+  private _temperature: number = 310;
+  private _vantHoffFactor: number = 1;
+  private _totalEntropy: number = 0;
 
-  constructor(data: OsmoticBalanceData) {
-    this._data = { ...data };
-    this._computePressure();
+  addCompartment(compartment: Compartment): void {
+    this._compartments.set(compartment.id, compartment);
   }
 
-  get balanceId(): string {
-    return this._data.balanceId;
+  computeOsmoticPressure(compartmentId: string): number {
+    const comp = this._compartments.get(compartmentId);
+    if (!comp) return 0;
+    return this._vantHoffFactor * comp.soluteConcentration * this._gasConstant * this._temperature;
   }
 
-  get osmoticPressure(): number {
-    return this._osmoticPressure;
-  }
-
-  get lysisRisk(): number {
-    return this._lysisRisk;
-  }
-
-  get equilibriumReached(): boolean {
-    return this._equilibriumReached;
-  }
-
-  private _computePressure(): void {
-    const inConc = this._data.soluteInside / (this._data.solventVolume + 0.001);
-    const outConc = this._data.soluteOutside / (this._data.solventVolume + 0.001);
-    this._osmoticPressure = Math.abs(inConc - outConc);
-  }
-
-  public stepOsmosis(): OsmosisStep {
-    this._computePressure();
-    const inConc = this._data.soluteInside / (this._data.solventVolume + 0.001);
-    const outConc = this._data.soluteOutside / (this._data.solventVolume + 0.001);
-    let direction: 'in' | 'out' | 'none' = 'none';
-    let volume = 0;
-    if (Math.abs(inConc - outConc) < 0.01) {
-      this._equilibriumReached = true;
-      direction = 'none';
-    } else if (inConc > outConc) {
-      direction = 'in';
-      volume = this._osmoticPressure * this._data.membranePermeability * 10;
-      this._data.solventVolume += volume;
-    } else {
-      direction = 'out';
-      volume = this._osmoticPressure * this._data.membranePermeability * 10;
-      this._data.solventVolume = Math.max(0.1, this._data.solventVolume - volume);
+  equilibrate(compartmentId: string, dt: number = 1): OsmoticFlux | null {
+    const comp = this._compartments.get(compartmentId);
+    if (!comp) return null;
+    const piIn = this.computeOsmoticPressure(compartmentId);
+    const piOut = this._vantHoffFactor * comp.externalConcentration * this._gasConstant * this._temperature;
+    const deltaPi = piIn - piOut;
+    const waterFlux = -comp.membranePermeability * deltaPi * dt;
+    const newVolume = comp.volume + waterFlux;
+    if (newVolume > 0) {
+      comp.soluteConcentration = (comp.soluteConcentration * comp.volume) / newVolume;
+      comp.volume = newVolume;
     }
-    this._updateLysisRisk(direction, volume);
-    const step: OsmosisStep = {
-      flowDirection: direction,
-      volume,
-      pressureDelta: this._osmoticPressure,
+    const flux: OsmoticFlux = {
+      from: compartmentId,
+      to: 'external',
+      waterFlux,
+      osmoticPressure: piIn,
+      timestamp: Date.now(),
     };
-    this._steps.push(step);
-    if (this._steps.length > 40) {
-      this._steps.shift();
+    this._fluxes.push(flux);
+    if (this._fluxes.length > 200) this._fluxes.shift();
+    this._updateEntropy();
+    return flux;
+  }
+
+  private _updateEntropy(): void {
+    const concentrations = Array.from(this._compartments.values()).map(c => c.soluteConcentration);
+    const total = concentrations.reduce((a, b) => a + b, 0);
+    if (total === 0) {
+      this._totalEntropy = 0;
+      return;
     }
-    return step;
-  }
-
-  private _updateLysisRisk(direction: 'in' | 'out' | 'none', volume: number): void {
-    if (direction === 'in') {
-      this._lysisRisk = Math.min(1, this._lysisRisk + volume * 0.05);
-    } else if (direction === 'out') {
-      this._lysisRisk = Math.max(0, this._lysisRisk - volume * 0.02);
+    let entropy = 0;
+    for (const c of concentrations) {
+      const p = c / total;
+      if (p > 0) entropy -= p * Math.log2(p);
     }
+    this._totalEntropy = entropy;
   }
 
-  public addSolute(side: 'inside' | 'outside', amount: number): void {
-    if (side === 'inside') {
-      this._data.soluteInside += amount;
-    } else {
-      this._data.soluteOutside += amount;
-    }
-    this._equilibriumReached = false;
+  getCompartment(id: string): Compartment | null {
+    return this._compartments.get(id) ?? null;
   }
 
-  public adjustPermeability(delta: number): void {
-    this._data.membranePermeability = Math.max(0, Math.min(1, this._data.membranePermeability + delta));
+  totalVolume(): number {
+    return Array.from(this._compartments.values()).reduce((s, c) => s + c.volume, 0);
   }
 
-  public regulatePressure(target: number): void {
-    const diff = target - this._osmoticPressure;
-    if (diff > 0) {
-      this._data.soluteInside += diff * 0.5;
-    } else {
-      this._data.soluteOutside += Math.abs(diff) * 0.5;
-    }
-    this._computePressure();
+  averageConcentration(): number {
+    if (this._compartments.size === 0) return 0;
+    return Array.from(this._compartments.values()).reduce((s, c) => s + c.soluteConcentration, 0) / this._compartments.size;
   }
 
-  public checkLysis(): boolean {
-    return this._lysisRisk > 0.8;
+  setExternalConcentration(compartmentId: string, concentration: number): void {
+    const comp = this._compartments.get(compartmentId);
+    if (comp) comp.externalConcentration = concentration;
   }
 
-  public osmosisReport(): Record<string, unknown> {
+  setVantHoffFactor(factor: number): void {
+    this._vantHoffFactor = Math.max(0, factor);
+  }
+
+  setTemperature(temp: number): void {
+    this._temperature = Math.max(0, temp);
+  }
+
+  get fluxCount(): number {
+    return this._fluxes.length;
+  }
+
+  get totalEntropy(): number {
+    return this._totalEntropy;
+  }
+
+  balanceReport(): Record<string, unknown> {
     return {
-      balanceId: this.balanceId,
-      soluteInside: this._data.soluteInside.toFixed(2),
-      soluteOutside: this._data.soluteOutside.toFixed(2),
-      solventVolume: this._data.solventVolume.toFixed(2),
-      permeability: this._data.membranePermeability.toFixed(3),
-      osmoticPressure: this._osmoticPressure.toFixed(3),
-      lysisRisk: this._lysisRisk.toFixed(3),
-      equilibrium: this._equilibriumReached,
-      stepCount: this._steps.length,
+      compartmentCount: this._compartments.size,
+      totalVolume: this.totalVolume().toFixed(4),
+      averageConcentration: this.averageConcentration().toFixed(4),
+      totalEntropy: this._totalEntropy.toFixed(4),
+      fluxCount: this._fluxes.length,
+      temperature: this._temperature.toFixed(2),
+      vantHoffFactor: this._vantHoffFactor.toFixed(2),
+      state: this._state,
     };
   }
 }

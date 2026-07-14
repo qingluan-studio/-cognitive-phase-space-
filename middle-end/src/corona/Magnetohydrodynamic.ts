@@ -1,8 +1,3 @@
-/**
- * 磁流体动力学模块：磁场与导电流体相互耦合的物理过程。
- * 用于刻画系统中磁场与流场相互作用的复杂行为。
- */
-
 export interface MHDState {
   time: number;
   magneticField: number;
@@ -28,6 +23,10 @@ export class Magnetohydrodynamic {
   private _stability: MHDStability | null = null;
   private _time: number = 0;
   private _state: Record<string, unknown> = {};
+  private _vectorPotential: number = 0;
+  private _magneticReynolds: number = 0;
+  private _turbulenceSpectrum: number[] = [];
+  private _alfvenWaveAmplitude: number = 0;
 
   constructor(config: MagnetohydrodynamicConfig) {
     this._config = config;
@@ -39,6 +38,10 @@ export class Magnetohydrodynamic {
 
   get time(): number {
     return this._time;
+  }
+
+  get magneticReynolds(): number {
+    return this._magneticReynolds;
   }
 
   step(dt: number): MHDState {
@@ -57,7 +60,19 @@ export class Magnetohydrodynamic {
     };
     this._states.push(entry);
     if (this._states.length > 100) this._states.shift();
+    this._updateDerived(magneticField, fluidVelocity, dt);
     return entry;
+  }
+
+  private _updateDerived(b: number, v: number, dt: number): void {
+    this._vectorPotential += b * dt;
+    const nu = 0.01;
+    const L = 1;
+    this._magneticReynolds = Math.abs(v) * L / nu;
+    const alfven = this._config.baseField / Math.sqrt(this._config.permeability * this._config.density);
+    this._alfvenWaveAmplitude = Math.sin(this._time * alfven);
+    const kVals = [1, 2, 3, 4, 5];
+    this._turbulenceSpectrum = kVals.map((k) => Math.exp(-k) * b * b / (k * k + 1));
   }
 
   computeStability(): MHDStability {
@@ -95,6 +110,18 @@ export class Magnetohydrodynamic {
     return Math.max(...this._states.map((s) => Math.abs(s.magneticField)));
   }
 
+  computeOhmicHeating(): number {
+    const eta = 0.001;
+    const j = this._states.length > 0 ? this._states[this._states.length - 1].magneticField : 0;
+    return eta * j * j;
+  }
+
+  computeForceFreeAlpha(): number {
+    const last = this._states[this._states.length - 1];
+    if (!last || Math.abs(last.magneticField) < 1e-9) return 0;
+    return last.fluidVelocity / last.magneticField;
+  }
+
   setDensity(density: number): void {
     this._config.density = density;
     this._state.densityUpdated = density;
@@ -106,6 +133,12 @@ export class Magnetohydrodynamic {
       time: this._time,
       stability: this._stability,
       state: this._state,
+      vectorPotential: this._vectorPotential.toFixed(4),
+      magneticReynolds: this._magneticReynolds.toFixed(3),
+      alfvenWaveAmplitude: this._alfvenWaveAmplitude.toFixed(4),
+      turbulenceSpectrum: this._turbulenceSpectrum,
+      ohmicHeating: this.computeOhmicHeating().toFixed(4),
+      forceFreeAlpha: this.computeForceFreeAlpha().toFixed(4),
     };
   }
 }

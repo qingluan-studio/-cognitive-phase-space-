@@ -17,6 +17,19 @@ export class PointMutation {
   private _pyrimidines: Set<string> = new Set(['c', 't']);
   private _positionWeight: Map<number, number> = new Map();
   private _maxRecords: number = 500;
+  private _mutationMatrix: number[][] = [];
+  private _stationaryDistribution: number[] = [];
+
+  constructor() {
+    const n = this._alphabet.length;
+    this._mutationMatrix = Array.from({ length: n }, () => Array.from({ length: n }, () => 0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        this._mutationMatrix[i][j] = i === j ? 0.95 : 0.05 / (n - 1);
+      }
+    }
+    this._stationaryDistribution = Array.from({ length: n }, () => 1 / n);
+  }
 
   mutate(source: string, position?: number): PointMutationRecord | null {
     if (source.length === 0) return null;
@@ -113,10 +126,33 @@ export class PointMutation {
     return spectrum;
   }
 
+  computePositionEntropy(): number {
+    const total = Array.from(this._positionWeight.values()).reduce((s, v) => s + v, 0);
+    if (total === 0) return 0;
+    let entropy = 0;
+    for (const count of this._positionWeight.values()) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    return entropy;
+  }
+
   computeHotspots(): number[] {
     const sorted = [...this._positionWeight.entries()].sort((a, b) => b[1] - a[1]);
     const maxCount = sorted.length > 0 ? sorted[0][1] : 1;
     return sorted.filter(([, c]) => c >= maxCount * 0.5).map(([p]) => p);
+  }
+
+  computeTamuraNeiDistance(seqA: string, seqB: string): number {
+    const p = this.hammingDistance(seqA, seqB) / Math.max(seqA.length, seqB.length);
+    if (p >= 0.75) return Infinity;
+    const purineTrans = this._records.filter((r) => this._purines.has(r.originalChar) && this._purines.has(r.mutatedChar)).length;
+    const pyrimidineTrans = this._records.filter((r) => this._pyrimidines.has(r.originalChar) && this._pyrimidines.has(r.mutatedChar)).length;
+    const total = this._records.length || 1;
+    const w1 = 1 - purineTrans / total - pyrimidineTrans / total;
+    const w2 = 1 - 2 * pyrimidineTrans / total;
+    const w3 = 1 - 2 * purineTrans / total;
+    return -Math.log(w1) - 0.5 * Math.log(w2) - 0.5 * Math.log(w3);
   }
 
   setAlphabet(alphabet: string): void {
@@ -133,6 +169,10 @@ export class PointMutation {
 
   get totalMutations(): number {
     return this._records.length;
+  }
+
+  get transitionMatrix(): number[][] {
+    return this._mutationMatrix.map((row) => [...row]);
   }
 
   private _weightedPosition(length: number): number {
@@ -152,6 +192,14 @@ export class PointMutation {
   }
 
   private _selectMutatedChar(original: string): string {
+    const idx = this._alphabet.indexOf(original);
+    if (idx >= 0 && idx < this._mutationMatrix.length) {
+      let roll = Math.random();
+      for (let j = 0; j < this._alphabet.length; j++) {
+        roll -= this._mutationMatrix[idx][j];
+        if (roll <= 0) return this._alphabet[j];
+      }
+    }
     const candidates = this._alphabet.split('').filter((c) => c !== original);
     return candidates[Math.floor(Math.random() * candidates.length)];
   }

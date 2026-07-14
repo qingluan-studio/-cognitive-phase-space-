@@ -1,107 +1,139 @@
-/**
- * 荧光素酶报告模块：通过发光强度表示特定基因表达水平。
- * 用于将内部状态量化为可观测的光信号输出。
- */
-
-export interface ReporterGene {
-  id: string;
-  expressionLevel: number;
-  baselineLuminescence: number;
+export interface ReporterReading {
+  time: number;
+  luminescence: number;
+  substrate: number;
+  enzymeActive: boolean;
 }
 
-export type ReporterReading = {
-  gene: string;
-  luminescence: number;
-  foldChange: number;
-  detected: boolean;
+export type KineticsResult = {
+  vmax: number;
+  km: number;
+  reactionRate: number;
 };
 
-export interface LuciferaseConfig {
-  detectionThreshold: number;
-  substrateConcentration: number;
-  maxGenes: number;
+export interface ReporterConfig {
+  enzymeConcentration: number;
+  substrateInitial: number;
+  temperature: number;
 }
 
 export class LuciferaseReporter {
-  private _config: LuciferaseConfig;
-  private _genes: ReporterGene[] = [];
+  private _config: ReporterConfig;
   private _readings: ReporterReading[] = [];
+  private _kinetics: KineticsResult | null = null;
   private _state: Record<string, unknown> = {};
+  private _michaelisMentenParams: [number, number] = [1, 0.5];
+  private _activationEnergy: number = 50;
+  private _arrheniusFactor: number = 1;
 
-  constructor(config: LuciferaseConfig) {
+  constructor(config: ReporterConfig) {
     this._config = config;
-  }
-
-  get geneCount(): number {
-    return this._genes.length;
+    this._updateArrhenius();
   }
 
   get readingCount(): number {
     return this._readings.length;
   }
 
-  registerGene(gene: ReporterGene): void {
-    this._genes.push(gene);
-    if (this._genes.length > this._config.maxGenes) {
-      this._genes.shift();
-    }
+  get totalLuminescence(): number {
+    return this._readings.reduce((acc, r) => acc + r.luminescence, 0);
   }
 
-  read(geneId: string): ReporterReading | null {
-    const gene = this._genes.find((g) => g.id === geneId);
-    if (!gene) return null;
-    const luminescence =
-      gene.expressionLevel * gene.baselineLuminescence * this._config.substrateConcentration;
-    const foldChange = gene.baselineLuminescence > 0
-      ? luminescence / gene.baselineLuminescence
-      : 0;
-    const detected = luminescence >= this._config.detectionThreshold;
-    const reading: ReporterReading = { gene: geneId, luminescence, foldChange, detected };
+  get arrheniusFactor(): number {
+    return this._arrheniusFactor;
+  }
+
+  private _updateArrhenius(): void {
+    const R = 8.314;
+    const T = this._config.temperature + 273.15;
+    this._arrheniusFactor = Math.exp(-this._activationEnergy / (R * T * 0.001));
+  }
+
+  private _michaelisMenten(substrate: number): number {
+    const [vmax, km] = this._michaelisMentenParams;
+    return (vmax * substrate) / (km + substrate + 0.001);
+  }
+
+  private _hillEquation(substrate: number, n: number): number {
+    const [vmax, km] = this._michaelisMentenParams;
+    return (vmax * Math.pow(substrate, n)) / (Math.pow(km, n) + Math.pow(substrate, n));
+  }
+
+  record(luminescence: number, substrate: number): ReporterReading {
+    const enzymeActive = substrate > 0.01;
+    const reading: ReporterReading = {
+      time: Date.now(),
+      luminescence,
+      substrate,
+      enzymeActive,
+    };
     this._readings.push(reading);
-    if (this._readings.length > 50) this._readings.shift();
+    if (this._readings.length > 40) this._readings.shift();
+    const rate = this._michaelisMenten(substrate) * this._arrheniusFactor;
+    this._state.lastRate = rate;
     return reading;
   }
 
-  readAll(): ReporterReading[] {
-    return this._genes.map((g) => this.read(g.id)!).filter((r) => r !== null);
+  computeKinetics(): KineticsResult {
+    const active = this._readings.filter((r) => r.enzymeActive);
+    const vmax = active.length > 0 ? Math.max(...active.map((r) => r.luminescence)) : 0;
+    const halfVmax = vmax / 2;
+    let km = 0;
+    for (const r of active) {
+      if (r.luminescence >= halfVmax) {
+        km = r.substrate;
+        break;
+      }
+    }
+    const reactionRate = vmax * this._arrheniusFactor;
+    this._kinetics = { vmax, km, reactionRate };
+    this._michaelisMentenParams = [vmax, km];
+    return this._kinetics;
   }
 
-  setExpression(geneId: string, level: number): boolean {
-    const gene = this._genes.find((g) => g.id === geneId);
-    if (!gene) return false;
-    gene.expressionLevel = Math.max(0, level);
-    return true;
+  isSaturated(): boolean {
+    const last = this._readings[this._readings.length - 1];
+    if (!last) return false;
+    const rate = this._michaelisMenten(last.substrate);
+    return rate > this._michaelisMentenParams[0] * 0.95;
   }
 
-  brightestGene(): ReporterGene | null {
-    if (this._genes.length === 0) return null;
-    return this._genes.reduce((best, g) =>
-      g.expressionLevel * g.baselineLuminescence > best.expressionLevel * best.baselineLuminescence
-        ? g
-        : best
-    );
+  estimateSubstrateRemaining(): number {
+    const consumed = this._readings.reduce((acc, r) => acc + r.luminescence * 0.01, 0);
+    return Math.max(0, this._config.substrateInitial - consumed);
   }
 
-  averageExpression(): number {
-    if (this._genes.length === 0) return 0;
-    return this._genes.reduce((acc, g) => acc + g.expressionLevel, 0) / this._genes.length;
+  setTemperature(temperature: number): void {
+    this._config.temperature = temperature;
+    this._updateArrhenius();
   }
 
-  detectedCount(): number {
-    return this._readings.filter((r) => r.detected).length;
+  averageRate(): number {
+    if (this._readings.length < 2) return 0;
+    const rates: number[] = [];
+    for (let i = 1; i < this._readings.length; i++) {
+      const dt = (this._readings[i].time - this._readings[i - 1].time) / 1000;
+      const dl = this._readings[i].luminescence - this._readings[i - 1].luminescence;
+      if (dt > 0) rates.push(dl / dt);
+    }
+    return rates.length > 0 ? rates.reduce((a, b) => a + b, 0) / rates.length : 0;
   }
 
-  replenishSubstrate(amount: number): void {
-    this._config.substrateConcentration += amount;
-    this._state.replenishedAt = Date.now();
+  reset(): void {
+    this._readings = [];
+    this._kinetics = null;
+    this._arrheniusFactor = 1;
+    this._state = {};
   }
 
   report(): Record<string, unknown> {
     return {
-      geneCount: this._genes.length,
-      readingCount: this._readings.length,
-      detected: this.detectedCount(),
+      readings: this._readings.length,
+      totalLuminescence: this.totalLuminescence.toFixed(3),
+      kinetics: this._kinetics,
       state: this._state,
+      arrheniusFactor: this._arrheniusFactor.toFixed(4),
+      averageRate: this.averageRate().toFixed(4),
     };
   }
 }

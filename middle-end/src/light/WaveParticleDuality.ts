@@ -1,116 +1,127 @@
-/**
- * 波粒二象性模块：信息既表现为连续波动又表现为离散粒子。
- * 用于建模同时具备连续与离散特性的混合信息处理。
- */
-
-export interface WaveState {
-  amplitude: number;
-  frequency: number;
-  phase: number;
-}
-
-export interface ParticleState {
-  position: number;
+export interface QuantumState {
+  waveAmplitude: number;
+  particlePosition: number;
   momentum: number;
-  energy: number;
+  probability: number;
 }
 
-export type DualityMeasurement = {
-  mode: 'wave' | 'particle';
+export type MeasurementOutcome = {
+  collapsedTo: 'wave' | 'particle';
   value: number;
   uncertainty: number;
 };
 
 export interface DualityConfig {
   planckConstant: number;
-  observationStrength: number;
-  wavelength: number;
+  slitSeparation: number;
+  screenDistance: number;
 }
 
 export class WaveParticleDuality {
   private _config: DualityConfig;
-  private _wave: WaveState;
-  private _particle: ParticleState;
-  private _measurements: DualityMeasurement[] = [];
+  private _states: QuantumState[] = [];
+  private _outcomes: MeasurementOutcome[] = [];
   private _state: Record<string, unknown> = {};
+  private _deBroglieWavelength: number = 0;
+  private _uncertaintyProduct: number = 0;
+  private _interferencePattern: number[] = [];
 
   constructor(config: DualityConfig) {
     this._config = config;
-    this._wave = { amplitude: 1, frequency: 1 / config.wavelength, phase: 0 };
-    this._particle = { position: 0, momentum: 1, energy: 1 };
   }
 
-  get waveMode(): WaveState {
-    return { ...this._wave };
+  get stateCount(): number {
+    return this._states.length;
   }
 
-  get particleMode(): ParticleState {
-    return { ...this._particle };
+  get uncertaintyProduct(): number {
+    return this._uncertaintyProduct;
   }
 
-  get measurementCount(): number {
-    return this._measurements.length;
+  get deBroglieWavelength(): number {
+    return this._deBroglieWavelength;
   }
 
-  evolve(time: number): void {
-    this._wave.phase += 2 * Math.PI * this._wave.frequency * time;
-    this._particle.position += (this._particle.momentum * time) / this._config.planckConstant;
-    this._wave.amplitude = Math.cos(this._wave.phase);
+  private _computeDeBroglie(momentum: number): number {
+    return this._config.planckConstant / (momentum + 0.001);
   }
 
-  measure(): DualityMeasurement {
-    const observation = this._config.observationStrength;
-    let mode: 'wave' | 'particle';
-    let value: number;
-    let uncertainty: number;
-    if (observation > 0.5) {
-      mode = 'particle';
-      value = this._particle.position;
-      uncertainty = this._config.planckConstant / (2 * Math.abs(this._particle.momentum));
-    } else {
-      mode = 'wave';
-      value = this._wave.amplitude;
-      uncertainty = this._config.planckConstant / (2 * this._wave.frequency);
+  private _computeUncertainty(position: number, momentum: number): void {
+    const deltaX = Math.abs(position) * 0.1;
+    const deltaP = Math.abs(momentum) * 0.1;
+    this._uncertaintyProduct = deltaX * deltaP;
+  }
+
+  private _computeInterference(position: number): number {
+    const k = (2 * Math.PI) / this._deBroglieWavelength;
+    const d = this._config.slitSeparation;
+    const l = this._config.screenDistance;
+    const theta = position / l;
+    const pathDiff = d * Math.sin(theta);
+    const phaseDiff = k * pathDiff;
+    return Math.cos(phaseDiff / 2) * Math.cos(phaseDiff / 2);
+  }
+
+  superpose(waveAmplitude: number, particlePosition: number, momentum: number): QuantumState {
+    this._deBroglieWavelength = this._computeDeBroglie(momentum);
+    this._computeUncertainty(particlePosition, momentum);
+    const probability = waveAmplitude * waveAmplitude;
+    const state: QuantumState = { waveAmplitude, particlePosition, momentum, probability };
+    this._states.push(state);
+    if (this._states.length > 30) this._states.shift();
+    const interference = this._computeInterference(particlePosition);
+    this._interferencePattern.push(interference);
+    if (this._interferencePattern.length > 30) this._interferencePattern.shift();
+    return state;
+  }
+
+  measure(): MeasurementOutcome {
+    if (this._states.length === 0) {
+      return { collapsedTo: 'particle', value: 0, uncertainty: Infinity };
     }
-    const result: DualityMeasurement = { mode, value, uncertainty };
-    this._measurements.push(result);
-    if (this._measurements.length > 30) this._measurements.shift();
-    return result;
+    const last = this._states[this._states.length - 1];
+    const waveProb = last.waveAmplitude * last.waveAmplitude;
+    const collapsedTo = Math.random() < waveProb ? 'wave' : 'particle';
+    const value = collapsedTo === 'wave' ? last.waveAmplitude : last.particlePosition;
+    const uncertainty = this._uncertaintyProduct / (Math.abs(value) + 0.001);
+    const outcome: MeasurementOutcome = { collapsedTo, value, uncertainty };
+    this._outcomes.push(outcome);
+    if (this._outcomes.length > 30) this._outcomes.shift();
+    this._state.lastMeasurement = collapsedTo;
+    return outcome;
   }
 
-  setObservationStrength(strength: number): void {
-    this._config.observationStrength = Math.max(0, Math.min(1, strength));
-    this._state.observationAdjusted = strength;
+  computePattern(): number[] {
+    return [...this._interferencePattern];
   }
 
-  averageUncertainty(): number {
-    if (this._measurements.length === 0) return 0;
-    return this._measurements.reduce((acc, m) => acc + m.uncertainty, 0) / this._measurements.length;
+  averageProbability(): number {
+    if (this._states.length === 0) return 0;
+    return this._states.reduce((acc, s) => acc + s.probability, 0) / this._states.length;
   }
 
-  dominantMode(): 'wave' | 'particle' {
-    if (this._measurements.length === 0) return 'wave';
-    const waves = this._measurements.filter((m) => m.mode === 'wave').length;
-    return waves > this._measurements.length / 2 ? 'wave' : 'particle';
-  }
-
-  collapse(): void {
-    this._wave.amplitude = 0;
-    this._state.collapsedAt = Date.now();
+  violatesUncertainty(): boolean {
+    return this._uncertaintyProduct < this._config.planckConstant / 2;
   }
 
   reset(): void {
-    this._wave = { amplitude: 1, frequency: 1 / this._config.wavelength, phase: 0 };
-    this._particle = { position: 0, momentum: 1, energy: 1 };
-    this._measurements = [];
+    this._states = [];
+    this._outcomes = [];
+    this._interferencePattern = [];
+    this._uncertaintyProduct = 0;
+    this._deBroglieWavelength = 0;
+    this._state = {};
   }
 
   report(): Record<string, unknown> {
     return {
-      wave: this._wave,
-      particle: this._particle,
-      measurements: this._measurements.length,
+      states: this._states.length,
+      outcomes: this._outcomes.length,
+      averageProbability: this.averageProbability().toFixed(4),
       state: this._state,
+      uncertaintyProduct: this._uncertaintyProduct.toFixed(4),
+      deBroglieWavelength: this._deBroglieWavelength.toFixed(4),
+      violatesUncertainty: this.violatesUncertainty(),
     };
   }
 }

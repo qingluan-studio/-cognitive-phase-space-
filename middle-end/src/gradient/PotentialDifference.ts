@@ -1,113 +1,165 @@
-/**
- * PotentialDifference - 势差
- * 利用两点之间的势能差异驱动流动，势差越大驱动越强，
- * 是能量传递与信息流动的根本动力来源。
- */
-
-export interface PotentialDifferenceData {
-  readonly potentialId: string;
-  highPotential: number;
-  lowPotential: number;
-  conductance: number;
+export interface PotentialNode {
+  id: string;
+  potential: number;
+  charge: number;
+  fixed: boolean;
 }
 
-export interface FlowResult {
-  amount: number;
-  duration: number;
-  remainingDifference: number;
+export type PotentialFlow = {
+  source: string;
+  sink: string;
+  current: number;
+  resistance: number;
+};
+
+export interface PotentialConfig {
+  conductivity: number;
+  dielectricConstant: number;
+  relaxationTime: number;
 }
 
 export class PotentialDifference {
-  private _data: PotentialDifferenceData;
-  private _flows: FlowResult[] = [];
-  private _totalFlowed: number = 0;
-  private _efficiency: number = 0.9;
+  private _config: PotentialConfig;
+  private _nodes: PotentialNode[] = [];
+  private _flows: PotentialFlow[] = [];
+  private _state: Record<string, unknown> = {};
+  private _laplacianMatrix: number[][] = [];
+  private _equipotentialError: number = 0;
 
-  constructor(data: PotentialDifferenceData) {
-    this._data = { ...data };
+  constructor(config: PotentialConfig) {
+    this._config = config;
   }
 
-  get potentialId(): string {
-    return this._data.potentialId;
+  get nodeCount(): number {
+    return this._nodes.length;
   }
 
-  get difference(): number {
-    return this._data.highPotential - this._data.lowPotential;
-  }
-
-  get conductance(): number {
-    return this._data.conductance;
-  }
-
-  get totalFlowed(): number {
-    return this._totalFlowed;
-  }
-
-  public flow(duration: number): FlowResult {
-    if (this.difference <= 0) {
-      return { amount: 0, duration, remainingDifference: this.difference };
+  get totalEnergy(): number {
+    let sum = 0;
+    for (const n of this._nodes) {
+      sum += n.potential * n.potential * n.charge;
     }
-    const amount = this.difference * this._data.conductance * this._efficiency * duration;
-    this._data.highPotential -= amount;
-    this._data.lowPotential += amount;
-    this._totalFlowed += amount;
-    const result: FlowResult = {
-      amount,
-      duration,
-      remainingDifference: this.difference,
-    };
-    this._flows.push(result);
-    if (this._flows.length > 30) {
-      this._flows.shift();
+    return sum * 0.5;
+  }
+
+  get equipotentialError(): number {
+    return this._equipotentialError;
+  }
+
+  private _buildLaplacian(): void {
+    const n = this._nodes.length;
+    this._laplacianMatrix = [];
+    for (let i = 0; i < n; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < n; j++) {
+        if (i === j) {
+          row.push(this._nodes.filter((node) => node.id !== this._nodes[i].id).length);
+        } else {
+          row.push(-1);
+        }
+      }
+      this._laplacianMatrix.push(row);
     }
-    return result;
   }
 
-  public chargeHigh(amount: number): void {
-    this._data.highPotential += amount;
+  private _solveGaussSeidel(tolerance: number = 1e-3, maxIter: number = 50): void {
+    const n = this._nodes.length;
+    for (let iter = 0; iter < maxIter; iter++) {
+      let maxDiff = 0;
+      for (let i = 0; i < n; i++) {
+        if (this._nodes[i].fixed) continue;
+        let sum = 0;
+        for (let j = 0; j < n; j++) {
+          if (i !== j) {
+            sum += this._nodes[j].potential;
+          }
+        }
+        const newPotential = sum / Math.max(1, n - 1);
+        const diff = Math.abs(newPotential - this._nodes[i].potential);
+        if (diff > maxDiff) maxDiff = diff;
+        this._nodes[i].potential = newPotential;
+      }
+      if (maxDiff < tolerance) break;
+    }
+    this._equipotentialError = 0;
+    for (let i = 0; i < n; i++) {
+      if (this._nodes[i].fixed) continue;
+      let sum = 0;
+      for (let j = 0; j < n; j++) {
+        if (i !== j) {
+          sum += this._nodes[j].potential;
+        }
+      }
+      const avg = sum / Math.max(1, n - 1);
+      this._equipotentialError += Math.abs(this._nodes[i].potential - avg);
+    }
   }
 
-  public drainLow(amount: number): void {
-    this._data.lowPotential = Math.max(0, this._data.lowPotential - amount);
+  addNode(id: string, potential: number, charge: number, fixed: boolean = false): PotentialNode {
+    const node: PotentialNode = { id, potential, charge, fixed };
+    this._nodes.push(node);
+    if (this._nodes.length > 30) this._nodes.shift();
+    this._buildLaplacian();
+    return node;
   }
 
-  public setConductance(value: number): void {
-    this._data.conductance = Math.max(0, Math.min(1, value));
+  connect(sourceId: string, sinkId: string, resistance: number): PotentialFlow | null {
+    const source = this._nodes.find((n) => n.id === sourceId);
+    const sink = this._nodes.find((n) => n.id === sinkId);
+    if (!source || !sink) return null;
+    const current = (source.potential - sink.potential) / (resistance + 0.001);
+    const flow: PotentialFlow = { source: sourceId, sink: sinkId, current, resistance };
+    this._flows.push(flow);
+    if (this._flows.length > 40) this._flows.shift();
+    this._state.lastConnection = { sourceId, sinkId };
+    return flow;
   }
 
-  public adjustEfficiency(delta: number): void {
-    this._efficiency = Math.max(0, Math.min(1, this._efficiency + delta));
+  relax(): void {
+    this._solveGaussSeidel();
+    for (const flow of this._flows) {
+      const source = this._nodes.find((n) => n.id === flow.source);
+      const sink = this._nodes.find((n) => n.id === flow.sink);
+      if (source && sink) {
+        flow.current = (source.potential - sink.potential) / (flow.resistance + 0.001);
+      }
+    }
   }
 
-  public isEquilibrium(): boolean {
-    return Math.abs(this.difference) < 0.01;
+  potentialAt(id: string): number {
+    const node = this._nodes.find((n) => n.id === id);
+    return node ? node.potential : 0;
   }
 
-  public amplifyDifference(factor: number): number {
-    const newDiff = this.difference * factor;
-    const midpoint = (this._data.highPotential + this._data.lowPotential) / 2;
-    this._data.highPotential = midpoint + newDiff / 2;
-    this._data.lowPotential = midpoint - newDiff / 2;
-    return this.difference;
+  totalCurrent(): number {
+    return this._flows.reduce((acc, f) => acc + Math.abs(f.current), 0);
   }
 
-  public invert(): void {
-    const temp = this._data.highPotential;
-    this._data.highPotential = this._data.lowPotential;
-    this._data.lowPotential = temp;
+  findMaxPotential(): PotentialNode | null {
+    if (this._nodes.length === 0) return null;
+    return this._nodes.reduce((best, n) => (n.potential > best.potential ? n : best));
   }
 
-  public potentialReport(): Record<string, unknown> {
+  isEquilibrium(): boolean {
+    return this._equipotentialError < 0.01;
+  }
+
+  reset(): void {
+    this._nodes = [];
+    this._flows = [];
+    this._laplacianMatrix = [];
+    this._equipotentialError = 0;
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
     return {
-      potentialId: this.potentialId,
-      highPotential: this._data.highPotential.toFixed(3),
-      lowPotential: this._data.lowPotential.toFixed(3),
-      difference: this.difference.toFixed(3),
-      conductance: this._data.conductance.toFixed(3),
-      efficiency: this._efficiency.toFixed(3),
-      totalFlowed: this._totalFlowed.toFixed(2),
-      flowCount: this._flows.length,
-      atEquilibrium: this.isEquilibrium(),
+      nodes: this._nodes.length,
+      flows: this._flows.length,
+      totalEnergy: this.totalEnergy,
+      state: this._state,
+      equipotentialError: this._equipotentialError.toFixed(4),
+      equilibrium: this.isEquilibrium(),
     };
   }
 }

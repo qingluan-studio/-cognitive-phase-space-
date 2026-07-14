@@ -1,8 +1,3 @@
-/**
- * 回声消除模块：在回声产生前预测并抵消反射成分。
- * 用于主动消除系统中不需要的重复信号。
- */
-
 export interface CancellationFilter {
   frequency: number;
   attenuation: number;
@@ -28,10 +23,14 @@ export class EchoCancellation {
   private _history: CancellationResult[] = [];
   private _buffer: number[] = [];
   private _state: Record<string, unknown> = {};
+  private _lmsWeights: number[] = [];
+  private _convolutionKernel: number[] = [];
+  private _kernelSize: number = 8;
 
   constructor(config: CancellationConfig) {
     this._config = config;
     this._initFilters();
+    this._initLMS();
   }
 
   get filterCount(): number {
@@ -40,6 +39,10 @@ export class EchoCancellation {
 
   get bufferSize(): number {
     return this._buffer.length;
+  }
+
+  get lmsError(): number {
+    return this._computeLMSError();
   }
 
   private _initFilters(): void {
@@ -53,6 +56,35 @@ export class EchoCancellation {
     }
   }
 
+  private _initLMS(): void {
+    this._lmsWeights = new Array(this._kernelSize).fill(0);
+    this._convolutionKernel = [];
+    for (let i = 0; i < this._kernelSize; i++) {
+      this._convolutionKernel.push(Math.exp(-i * 0.5));
+    }
+  }
+
+  private _convolve(signal: number[]): number {
+    let result = 0;
+    for (let i = 0; i < this._kernelSize && i < signal.length; i++) {
+      result += signal[signal.length - 1 - i] * this._convolutionKernel[i];
+    }
+    return result;
+  }
+
+  private _lmsUpdate(error: number): void {
+    for (let i = 0; i < this._kernelSize; i++) {
+      const input = this._buffer[this._buffer.length - 1 - i] || 0;
+      this._lmsWeights[i] += this._config.adaptationRate * error * input;
+    }
+  }
+
+  private _computeLMSError(): number {
+    if (this._history.length === 0) return 0;
+    const last = this._history[this._history.length - 1];
+    return Math.abs(last.input - last.output);
+  }
+
   process(input: number): CancellationResult {
     this._buffer.push(input);
     if (this._buffer.length > 64) this._buffer.shift();
@@ -62,11 +94,15 @@ export class EchoCancellation {
       cancelled += echoEstimate;
       filter.phase += 0.1 * this._config.adaptationRate;
     }
-    const output = input - cancelled * 0.5;
-    const efficiency = input !== 0 ? Math.abs(cancelled) / Math.abs(input) : 0;
-    const result: CancellationResult = { input, output, cancelled, efficiency };
+    const convolved = this._convolve(this._buffer);
+    const lmsEstimate = this._lmsWeights.reduce((sum, w, i) => sum + w * (this._buffer[this._buffer.length - 1 - i] || 0), 0);
+    const totalEstimate = cancelled * 0.5 + convolved * 0.1 + lmsEstimate * 0.1;
+    const output = input - totalEstimate;
+    const efficiency = input !== 0 ? Math.abs(totalEstimate) / Math.abs(input) : 0;
+    const result: CancellationResult = { input, output, cancelled: totalEstimate, efficiency };
     this._history.push(result);
     if (this._history.length > 50) this._history.shift();
+    this._lmsUpdate(input - output);
     return result;
   }
 
@@ -97,6 +133,7 @@ export class EchoCancellation {
 
   resetFilters(): void {
     this._initFilters();
+    this._initLMS();
     this._state.resetAt = Date.now();
   }
 
@@ -106,6 +143,7 @@ export class EchoCancellation {
       bufferSize: this._buffer.length,
       averageEfficiency: this.averageEfficiency(),
       state: this._state,
+      lmsError: this.lmsError.toFixed(4),
     };
   }
 }

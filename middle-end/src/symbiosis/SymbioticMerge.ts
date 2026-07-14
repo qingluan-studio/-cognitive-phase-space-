@@ -1,130 +1,122 @@
-/**
- * SymbioticMerge - 共生融合模块
- * 两个共生体完全合并为一个新实体，融合双方的特性、资源与能力，
- * 融合后的实体具有原始双方不可单独达成的涌现属性。
- */
-
-export interface SymbioticMergeRecord {
-  readonly mergeId: string;
-  entityA: string;
-  entityB: string;
-  traitMap: Record<string, number>;
-  synergyPotential: number;
-  finalized: boolean;
+export interface ChemicalSpecies {
+  id: string;
+  concentration: number;
+  stoichiometry: number;
+  gibbsFreeEnergy: number;
 }
 
-export interface MergedTrait {
-  name: string;
-  dominance: 'A' | 'B' | 'hybrid';
-  value: number;
-  emergent: boolean;
+export interface ReactionResult {
+  reactants: string[];
+  products: string[];
+  deltaG: number;
+  equilibriumConstant: number;
+  rate: number;
+  emergentProperty: number;
 }
 
 export class SymbioticMerge {
-  private _record: SymbioticMergeRecord;
-  private _traits: MergedTrait[] = [];
-  private _emergentProperties: string[] = [];
-  private _fusionProgress: number = 0;
-  private _instability: number = 0;
+  private _species: Map<string, ChemicalSpecies> = new Map();
+  private _reactions: ReactionResult[] = [];
+  private _state: Record<string, unknown> = {};
+  private _temperature: number = 298;
+  private _gasConstant: number = 8.314;
 
-  constructor(record: SymbioticMergeRecord) {
-    this._record = { ...record, traitMap: { ...record.traitMap } };
+  constructor(temperature: number = 298) {
+    this._temperature = temperature;
   }
 
-  get mergeId(): string {
-    return this._record.mergeId;
+  get speciesCount(): number {
+    return this._species.size;
   }
 
-  get entities(): readonly [string, string] {
-    return [this._record.entityA, this._record.entityB];
+  get reactionCount(): number {
+    return this._reactions.length;
   }
 
-  get fusionProgress(): number {
-    return this._fusionProgress;
+  addSpecies(id: string, concentration: number, stoichiometry: number, gibbsFreeEnergy: number): void {
+    this._species.set(id, { id, concentration, stoichiometry, gibbsFreeEnergy });
   }
 
-  get finalized(): boolean {
-    return this._record.finalized;
-  }
-
-  public blendTrait(traitA: number, traitB: number, name: string): MergedTrait {
-    const hybridValue = (traitA + traitB) / 2 * this._record.synergyPotential;
-    const dominance: 'A' | 'B' | 'hybrid' =
-      traitA > traitB * 1.3 ? 'A' : traitB > traitA * 1.3 ? 'B' : 'hybrid';
-    const emergent = hybridValue > Math.max(traitA, traitB) * 1.1;
-    const trait: MergedTrait = { name, dominance, value: hybridValue, emergent };
-    if (emergent) {
-      this._emergentProperties.push(name);
+  react(reactantIds: string[], productIds: string[]): ReactionResult | null {
+    let reactantG = 0;
+    let productG = 0;
+    for (const id of reactantIds) {
+      const sp = this._species.get(id);
+      if (sp) reactantG += sp.gibbsFreeEnergy * sp.stoichiometry;
     }
-    this._traits.push(trait);
-    return trait;
-  }
-
-  public advanceFusion(steps: number): number {
-    this._fusionProgress = Math.min(1, this._fusionProgress + steps * 0.1);
-    if (this._fusionProgress > 0.5 && this._instability > 0) {
-      this._instability = Math.max(0, this._instability - 0.05);
+    for (const id of productIds) {
+      const sp = this._species.get(id);
+      if (sp) productG += sp.gibbsFreeEnergy * sp.stoichiometry;
     }
-    return this._fusionProgress;
-  }
-
-  public detectConflict(): boolean {
-    const aDominant = this._traits.filter((t) => t.dominance === 'A').length;
-    const bDominant = this._traits.filter((t) => t.dominance === 'B').length;
-    const imbalance = Math.abs(aDominant - bDominant);
-    if (imbalance > this._traits.length * 0.6) {
-      this._instability = Math.min(1, this._instability + 0.2);
-      return true;
+    const deltaG = productG - reactantG;
+    const equilibriumConstant = Math.exp(-deltaG / (this._gasConstant * this._temperature));
+    const rate = equilibriumConstant * Math.exp(-Math.abs(deltaG) / (this._gasConstant * this._temperature));
+    const emergentProperty = -deltaG * Math.log(equilibriumConstant + 1);
+    const result: ReactionResult = {
+      reactants: [...reactantIds],
+      products: [...productIds],
+      deltaG,
+      equilibriumConstant,
+      rate,
+      emergentProperty,
+    };
+    this._reactions.push(result);
+    if (this._reactions.length > 100) this._reactions.shift();
+    for (const id of reactantIds) {
+      const sp = this._species.get(id);
+      if (sp) sp.concentration = Math.max(0, sp.concentration - rate * sp.stoichiometry);
     }
-    return false;
-  }
-
-  public rebalance(): void {
-    this._traits.forEach((t) => {
-      if (t.dominance !== 'hybrid') {
-        t.value *= 0.95;
-        t.dominance = 'hybrid';
-      }
-    });
-    this._instability = Math.max(0, this._instability - 0.3);
-  }
-
-  public harvestSynergy(): number {
-    if (this._fusionProgress < 0.8) {
-      return 0;
+    for (const id of productIds) {
+      const sp = this._species.get(id);
+      if (sp) sp.concentration += rate * sp.stoichiometry;
     }
-    const emergent = this._traits.filter((t) => t.emergent);
-    const total = emergent.reduce((s, t) => s + t.value, 0);
-    return total * this._record.synergyPotential;
+    return result;
   }
 
-  public finalize(): boolean {
-    if (this._fusionProgress < 1 || this._instability > 0.3) {
-      return false;
+  bindingEnergy(aId: string, bId: string): number {
+    const a = this._species.get(aId);
+    const b = this._species.get(bId);
+    if (!a || !b) return 0;
+    return a.gibbsFreeEnergy + b.gibbsFreeEnergy - Math.sqrt(a.gibbsFreeEnergy * b.gibbsFreeEnergy);
+  }
+
+  stoichiometricBalance(reactionId: number): number {
+    const reaction = this._reactions[reactionId];
+    if (!reaction) return 0;
+    let reactantSum = 0;
+    let productSum = 0;
+    for (const id of reaction.reactants) {
+      const sp = this._species.get(id);
+      if (sp) reactantSum += sp.stoichiometry;
     }
-    this._record.finalized = true;
-    return true;
+    for (const id of reaction.products) {
+      const sp = this._species.get(id);
+      if (sp) productSum += sp.stoichiometry;
+    }
+    return Math.abs(reactantSum - productSum);
   }
 
-  public abort(): void {
-    this._fusionProgress = 0;
-    this._traits = [];
-    this._emergentProperties = [];
-    this._instability = 1;
-    this._record.finalized = false;
+  totalFreeEnergy(): number {
+    return Array.from(this._species.values()).reduce((s, sp) => s + sp.gibbsFreeEnergy * sp.concentration, 0);
   }
 
-  public mergeReport(): Record<string, unknown> {
+  emergentProperties(): number[] {
+    return this._reactions.map((r) => r.emergentProperty);
+  }
+
+  reactionYield(reactionId: number): number {
+    const reaction = this._reactions[reactionId];
+    if (!reaction) return 0;
+    return 1 / (1 + Math.exp(reaction.deltaG / (this._gasConstant * this._temperature)));
+  }
+
+  report(): Record<string, unknown> {
     return {
-      mergeId: this.mergeId,
-      entities: this.entities,
-      fusionProgress: this._fusionProgress.toFixed(3),
-      finalized: this._record.finalized,
-      traitCount: this._traits.length,
-      emergentCount: this._emergentProperties.length,
-      emergentProperties: [...this._emergentProperties],
-      instability: this._instability.toFixed(3),
-      synergy: this.harvestSynergy().toFixed(2),
+      species: this._species.size,
+      reactions: this._reactions.length,
+      totalFreeEnergy: this.totalFreeEnergy(),
+      temperature: this._temperature,
+      state: this._state,
     };
   }
 }

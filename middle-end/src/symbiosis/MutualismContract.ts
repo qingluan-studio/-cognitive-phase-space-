@@ -1,135 +1,153 @@
-/**
- * MutualismContract - 互利契约模块
- * 定义两个模块互助协作的契约关系，双方均从合作中获益，
- * 契约约束资源交换、义务分配与违约处理。
- */
-
-export interface MutualismContractData {
-  readonly contractId: string;
-  partyA: string;
-  partyB: string;
-  exchangeRate: number;
-  signedAt: number;
-  duration: number;
-  terms: string[];
+export interface ContractPayoff {
+  cooperate: number;
+  defect: number;
 }
 
-export interface ContractObligation {
-  party: string;
-  resource: string;
-  amount: number;
-  fulfilled: boolean;
+export interface ContractStrategy {
+  playerId: string;
+  cooperateProbability: number;
+  reciprocity: number;
+  memoryLength: number;
 }
 
-export type ContractStatus = 'draft' | 'active' | 'breached' | 'expired';
+export interface ContractOutcome {
+  round: number;
+  playerA: string;
+  playerB: string;
+  actionA: boolean;
+  actionB: boolean;
+  payoffA: number;
+  payoffB: number;
+  cumulativeA: number;
+  cumulativeB: number;
+}
 
 export class MutualismContract {
-  private _data: MutualismContractData;
-  private _obligations: ContractObligation[] = [];
-  private _status: ContractStatus = 'draft';
-  private _benefitLedger: Record<string, number> = {};
-  private _breachCount: number = 0;
+  private _payoffs: Map<string, ContractPayoff> = new Map();
+  private _strategies: Map<string, ContractStrategy> = new Map();
+  private _history: ContractOutcome[] = [];
+  private _state: Record<string, unknown> = {};
+  private _ ESS: Map<string, number> = new Map();
+  private _reciprocityMatrix: Map<string, Map<string, number>> = new Map();
 
-  constructor(data: MutualismContractData) {
-    this._data = { ...data, terms: [...data.terms] };
-    this._benefitLedger[data.partyA] = 0;
-    this._benefitLedger[data.partyB] = 0;
+  constructor() {}
+
+  get playerCount(): number {
+    return this._strategies.size;
   }
 
-  get contractId(): string {
-    return this._data.contractId;
+  get roundCount(): number {
+    return this._history.length;
   }
 
-  get status(): ContractStatus {
-    return this._status;
+  setPayoff(playerId: string, cooperate: number, defect: number): void {
+    this._payoffs.set(playerId, { cooperate, defect });
   }
 
-  get parties(): readonly string[] {
-    return [this._data.partyA, this._data.partyB];
+  registerStrategy(playerId: string, cooperateProbability: number, reciprocity: number, memoryLength: number): void {
+    this._strategies.set(playerId, { playerId, cooperateProbability, reciprocity, memoryLength });
+    this._reciprocityMatrix.set(playerId, new Map());
   }
 
-  get exchangeRate(): number {
-    return this._data.exchangeRate;
-  }
-
-  public activate(): boolean {
-    if (this._status !== 'draft') {
-      return false;
+  playRound(playerA: string, playerB: string): ContractOutcome | null {
+    const strategyA = this._strategies.get(playerA);
+    const strategyB = this._strategies.get(playerB);
+    const payoffA = this._payoffs.get(playerA);
+    const payoffB = this._payoffs.get(playerB);
+    if (!strategyA || !strategyB || !payoffA || !payoffB) return null;
+    const actionA = Math.random() < strategyA.cooperateProbability;
+    const actionB = Math.random() < strategyB.cooperateProbability;
+    let pA = 0;
+    let pB = 0;
+    if (actionA && actionB) {
+      pA = payoffA.cooperate;
+      pB = payoffB.cooperate;
+    } else if (actionA && !actionB) {
+      pA = 0;
+      pB = payoffB.defect;
+    } else if (!actionA && actionB) {
+      pA = payoffA.defect;
+      pB = 0;
+    } else {
+      pA = payoffA.defect * 0.5;
+      pB = payoffB.defect * 0.5;
     }
-    if (this._obligations.length === 0) {
-      return false;
-    }
-    this._status = 'active';
-    return true;
-  }
-
-  public addObligation(obligation: ContractObligation): void {
-    if (!this.parties.includes(obligation.party)) {
-      throw new Error(`Unknown party: ${obligation.party}`);
-    }
-    this._obligations.push({ ...obligation });
-  }
-
-  public exchange(provider: string, resource: string, amount: number): void {
-    if (this._status !== 'active') {
-      throw new Error('Contract is not active');
-    }
-    const receiver = provider === this._data.partyA
-      ? this._data.partyB
-      : this._data.partyA;
-    const converted = amount * this._data.exchangeRate;
-    this._benefitLedger[provider] = (this._benefitLedger[provider] ?? 0) + amount;
-    this._benefitLedger[receiver] = (this._benefitLedger[receiver] ?? 0) + converted;
-    this._markObligationFulfilled(provider, resource, amount);
-  }
-
-  private _markObligationFulfilled(party: string, resource: string, amount: number): void {
-    const ob = this._obligations.find(
-      (o) => o.party === party && o.resource === resource && !o.fulfilled
-    );
-    if (ob && amount >= ob.amount) {
-      ob.fulfilled = true;
-    }
-  }
-
-  public reportBreach(reason: string): void {
-    this._breachCount++;
-    if (this._breachCount >= 3) {
-      this._status = 'breached';
-    }
-    this._data.terms.push(`BREACH#${this._breachCount}: ${reason}`);
-  }
-
-  public evaluateBalance(): { balanced: boolean; surplus: string | null } {
-    const a = this._benefitLedger[this._data.partyA] ?? 0;
-    const b = this._benefitLedger[this._data.partyB] ?? 0;
-    const diff = Math.abs(a - b);
-    const threshold = Math.max(a, b) * 0.15;
-    const balanced = diff <= threshold;
-    return {
-      balanced,
-      surplus: balanced ? null : (a > b ? this._data.partyA : this._data.partyB),
+    const prev = this._history.filter((h) => h.playerA === playerA && h.playerB === playerB);
+    const cumA = prev.length > 0 ? prev[prev.length - 1].cumulativeA + pA : pA;
+    const cumB = prev.length > 0 ? prev[prev.length - 1].cumulativeB + pB : pB;
+    const outcome: ContractOutcome = {
+      round: this._history.length + 1,
+      playerA,
+      playerB,
+      actionA,
+      actionB,
+      payoffA: pA,
+      payoffB: pB,
+      cumulativeA: cumA,
+      cumulativeB: cumB,
     };
+    this._history.push(outcome);
+    this._updateReciprocity(playerA, playerB, actionA, actionB);
+    return outcome;
   }
 
-  public isExpired(now: number): boolean {
-    const elapsed = now - this._data.signedAt;
-    if (elapsed >= this._data.duration) {
-      this._status = 'expired';
-      return true;
-    }
-    return false;
+  private _updateReciprocity(a: string, b: string, actionA: boolean, actionB: boolean): void {
+    const matrixA = this._reciprocityMatrix.get(a)!;
+    const current = matrixA.get(b) ?? 0;
+    const delta = actionA && actionB ? 0.1 : -0.1;
+    matrixA.set(b, Math.max(-1, Math.min(1, current + delta)));
   }
 
-  public summarize(): Record<string, unknown> {
+  nashEquilibrium(playerA: string, playerB: string): { aCoop: number; bCoop: number } | null {
+    const payoffA = this._payoffs.get(playerA);
+    const payoffB = this._payoffs.get(playerB);
+    if (!payoffA || !payoffB) return null;
+    const r = payoffA.cooperate;
+    const s = 0;
+    const t = payoffA.defect;
+    const p = payoffA.defect * 0.5;
+    const denom = r - s - t + p;
+    const pA = denom !== 0 ? (p - s) / denom : 0.5;
+    const pB = denom !== 0 ? (p - s) / denom : 0.5;
+    return { aCoop: Math.max(0, Math.min(1, pA)), bCoop: Math.max(0, Math.min(1, pB)) };
+  }
+
+  evolutionaryStableStrategy(playerId: string): boolean {
+    const strategy = this._strategies.get(playerId);
+    if (!strategy) return false;
+    const payoff = this._payoffs.get(playerId);
+    if (!payoff) return false;
+    const benefit = payoff.cooperate;
+    const cost = payoff.cooperate - payoff.defect;
+    const ess = benefit > cost;
+    this._ESS.set(playerId, ess ? 1 : 0);
+    return ess;
+  }
+
+  averagePayoff(playerId: string): number {
+    const relevant = this._history.filter((h) => h.playerA === playerId || h.playerB === playerId);
+    if (relevant.length === 0) return 0;
+    return relevant.reduce((s, h) => s + (h.playerA === playerId ? h.payoffA : h.payoffB), 0) / relevant.length;
+  }
+
+  cooperationRate(): number {
+    if (this._history.length === 0) return 0;
+    const coopA = this._history.filter((h) => h.actionA).length;
+    const coopB = this._history.filter((h) => h.actionB).length;
+    return (coopA + coopB) / (this._history.length * 2);
+  }
+
+  reciprocityScore(a: string, b: string): number {
+    return this._reciprocityMatrix.get(a)?.get(b) ?? 0;
+  }
+
+  report(): Record<string, unknown> {
     return {
-      contractId: this._data.contractId,
-      parties: this.parties,
-      status: this._status,
-      obligations: this._obligations.length,
-      fulfilled: this._obligations.filter((o) => o.fulfilled).length,
-      breaches: this._breachCount,
-      benefits: { ...this._benefitLedger },
+      players: this._strategies.size,
+      rounds: this._history.length,
+      cooperationRate: this.cooperationRate(),
+      essCount: Array.from(this._ESS.values()).filter(Boolean).length,
+      state: this._state,
     };
   }
 }

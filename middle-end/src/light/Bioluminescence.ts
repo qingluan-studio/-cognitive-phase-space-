@@ -1,109 +1,140 @@
-/**
- * 生物发光模块：模块自身发出可见信息光，无需外部光源。
- * 用于刻画系统主动产生可感知信号的能力。
- */
-
-export interface BioluminescentEmission {
-  wavelength: number;
+export interface LuminescentNode {
+  id: string;
   intensity: number;
-  source: string;
-  timestamp: number;
+  wavelength: number;
+  active: boolean;
 }
 
-export type EmissionSpectrum = {
-  emissions: number;
+export type GlowSpectrum = {
   peakWavelength: number;
   totalIntensity: number;
+  bandwidth: number;
 };
 
 export interface BioluminescenceConfig {
-  substrateLevel: number;
-  enzymeEfficiency: number;
-  maxEmissions: number;
+  baseIntensity: number;
+  decayRate: number;
+  quantumYield: number;
 }
 
 export class Bioluminescence {
   private _config: BioluminescenceConfig;
-  private _emissions: BioluminescentEmission[] = [];
-  private _spectrum: EmissionSpectrum | null = null;
+  private _nodes: LuminescentNode[] = [];
+  private _spectrum: GlowSpectrum | null = null;
   private _state: Record<string, unknown> = {};
+  private _photonEmissionRate: number = 0;
+  private _fretEfficiency: number = 0;
+  private _stoichiometry: number = 1;
 
   constructor(config: BioluminescenceConfig) {
     this._config = config;
   }
 
-  get emissionCount(): number {
-    return this._emissions.length;
+  get nodeCount(): number {
+    return this._nodes.length;
   }
 
-  get substrateLevel(): number {
-    return this._config.substrateLevel;
+  get totalIntensity(): number {
+    return this._nodes.reduce((acc, n) => acc + (n.active ? n.intensity : 0), 0);
   }
 
-  glow(source: string, wavelength: number): BioluminescentEmission | null {
-    if (this._config.substrateLevel <= 0) return null;
-    const intensity =
-      this._config.substrateLevel * this._config.enzymeEfficiency * (1 / (wavelength / 500));
-    const emission: BioluminescentEmission = {
-      wavelength,
-      intensity,
-      source,
-      timestamp: Date.now(),
-    };
-    this._emissions.push(emission);
-    if (this._emissions.length > this._config.maxEmissions) {
-      this._emissions.shift();
+  get fretEfficiency(): number {
+    return this._fretEfficiency;
+  }
+
+  private _planckDistribution(wavelength: number, temperature: number): number {
+    const h = 6.626e-34;
+    const c = 3e8;
+    const k = 1.38e-23;
+    const lambda = wavelength * 1e-9;
+    return (2 * h * c * c) / (Math.pow(lambda, 5) * (Math.exp((h * c) / (lambda * k * temperature)) - 1));
+  }
+
+  private _computeFret(donor: LuminescentNode, acceptor: LuminescentNode): number {
+    const r0 = 5e-9;
+    const r = Math.abs(donor.wavelength - acceptor.wavelength) * 1e-9 + r0;
+    return 1 / (1 + Math.pow(r / r0, 6));
+  }
+
+  addNode(id: string, intensity: number, wavelength: number): LuminescentNode {
+    const node: LuminescentNode = { id, intensity, wavelength, active: true };
+    this._nodes.push(node);
+    if (this._nodes.length > 20) this._nodes.shift();
+    if (this._nodes.length >= 2) {
+      const donor = this._nodes[this._nodes.length - 2];
+      const acceptor = this._nodes[this._nodes.length - 1];
+      this._fretEfficiency = this._computeFret(donor, acceptor);
     }
-    this._config.substrateLevel *= 0.95;
-    this._state.lastGlow = source;
-    return emission;
+    this._photonEmissionRate += intensity * this._config.quantumYield;
+    return node;
   }
 
-  computeSpectrum(): EmissionSpectrum {
-    if (this._emissions.length === 0) {
-      this._spectrum = { emissions: 0, peakWavelength: 0, totalIntensity: 0 };
-      return this._spectrum;
+  pulse(nodeId: string, boost: number): boolean {
+    const node = this._nodes.find((n) => n.id === nodeId);
+    if (!node) return false;
+    node.intensity = Math.min(1, node.intensity + boost);
+    node.active = true;
+    this._photonEmissionRate += boost * this._config.quantumYield;
+    return true;
+  }
+
+  decay(dt: number): void {
+    for (const node of this._nodes) {
+      if (node.active) {
+        node.intensity *= Math.exp(-this._config.decayRate * dt);
+        if (node.intensity < 0.01) node.active = false;
+      }
     }
-    const totalIntensity = this._emissions.reduce((acc, e) => acc + e.intensity, 0);
-    const peak = this._emissions.reduce((best, e) =>
-      e.intensity > best.intensity ? e : best
-    );
-    this._spectrum = {
-      emissions: this._emissions.length,
-      peakWavelength: peak.wavelength,
-      totalIntensity,
-    };
+    this._photonEmissionRate *= Math.exp(-this._config.decayRate * dt);
+  }
+
+  computeSpectrum(): GlowSpectrum {
+    const active = this._nodes.filter((n) => n.active);
+    const totalIntensity = active.reduce((acc, n) => acc + n.intensity, 0);
+    const peak = active.length > 0
+      ? active.reduce((best, n) => (n.intensity > best.intensity ? n : best)).wavelength
+      : 0;
+    const wavelengths = active.map((n) => n.wavelength);
+    const bandwidth = wavelengths.length > 0 ? Math.max(...wavelengths) - Math.min(...wavelengths) : 0;
+    this._spectrum = { peakWavelength: peak, totalIntensity, bandwidth };
     return this._spectrum;
   }
 
-  replenishSubstrate(amount: number): void {
-    this._config.substrateLevel += amount;
-    this._state.replenishedAt = Date.now();
+  isGlowing(): boolean {
+    return this.totalIntensity > 0.01;
   }
 
-  tuneEnzyme(efficiency: number): void {
-    this._config.enzymeEfficiency = Math.max(0, Math.min(1, efficiency));
+  dominantWavelength(): number {
+    const active = this._nodes.filter((n) => n.active);
+    if (active.length === 0) return 0;
+    return active.reduce((best, n) => (n.intensity > best.intensity ? n : best)).wavelength;
   }
 
-  brightestEmission(): BioluminescentEmission | null {
-    if (this._emissions.length === 0) return null;
-    return this._emissions.reduce((best, e) => (e.intensity > best.intensity ? e : best));
+  computeBlackbodyFit(temperature: number): number {
+    let error = 0;
+    for (const n of this._nodes) {
+      const theoretical = this._planckDistribution(n.wavelength, temperature);
+      error += Math.abs(n.intensity - theoretical * 1e13);
+    }
+    return error / Math.max(1, this._nodes.length);
   }
 
-  isIlluminated(): boolean {
-    return this.computeSpectrum().totalIntensity > 0.5;
-  }
-
-  filterBySource(source: string): BioluminescentEmission[] {
-    return this._emissions.filter((e) => e.source === source);
+  reset(): void {
+    this._nodes = [];
+    this._spectrum = null;
+    this._photonEmissionRate = 0;
+    this._fretEfficiency = 0;
+    this._state = {};
   }
 
   report(): Record<string, unknown> {
     return {
-      emissionCount: this._emissions.length,
-      substrateLevel: this._config.substrateLevel,
+      nodes: this._nodes.length,
+      totalIntensity: this.totalIntensity.toFixed(3),
       spectrum: this._spectrum,
       state: this._state,
+      fretEfficiency: this._fretEfficiency.toFixed(4),
+      photonRate: this._photonEmissionRate.toFixed(2),
     };
   }
 }

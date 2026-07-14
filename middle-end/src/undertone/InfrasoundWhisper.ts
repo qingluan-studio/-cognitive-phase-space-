@@ -1,8 +1,3 @@
-/**
- * 次声低语模块：产生低于人类听觉阈值的振动，无法被直接感知但影响身心。
- * 用于在系统中传递潜意识层面的微弱信号。
- */
-
 export interface InfrasoundPulse {
   frequency: number;
   intensity: number;
@@ -27,9 +22,24 @@ export class InfrasoundWhisper {
   private _pulses: InfrasoundPulse[] = [];
   private _exposure: InfrasoundExposure | null = null;
   private _trace: Record<string, unknown> = {};
+  private _maskingThreshold: number[] = [];
+  private _equalLoudnessContour: number = 40;
 
   constructor(config: InfrasoundConfig) {
     this._config = config;
+    this._initMaskingCurve();
+  }
+
+  private _initMaskingCurve(): void {
+    for (let i = 0; i < 20; i++) {
+      const freq = 1 + i * 1;
+      const threshold = 20 * Math.log10(freq) + this._equalLoudnessContour;
+      this._maskingThreshold.push(threshold);
+    }
+  }
+
+  private _phonToSone(phon: number): number {
+    return phon >= 40 ? Math.pow(2, (phon - 40) / 10) : Math.pow(phon / 40, 2.86);
   }
 
   get pulseCount(): number {
@@ -42,7 +52,9 @@ export class InfrasoundWhisper {
 
   emit(duration: number, intensity: number): InfrasoundPulse {
     const clampedIntensity = Math.min(intensity, this._config.maxIntensity);
-    const perceived = clampedIntensity >= this._config.hearingThreshold;
+    const spl = 20 * Math.log10(clampedIntensity + 1e-6);
+    const phon = spl + this._equalLoudnessContour * Math.log10(this._config.baseFrequency + 1);
+    const perceived = phon >= this._config.hearingThreshold;
     const pulse: InfrasoundPulse = {
       frequency: this._config.baseFrequency,
       intensity: clampedIntensity,
@@ -100,5 +112,28 @@ export class InfrasoundWhisper {
       exposure: this._exposure,
       trace: this._trace,
     };
+  }
+
+  computeLoudnessInSones(): number {
+    const avgIntensity = this.averageIntensity();
+    const spl = 20 * Math.log10(avgIntensity + 1e-6);
+    const phon = spl + this._equalLoudnessContour;
+    return this._phonToSone(phon);
+  }
+
+  computeTemporalMaskingRatio(): number {
+    if (this._pulses.length < 2) return 0;
+    let masked = 0;
+    for (let i = 1; i < this._pulses.length; i++) {
+      const gap = 0;
+      if (gap < 0.005) masked++;
+    }
+    return masked / (this._pulses.length - 1);
+  }
+
+  setEqualLoudnessContour(phon: number): void {
+    this._equalLoudnessContour = phon;
+    this._maskingThreshold = [];
+    this._initMaskingCurve();
   }
 }

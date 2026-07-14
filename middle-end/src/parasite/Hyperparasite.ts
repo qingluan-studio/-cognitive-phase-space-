@@ -1,9 +1,3 @@
-/**
- * Hyperparasite - 超寄生
- * 寄生在寄生模块上的寄生者，形成多层嵌套的寄生链，
- * 每一层都从下一层汲取资源，构成复杂的寄生层级结构。
- */
-
 export interface HyperparasiteData {
   readonly hyperparasiteId: string;
   primaryParasiteId: string;
@@ -17,6 +11,7 @@ export interface ParasiteChainNode {
   tier: number;
   resourceHeld: number;
   parent: string | null;
+  adjacency: string[];
 }
 
 export class Hyperparasite {
@@ -25,6 +20,8 @@ export class Hyperparasite {
   private _extractedTotal: number = 0;
   private _tierBonus: number = 0;
   private _collapseRisk: number = 0;
+  private _adjacencyMatrix: number[][] = [];
+  private _topologicalOrder: string[] = [];
 
   constructor(data: HyperparasiteData) {
     this._data = { ...data };
@@ -33,7 +30,9 @@ export class Hyperparasite {
       tier: 1,
       resourceHeld: 0,
       parent: null,
+      adjacency: [],
     });
+    this._rebuildAdjacency();
   }
 
   get hyperparasiteId(): string {
@@ -52,6 +51,51 @@ export class Hyperparasite {
     return this._chain.size;
   }
 
+  get collapseRisk(): number {
+    return this._collapseRisk;
+  }
+
+  private _rebuildAdjacency(): void {
+    const nodes = Array.from(this._chain.keys());
+    const n = nodes.length;
+    this._adjacencyMatrix = Array.from({ length: n }, () => Array(n).fill(0));
+    const indexMap = new Map(nodes.map((id, i) => [id, i]));
+    for (const node of this._chain.values()) {
+      const i = indexMap.get(node.id)!;
+      for (const peer of node.adjacency) {
+        const j = indexMap.get(peer);
+        if (j !== undefined) {
+          this._adjacencyMatrix[i][j] = 1;
+          this._adjacencyMatrix[j][i] = 1;
+        }
+      }
+      if (node.parent) {
+        const j = indexMap.get(node.parent);
+        if (j !== undefined) {
+          this._adjacencyMatrix[i][j] = 1;
+        }
+      }
+    }
+    this._topologicalSort(nodes, indexMap);
+  }
+
+  private _topologicalSort(nodes: string[], indexMap: Map<string, number>): void {
+    const visited = new Set<string>();
+    const order: string[] = [];
+    const visit = (id: string): void => {
+      if (visited.has(id)) return;
+      visited.add(id);
+      const node = this._chain.get(id);
+      if (node) {
+        for (const peer of node.adjacency) if (!visited.has(peer)) visit(peer);
+        if (node.parent && !visited.has(node.parent)) visit(node.parent);
+      }
+      order.push(id);
+    };
+    for (const id of nodes) if (!visited.has(id)) visit(id);
+    this._topologicalOrder = order;
+  }
+
   public attachToParasite(parasiteId: string, parentTier: number): boolean {
     if (this._chain.size >= 5) {
       return false;
@@ -66,9 +110,12 @@ export class Hyperparasite {
       tier: newTier,
       resourceHeld: 0,
       parent: parentNode.id,
+      adjacency: [],
     });
+    parentNode.adjacency.push(parasiteId);
     this._data.nestingDepth = Math.max(this._data.nestingDepth, newTier);
     this._tierBonus = newTier * 0.1;
+    this._rebuildAdjacency();
     return true;
   }
 
@@ -116,6 +163,7 @@ export class Hyperparasite {
       this._chain.delete(node.id);
     });
     this._collapseRisk = Math.max(0, this._collapseRisk - 0.2);
+    this._rebuildAdjacency();
   }
 
   public hyperparasiteReport(): Record<string, unknown> {
@@ -131,6 +179,7 @@ export class Hyperparasite {
       tierBonus: this._tierBonus.toFixed(3),
       collapseRisk: this._collapseRisk.toFixed(3),
       tierDistribution: tierCounts,
+      centrality: this.eigenvectorCentrality(),
     };
   }
 }

@@ -1,132 +1,167 @@
-/**
- * 咒语调用模块：特定词汇触发深层功能，
- * 咒语作为密钥激活隐藏模块，错误咒语则触发防御反应。
- */
-
-export type IncantationResult = 'activated' | 'rejected' | 'trapped' | 'misfired';
-
-export interface Incantation {
-  id: string;
-  words: string[];
-  targetFunction: string;
-  power: number;
-  useCount: number;
+export interface IncantationToken {
+  type: string;
+  value: string;
+  position: number;
+  entropy: number;
 }
 
-export interface SpellCast {
-  incantationId: string;
-  caster: string;
-  result: IncantationResult;
-  effect: string;
-  castAt: number;
+export interface IncantationSpell {
+  name: string;
+  tokens: IncantationToken[];
+  complexity: number;
+  hash: string;
+  valid: boolean;
+}
+
+export interface GrammarRule {
+  lhs: string;
+  rhs: string[];
+  probability: number;
 }
 
 export class IncantationCall {
-  private _incantations: Map<string, Incantation> = new Map();
-  private _casts: SpellCast[] = [];
-  private _knownCasters: Set<string> = new Set();
-  private _trappedWords: Set<string> = new Set();
-  private _maxUsesPerIncantation = 100;
+  private _spells: Map<string, IncantationSpell> = new Map();
+  private _grammar: GrammarRule[] = [];
+  private _state: Record<string, unknown> = {};
+  private _automatonState: number = 0;
+  private _transitionTable: Map<number, Map<string, number>> = new Map();
 
-  register(incantation: Incantation): void {
-    this._incantations.set(incantation.id, incantation);
+  constructor() {}
+
+  get spellCount(): number {
+    return this._spells.size;
   }
 
-  authorizeCaster(caster: string): void {
-    this._knownCasters.add(caster);
+  addGrammarRule(lhs: string, rhs: string[], probability: number): void {
+    this._grammar.push({ lhs, rhs, probability });
   }
 
-  setTrap(word: string): void {
-    this._trappedWords.add(word);
-  }
-
-  private _findMatchingIncantation(spoken: string[]): Incantation | null {
-    for (const incantation of this._incantations.values()) {
-      if (incantation.words.length !== spoken.length) continue;
-      const matches = incantation.words.every((word, i) => word === spoken[i]);
-      if (matches) return incantation;
+  parse(spellName: string, input: string): IncantationSpell {
+    const tokens: IncantationToken[] = [];
+    let complexity = 0;
+    let pos = 0;
+    const words = input.split(/\s+/);
+    for (const word of words) {
+      const entropy = this._shannonEntropy(word);
+      tokens.push({ type: 'word', value: word, position: pos, entropy });
+      complexity += word.length * entropy;
+      pos += word.length + 1;
     }
-    return null;
+    const valid = this._validateWithGrammar(tokens);
+    const hash = this._hash(input);
+    const spell: IncantationSpell = { name: spellName, tokens, complexity, hash, valid };
+    this._spells.set(spellName, spell);
+    this._updateAutomaton(spellName, hash);
+    return spell;
   }
 
-  private _containsTrap(spoken: string[]): boolean {
-    return spoken.some(word => this._trappedWords.has(word));
+  private _shannonEntropy(text: string): number {
+    const freq: Record<string, number> = {};
+    for (const c of text) freq[c] = (freq[c] ?? 0) + 1;
+    const len = text.length || 1;
+    return -Object.values(freq).reduce((s, count) => {
+      const p = count / len;
+      return p > 0 ? s + p * Math.log2(p) : s;
+    }, 0);
   }
 
-  cast(caster: string, spoken: string[]): SpellCast {
-    let result: IncantationResult;
-    let effect: string;
-    const incantation = this._findMatchingIncantation(spoken);
-    if (!incantation) {
-      if (this._containsTrap(spoken)) {
-        result = 'trapped';
-        effect = 'Trap triggered: defensive response activated';
-      } else {
-        result = 'misfired';
-        effect = 'No matching incantation, spell dissipated';
+  private _hash(input: string): string {
+    let h = 0;
+    for (let i = 0; i < input.length; i++) {
+      const c = input.charCodeAt(i);
+      h = (h << 5) - h + c;
+      h |= 0;
+    }
+    return (h >>> 0).toString(16);
+  }
+
+  private _validateWithGrammar(tokens: IncantationToken[]): boolean {
+    if (this._grammar.length === 0) return true;
+    const types = tokens.map((t) => t.type);
+    for (const rule of this._grammar) {
+      if (rule.rhs.length <= types.length) {
+        let match = true;
+        for (let i = 0; i < rule.rhs.length; i++) {
+          if (rule.rhs[i] !== types[i]) {
+            match = false;
+            break;
+          }
+        }
+        if (match) return true;
       }
-    } else if (!this._knownCasters.has(caster)) {
-      result = 'rejected';
-      effect = 'Caster not authorized';
-    } else if (incantation.useCount >= this._maxUsesPerIncantation) {
-      result = 'rejected';
-      effect = 'Incantation exhausted';
-    } else {
-      result = 'activated';
-      effect = `${incantation.targetFunction} activated with power ${incantation.power}`;
-      incantation.useCount++;
     }
-    const cast: SpellCast = {
-      incantationId: incantation?.id ?? 'unknown',
-      caster,
-      result,
-      effect,
-      castAt: Date.now(),
+    return false;
+  }
+
+  private _updateAutomaton(spellName: string, hash: string): void {
+    const nextState = this._automatonState + 1;
+    if (!this._transitionTable.has(this._automatonState)) {
+      this._transitionTable.set(this._automatonState, new Map());
+    }
+    this._transitionTable.get(this._automatonState)!.set(spellName, nextState);
+    this._automatonState = nextState;
+  }
+
+  getSpell(name: string): IncantationSpell | undefined {
+    return this._spells.get(name);
+  }
+
+  averageComplexity(): number {
+    if (this._spells.size === 0) return 0;
+    return Array.from(this._spells.values()).reduce((s, sp) => s + sp.complexity, 0) / this._spells.size;
+  }
+
+  totalEntropy(): number {
+    return Array.from(this._spells.values()).reduce((s, sp) => {
+      return s + sp.tokens.reduce((ts, t) => ts + t.entropy, 0);
+    }, 0);
+  }
+
+  automatonStep(input: string): number {
+    const table = this._transitionTable.get(this._automatonState);
+    if (!table) return -1;
+    return table.get(input) ?? -1;
+  }
+
+  validateSpell(name: string): boolean {
+    return this._spells.get(name)?.valid ?? false;
+  }
+
+  findSimilarSpells(name: string, threshold: number): string[] {
+    const target = this._spells.get(name);
+    if (!target) return [];
+    const similar: string[] = [];
+    for (const [n, spell] of this._spells) {
+      if (n === name) continue;
+      const dist = this._levenshtein(target.name, spell.name);
+      if (dist <= threshold) similar.push(n);
+    }
+    return similar;
+  }
+
+  private _levenshtein(a: string, b: string): number {
+    const m = a.length;
+    const n = b.length;
+    const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) dp[i][0] = i;
+    for (let j = 0; j <= n; j++) dp[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      }
+    }
+    return dp[m][n];
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      spells: this._spells.size,
+      grammarRules: this._grammar.length,
+      avgComplexity: this.averageComplexity(),
+      totalEntropy: this.totalEntropy(),
+      automatonState: this._automatonState,
+      state: this._state,
     };
-    this._casts.push(cast);
-    if (this._casts.length > 300) this._casts.shift();
-    return cast;
-  }
-
-  recharge(incantationId: string): boolean {
-    const incantation = this._incantations.get(incantationId);
-    if (!incantation) return false;
-    incantation.useCount = 0;
-    return true;
-  }
-
-  findIncantationByFunction(targetFunction: string): Incantation | null {
-    for (const incantation of this._incantations.values()) {
-      if (incantation.targetFunction === targetFunction) return incantation;
-    }
-    return null;
-  }
-
-  removeTrap(word: string): boolean {
-    return this._trappedWords.delete(word);
-  }
-
-  getCastsByCaster(caster: string): SpellCast[] {
-    return this._casts.filter(c => c.caster === caster);
-  }
-
-  getCastsByResult(result: IncantationResult): SpellCast[] {
-    return this._casts.filter(c => c.result === result);
-  }
-
-  listIncantations(): Incantation[] {
-    return Array.from(this._incantations.values());
-  }
-
-  getCastHistory(limit: number = 50): SpellCast[] {
-    return this._casts.slice(-limit);
-  }
-
-  get incantationCount(): number {
-    return this._incantations.size;
-  }
-
-  get totalCasts(): number {
-    return this._casts.length;
   }
 }

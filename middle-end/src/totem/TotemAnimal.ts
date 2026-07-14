@@ -1,8 +1,3 @@
-/**
- * 图腾动物模块：选择一个动物作为系统化身与精神象征，
- * 通过图腾动物的特性来定义系统的行为模式与价值观。
- */
-
 export interface AnimalTotem {
   id: string;
   animal: string;
@@ -25,6 +20,8 @@ export class TotemAnimal {
   private _dominant: string | null = null;
   private _animalTraits: Map<string, string[]> = new Map();
   private _maxAffinity = 1.0;
+  private _traitVectors: Map<string, number[]> = new Map();
+  private _interactionMatrix: Map<string, Map<string, number>> = new Map();
 
   constructor() {
     this._animalTraits.set('wolf', ['loyal', 'instinctive', 'pack-oriented', 'nocturnal']);
@@ -32,6 +29,38 @@ export class TotemAnimal {
     this._animalTraits.set('bear', ['protective', 'hibernating', 'powerful', 'patient']);
     this._animalTraits.set('serpent', ['transformational', 'cunning', 'cyclic', 'medicinal']);
     this._animalTraits.set('owl', ['wise', 'silent', 'observant', 'mysterious']);
+    this._buildTraitVectors();
+  }
+
+  private _buildTraitVectors(): void {
+    const allTraits = new Set<string>();
+    for (const traits of this._animalTraits.values()) {
+      for (const t of traits) allTraits.add(t);
+    }
+    const traitList = Array.from(allTraits);
+    for (const [animal, traits] of this._animalTraits) {
+      const vec = traitList.map(t => traits.includes(t) ? 1 : 0);
+      this._traitVectors.set(animal, vec);
+    }
+    for (const a of this._animalTraits.keys()) {
+      const row = new Map<string, number>();
+      for (const b of this._animalTraits.keys()) {
+        row.set(b, this._cosineSimilarity(this._traitVectors.get(a)!, this._traitVectors.get(b)!));
+      }
+      this._interactionMatrix.set(a, row);
+    }
+  }
+
+  private _cosineSimilarity(a: number[], b: number[]): number {
+    let dot = 0;
+    let na = 0;
+    let nb = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+      na += a[i] * a[i];
+      nb += b[i] * b[i];
+    }
+    return na > 0 && nb > 0 ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
   }
 
   nominate(animal: string): AnimalTotem | null {
@@ -67,7 +96,8 @@ export class TotemAnimal {
   strengthenBond(totemId: string, amount: number): boolean {
     const totem = this._totems.get(totemId);
     if (!totem) return false;
-    totem.affinity = Math.min(this._maxAffinity, totem.affinity + amount);
+    const logGain = Math.log1p(amount) / Math.log(2);
+    totem.affinity = Math.min(this._maxAffinity, totem.affinity + logGain * 0.1);
     return true;
   }
 
@@ -75,7 +105,7 @@ export class TotemAnimal {
     const totem = this._totems.get(totemId);
     if (!totem) return null;
     const traitMatch = totem.traits.some(t => behavior.toLowerCase().includes(t.toLowerCase()));
-    const effectiveIntensity = traitMatch ? intensity * totem.affinity : intensity * 0.3;
+    const effectiveIntensity = traitMatch ? intensity * totem.affinity : intensity * 0.3 * Math.exp(-totem.affinity);
     const tb: TotemBehavior = {
       animal: totem.animal,
       behavior,
@@ -106,6 +136,7 @@ export class TotemAnimal {
       if (!existing.includes(trait)) existing.push(trait);
     }
     this._animalTraits.set(animal, existing);
+    this._buildTraitVectors();
   }
 
   getDominantTotem(): AnimalTotem | null {
@@ -131,5 +162,17 @@ export class TotemAnimal {
 
   get behaviorCount(): number {
     return this._behaviors.length;
+  }
+
+  computeAnimalCompatibility(animalA: string, animalB: string): number {
+    return this._interactionMatrix.get(animalA)?.get(animalB) ?? 0;
+  }
+
+  getAffinityDistribution(): { mean: number; variance: number } {
+    const affinities = Array.from(this._totems.values()).map(t => t.affinity);
+    if (affinities.length === 0) return { mean: 0, variance: 0 };
+    const mean = affinities.reduce((a, b) => a + b, 0) / affinities.length;
+    const variance = affinities.reduce((a, b) => a + (b - mean) ** 2, 0) / affinities.length;
+    return { mean, variance };
   }
 }

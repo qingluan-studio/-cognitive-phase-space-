@@ -15,6 +15,8 @@ export class FrameShiftInnovation {
   private _insertPool: string[] = ['xyz', 'abc', '123', 'qq', 'zz', 'rr'];
   private _frameSize: number = 3;
   private _maxRecords: number = 200;
+  private _jukesCantorAlpha: number = 0.01;
+  private _sequenceComplexityCache: Map<string, number> = new Map();
 
   insertShift(source: string, position?: number): FrameShiftRecord | null {
     if (source.length === 0) return null;
@@ -92,6 +94,35 @@ export class FrameShiftInnovation {
     return 1 - intersection / union;
   }
 
+  computeJukesCantorDistance(original: string, shifted: string): number {
+    const p = this.compareFrames(original, shifted) / Math.max(original.length, shifted.length);
+    if (p >= 0.75) return Infinity;
+    return -0.75 * Math.log(1 - (4 / 3) * p);
+  }
+
+  computeSequenceComplexity(source: string): number {
+    if (this._sequenceComplexityCache.has(source)) {
+      return this._sequenceComplexityCache.get(source)!;
+    }
+    const n = source.length;
+    if (n === 0) return 0;
+    const substrings: Map<string, number> = new Map();
+    for (let len = 1; len <= Math.min(3, n); len++) {
+      for (let i = 0; i + len <= n; i++) {
+        const sub = source.slice(i, i + len);
+        substrings.set(sub, (substrings.get(sub) ?? 0) + 1);
+      }
+    }
+    let entropy = 0;
+    const total = n * Math.min(3, n);
+    for (const count of substrings.values()) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    this._sequenceComplexityCache.set(source, entropy);
+    return entropy;
+  }
+
   computeAverageNovelty(): number {
     if (this._records.length === 0) return 0;
     const sum = this._records.reduce((s, r) => s + r.noveltyScore, 0);
@@ -125,20 +156,26 @@ export class FrameShiftInnovation {
     return this._records.length;
   }
 
+  get jukesCantorAlpha(): number {
+    return this._jukesCantorAlpha;
+  }
+
   private _computeNovelty(original: string, shifted: string): number {
     const origFreq: Record<string, number> = {};
     const shiftFreq: Record<string, number> = {};
     for (const ch of original) origFreq[ch] = (origFreq[ch] ?? 0) + 1;
     for (const ch of shifted) shiftFreq[ch] = (shiftFreq[ch] ?? 0) + 1;
     const chars = new Set([...Object.keys(origFreq), ...Object.keys(shiftFreq)]);
-    let diff = 0;
-    let total = 0;
+    let klDiv = 0;
+    const origLen = original.length || 1;
+    const shiftLen = shifted.length || 1;
     for (const ch of chars) {
-      const o = origFreq[ch] ?? 0;
-      const s = shiftFreq[ch] ?? 0;
-      diff += Math.abs(o - s);
-      total += Math.max(o, s);
+      const p = (origFreq[ch] ?? 0) / origLen;
+      const q = (shiftFreq[ch] ?? 0) / shiftLen;
+      if (p > 0 && q > 0) {
+        klDiv += p * Math.log(p / q);
+      }
     }
-    return total === 0 ? 0 : diff / total;
+    return Math.min(1, Math.abs(klDiv));
   }
 }

@@ -1,143 +1,139 @@
-/**
- * 归来者重试模块：已经死透的请求反复复活重试，
- * 像不死的归来者一样持续骚扰目标服务。
- */
-
-export type RevenantState = 'alive' | 'dying' | 'dead' | 'revenant' | 'banished';
-
-export interface RevenantRequest {
-  id: string;
-  target: string;
-  payload: Record<string, unknown>;
-  attemptCount: number;
-  maxAttempts: number;
-  state: RevenantState;
-  lastAttemptAt: number | null;
-  totalDelayMs: number;
+export interface RetryAttempt {
+  id: number;
+  taskId: string;
+  attemptNumber: number;
+  success: boolean;
+  delayMs: number;
+  timestamp: number;
 }
 
-export interface RevenantOutcome {
-  requestId: string;
-  attempt: number;
-  success: boolean;
-  responseStatus: number;
-  nextDelayMs: number;
-  occurredAt: number;
+export interface RetryPolicy {
+  maxAttempts: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  backoffMultiplier: number;
+  jitterFactor: number;
 }
 
 export class RevenantRetry {
-  private _requests: Map<string, RevenantRequest> = new Map();
-  private _outcomes: RevenantOutcome[] = [];
-  private _baseDelayMs = 100;
-  private _maxDelayMs = 60000;
-  private _backoffMultiplier = 2.0;
-  private _banishThreshold = 10;
+  private _policy: RetryPolicy;
+  private _attempts: RetryAttempt[] = [];
+  private _nextId: number = 0;
+  private _state: Record<string, unknown> = {};
+  private _markovState: number = 0;
+  private _transitionMatrix: number[][] = [[0.6, 0.4], [0.3, 0.7]];
+  private _delayEntropy: number = 0;
+  private _intervalDistribution: Map<number, number> = new Map();
 
-  summon(requestId: string, target: string, payload: Record<string, unknown>, maxAttempts: number): RevenantRequest {
-    const request: RevenantRequest = {
-      id: requestId,
-      target,
-      payload,
-      attemptCount: 0,
-      maxAttempts,
-      state: 'alive',
-      lastAttemptAt: null,
-      totalDelayMs: 0,
-    };
-    this._requests.set(requestId, request);
-    return request;
+  constructor(policy: RetryPolicy) {
+    this._policy = { ...policy };
   }
 
-  private _computeDelay(attempt: number): number {
-    const delay = this._baseDelayMs * Math.pow(this._backoffMultiplier, attempt - 1);
-    return Math.min(delay, this._maxDelayMs);
+  get attemptCount(): number {
+    return this._attempts.length;
   }
 
-  attempt(requestId: string, successChance: number): RevenantOutcome | null {
-    const request = this._requests.get(requestId);
-    if (!request) return null;
-    if (request.state === 'banished') return null;
-    if (request.attemptCount >= request.maxAttempts) {
-      request.state = 'dead';
-      return null;
-    }
-    request.attemptCount++;
-    request.lastAttemptAt = Date.now();
-    const success = Math.random() < successChance;
-    const responseStatus = success ? 200 : 500;
-    const nextDelayMs = success ? 0 : this._computeDelay(request.attemptCount);
-    request.totalDelayMs += nextDelayMs;
-    if (success) {
-      request.state = 'alive';
-    } else if (request.attemptCount >= request.maxAttempts) {
-      request.state = 'dead';
-    } else if (request.attemptCount >= this._banishThreshold / 2) {
-      request.state = 'revenant';
-    } else {
-      request.state = 'dying';
-    }
-    const outcome: RevenantOutcome = {
-      requestId,
-      attempt: request.attemptCount,
+  get successRate(): number {
+    const successes = this._attempts.filter(a => a.success).length;
+    return this._attempts.length > 0 ? successes / this._attempts.length : 0;
+  }
+
+  get delayEntropy(): number {
+    return this._delayEntropy;
+  }
+
+  private _advanceMarkov(): number {
+    const row = this._transitionMatrix[this._markovState];
+    const roll = Math.random();
+    return roll < row[0] ? 0 : 1;
+  }
+
+  private _computeDelay(attemptNumber: number): number {
+    const exponential = this._policy.baseDelayMs * Math.pow(this._policy.backoffMultiplier, attemptNumber - 1);
+    const clamped = Math.min(exponential, this._policy.maxDelayMs);
+    const jitter = clamped * this._policy.jitterFactor * (Math.random() - 0.5) * 2;
+    return Math.max(0, Math.floor(clamped + jitter));
+  }
+
+  attempt(taskId: string, attemptNumber: number, success: boolean): RetryAttempt {
+    const delay = this._computeDelay(attemptNumber);
+    const attempt: RetryAttempt = {
+      id: this._nextId++,
+      taskId,
+      attemptNumber,
       success,
-      responseStatus,
-      nextDelayMs,
-      occurredAt: Date.now(),
+      delayMs: delay,
+      timestamp: Date.now(),
     };
-    this._outcomes.push(outcome);
-    if (this._outcomes.length > 300) this._outcomes.shift();
-    return outcome;
+    this._attempts.push(attempt);
+    if (this._attempts.length > 200) this._attempts.shift();
+    this._markovState = this._advanceMarkov();
+    this._intervalDistribution.set(delay, (this._intervalDistribution.get(delay) ?? 0) + 1);
+    this._updateDelayEntropy();
+    return attempt;
   }
 
-  resurrect(requestId: string): boolean {
-    const request = this._requests.get(requestId);
-    if (!request || request.state !== 'dead') return false;
-    request.state = 'revenant';
-    request.attemptCount = 0;
-    request.maxAttempts *= 2;
-    return true;
+  private _updateDelayEntropy(): void {
+    const total = Array.from(this._intervalDistribution.values()).reduce((a, b) => a + b, 0);
+    if (total === 0) {
+      this._delayEntropy = 0;
+      return;
+    }
+    let entropy = 0;
+    for (const count of this._intervalDistribution.values()) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    this._delayEntropy = entropy;
   }
 
-  banish(requestId: string): boolean {
-    const request = this._requests.get(requestId);
-    if (!request) return false;
-    request.state = 'banished';
-    return true;
+  shouldRetry(attemptNumber: number): boolean {
+    return attemptNumber < this._policy.maxAttempts;
   }
 
-  isPersistent(requestId: string): boolean {
-    const request = this._requests.get(requestId);
-    if (!request) return false;
-    return request.state === 'revenant' || request.attemptCount > this._banishThreshold;
+  getAttemptsForTask(taskId: string): RetryAttempt[] {
+    return this._attempts.filter(a => a.taskId === taskId);
   }
 
-  setBackoffParams(base: number, multiplier: number, maxDelay: number): void {
-    this._baseDelayMs = Math.max(10, base);
-    this._backoffMultiplier = Math.max(1, multiplier);
-    this._maxDelayMs = Math.max(1000, maxDelay);
+  averageDelay(): number {
+    if (this._attempts.length === 0) return 0;
+    return this._attempts.reduce((acc, a) => acc + a.delayMs, 0) / this._attempts.length;
   }
 
-  setBanishThreshold(value: number): void {
-    this._banishThreshold = Math.max(1, value);
+  maxDelayObserved(): number {
+    if (this._attempts.length === 0) return 0;
+    return Math.max(...this._attempts.map(a => a.delayMs));
   }
 
-  getOutcomesByRequest(requestId: string): RevenantOutcome[] {
-    return this._outcomes.filter(o => o.requestId === requestId);
+  getRecentAttempts(limit: number = 50): RetryAttempt[] {
+    return this._attempts.slice(-limit);
   }
 
-  listActiveRevenants(): RevenantRequest[] {
-    return Array.from(this._requests.values()).filter(r => r.state === 'revenant');
+  setPolicy(policy: Partial<RetryPolicy>): void {
+    this._policy = { ...this._policy, ...policy };
   }
 
-  getRequest(requestId: string): RevenantRequest | null {
-    return this._requests.get(requestId) ?? null;
+  computeExpectedRetries(): number {
+    const p = 1 - this.successRate;
+    if (p >= 1) return this._policy.maxAttempts;
+    return p / (1 - p);
   }
 
-  get requestCount(): number {
-    return this._requests.size;
+  resetAttempts(taskId: string): void {
+    this._attempts = this._attempts.filter(a => a.taskId !== taskId);
+    this._updateDelayEntropy();
   }
 
-  get revenantCount(): number {
-    return this.listActiveRevenants().length;
+  retryReport(): Record<string, unknown> {
+    return {
+      attemptCount: this._attempts.length,
+      successRate: this.successRate.toFixed(4),
+      averageDelay: this.averageDelay().toFixed(2),
+      maxDelayObserved: this.maxDelayObserved(),
+      delayEntropy: this._delayEntropy.toFixed(4),
+      expectedRetries: this.computeExpectedRetries().toFixed(3),
+      policy: this._policy,
+      state: this._state,
+    };
   }
 }

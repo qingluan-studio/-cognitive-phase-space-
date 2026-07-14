@@ -1,117 +1,128 @@
-/**
- * ZombieProcess - 僵尸进程
- * 宿主被寄生后失去自主意识，行为由寄生者远程操控，
- * 进程虽在运行但丧失自主决策能力，成为执行寄生者意志的载体。
- */
-
-export interface ZombieProcessData {
-  readonly processId: string;
-  hostId: string;
-  autonomyLevel: number;
-  puppetMaster: string;
-  commandQueue: string[];
+export interface ZombieRecord {
+  id: string;
+  originalPid: string;
+  resurrectionCount: number;
+  infectionSource: string;
+  lastResurrectedAt: number | null;
+  virulence: number;
 }
 
-export interface ExecutedCommand {
-  command: string;
+export interface InfectionSpread {
+  from: string;
+  to: string;
   timestamp: number;
-  result: 'success' | 'failed' | 'partial';
+  probability: number;
 }
 
 export class ZombieProcess {
-  private _data: ZombieProcessData;
-  private _executedLog: ExecutedCommand[] = [];
-  private _residualAutonomy: number;
-  private _commandLatency: number = 0;
-  private _heartbeatCount: number = 0;
+  private _zombies: Map<string, ZombieRecord> = new Map();
+  private _spreadLog: InfectionSpread[] = [];
+  private _state: Record<string, unknown> = {};
+  private _resurrectionQueue: string[] = [];
+  private _infectionGraph: Map<string, Set<string>> = new Map();
+  private _baseVirulence: number = 0.3;
 
-  constructor(data: ZombieProcessData) {
-    this._data = { ...data, commandQueue: [...data.commandQueue] };
-    this._residualAutonomy = data.autonomyLevel;
+  infect(id: string, originalPid: string, infectionSource: string): ZombieRecord {
+    const record: ZombieRecord = {
+      id,
+      originalPid,
+      resurrectionCount: 0,
+      infectionSource,
+      lastResurrectedAt: null,
+      virulence: this._baseVirulence,
+    };
+    this._zombies.set(id, record);
+    const edges = this._infectionGraph.get(infectionSource) ?? new Set();
+    edges.add(id);
+    this._infectionGraph.set(infectionSource, edges);
+    return record;
   }
 
-  get processId(): string {
-    return this._data.processId;
+  resurrect(id: string): boolean {
+    const zombie = this._zombies.get(id);
+    if (!zombie) return false;
+    zombie.resurrectionCount++;
+    zombie.lastResurrectedAt = Date.now();
+    zombie.virulence = Math.min(1, zombie.virulence * 1.2);
+    this._resurrectionQueue.push(id);
+    if (this._resurrectionQueue.length > 100) this._resurrectionQueue.shift();
+    return true;
   }
 
-  get puppetMaster(): string {
-    return this._data.puppetMaster;
-  }
-
-  get autonomyLevel(): number {
-    return this._residualAutonomy;
-  }
-
-  get pendingCommands(): number {
-    return this._data.commandQueue.length;
-  }
-
-  public receiveCommand(command: string, timestamp: number): void {
-    this._data.commandQueue.push(command);
-    this._commandLatency = Math.max(0, this._commandLatency - 0.05);
-  }
-
-  public executeNext(timestamp: number): ExecutedCommand | null {
-    if (this._data.commandQueue.length === 0) {
-      return null;
+  spread(fromId: string, toId: string, probability: number): boolean {
+    if (Math.random() > probability) return false;
+    const spread: InfectionSpread = {
+      from: fromId,
+      to: toId,
+      timestamp: Date.now(),
+      probability,
+    };
+    this._spreadLog.push(spread);
+    if (this._spreadLog.length > 200) this._spreadLog.shift();
+    const edges = this._infectionGraph.get(fromId) ?? new Set();
+    edges.add(toId);
+    this._infectionGraph.set(fromId, edges);
+    if (!this._zombies.has(toId)) {
+      this.infect(toId, toId, fromId);
     }
-    const command = this._data.commandQueue.shift()!;
-    const obeyChance = 1 - this._residualAutonomy;
-    const roll = Math.random();
-    let result: 'success' | 'failed' | 'partial';
-    if (roll < obeyChance * 0.8) {
-      result = 'success';
-    } else if (roll < obeyChance) {
-      result = 'partial';
-    } else {
-      result = 'failed';
-      this._residualAutonomy = Math.min(1, this._residualAutonomy + 0.05);
+    return true;
+  }
+
+  getZombie(id: string): ZombieRecord | null {
+    return this._zombies.get(id) ?? null;
+  }
+
+  getInfectedBy(source: string): string[] {
+    return Array.from(this._infectionGraph.get(source) ?? []);
+  }
+
+  averageResurrectionCount(): number {
+    if (this._zombies.size === 0) return 0;
+    return Array.from(this._zombies.values()).reduce((s, z) => s + z.resurrectionCount, 0) / this._zombies.size;
+  }
+
+  maxVirulence(): number {
+    if (this._zombies.size === 0) return 0;
+    return Math.max(...Array.from(this._zombies.values()).map(z => z.virulence));
+  }
+
+  getSpreadChain(rootId: string): string[] {
+    const chain: string[] = [];
+    const queue = [rootId];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      chain.push(current);
+      for (const neighbor of this._infectionGraph.get(current) ?? []) {
+        queue.push(neighbor);
+      }
     }
-    const entry: ExecutedCommand = { command, timestamp, result };
-    this._executedLog.push(entry);
-    if (this._executedLog.length > 40) {
-      this._executedLog.shift();
-    }
-    return entry;
+    return chain;
   }
 
-  public heartbeat(): boolean {
-    this._heartbeatCount++;
-    this._commandLatency = Math.min(1, this._commandLatency + 0.02);
-    return this._heartbeatCount % 5 === 0;
+  setBaseVirulence(virulence: number): void {
+    this._baseVirulence = Math.max(0, Math.min(1, virulence));
   }
 
-  public resistControl(strength: number): void {
-    this._residualAutonomy = Math.min(1, this._residualAutonomy + strength * 0.1);
+  get zombieCount(): number {
+    return this._zombies.size;
   }
 
-  public reinforceControl(intensity: number): void {
-    this._residualAutonomy = Math.max(0, this._residualAutonomy - intensity * 0.15);
-    this._commandLatency = Math.max(0, this._commandLatency - 0.1);
+  get spreadCount(): number {
+    return this._spreadLog.length;
   }
 
-  public severLink(): boolean {
-    if (this._residualAutonomy > 0.7) {
-      this._data.puppetMaster = '';
-      this._data.commandQueue = [];
-      return true;
-    }
-    return false;
-  }
-
-  public zombieReport(): Record<string, unknown> {
-    const successRate = this._executedLog.length > 0
-      ? this._executedLog.filter((e) => e.result === 'success').length / this._executedLog.length
-      : 0;
+  zombieReport(): Record<string, unknown> {
     return {
-      processId: this.processId,
-      puppetMaster: this._data.puppetMaster || 'none',
-      autonomy: this._residualAutonomy.toFixed(3),
-      pendingCommands: this.pendingCommands,
-      executedCount: this._executedLog.length,
-      successRate: successRate.toFixed(3),
-      heartbeatCount: this._heartbeatCount,
-      commandLatency: this._commandLatency.toFixed(3),
+      zombieCount: this._zombies.size,
+      spreadCount: this._spreadLog.length,
+      averageResurrectionCount: this.averageResurrectionCount().toFixed(2),
+      maxVirulence: this.maxVirulence().toFixed(4),
+      baseVirulence: this._baseVirulence.toFixed(4),
+      resurrectionQueueLength: this._resurrectionQueue.length,
+      state: this._state,
     };
   }
 }

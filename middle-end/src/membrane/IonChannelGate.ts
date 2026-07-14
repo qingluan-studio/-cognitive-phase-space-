@@ -1,122 +1,157 @@
-/**
- * IonChannelGate - 离子通道门
- * 快速开启或关闭特定信息通道，模拟细胞膜上离子通道的
- * 门控机制，对特定信号做出毫秒级响应。
- */
+export type ChannelState = 'closed' | 'open' | 'inactivated';
 
-export interface IonChannelGateData {
-  readonly gateId: string;
-  ionType: string;
+export interface ChannelRecord {
+  id: string;
+  state: ChannelState;
   conductance: number;
-  thresholdPotential: number;
-  state: 'open' | 'closed' | 'inactivated';
+  activationEnergy: number;
+  ionType: string;
 }
 
-export interface GateTransition {
-  from: 'open' | 'closed' | 'inactivated';
-  to: 'open' | 'closed' | 'inactivated';
-  trigger: string;
+export interface TransitionEvent {
+  channelId: string;
+  from: ChannelState;
+  to: ChannelState;
   timestamp: number;
+  voltage: number;
 }
 
 export class IonChannelGate {
-  private _data: IonChannelGateData;
-  private _transitions: GateTransition[] = [];
-  private _ionFlux: number = 0;
-  private _currentPotential: number = 0;
-  private _refractoryTimer: number = 0;
+  private _channels: Map<string, ChannelRecord> = new Map();
+  private _events: TransitionEvent[] = [];
+  private _state: Record<string, unknown> = {};
+  private _markovMatrix: Map<ChannelState, Map<ChannelState, number>> = new Map();
+  private _boltzmannTemperature: number = 310;
+  private _stateEntropy: number = 0;
+  private _openProbability: number = 0;
 
-  constructor(data: IonChannelGateData) {
-    this._data = { ...data };
+  constructor() {
+    this._initMarkovMatrix();
   }
 
-  get gateId(): string {
-    return this._data.gateId;
-  }
-
-  get state(): 'open' | 'closed' | 'inactivated' {
-    return this._data.state;
-  }
-
-  get ionFlux(): number {
-    return this._ionFlux;
-  }
-
-  public applyPotential(potential: number, timestamp: number): number {
-    this._currentPotential = potential;
-    if (this._refractoryTimer > 0) {
-      this._refractoryTimer--;
-      return 0;
-    }
-    if (this._data.state === 'closed' && potential >= this._data.thresholdPotential) {
-      this._transition('open', 'depolarization', timestamp);
-    } else if (this._data.state === 'open' && potential >= this._data.thresholdPotential * 1.5) {
-      this._transition('inactivated', 'overexcitation', timestamp);
-      this._refractoryTimer = 5;
-    } else if (this._data.state === 'open' && potential < this._data.thresholdPotential * 0.5) {
-      this._transition('closed', 'repolarization', timestamp);
-    }
-    return this._computeFlux();
-  }
-
-  private _transition(to: 'open' | 'closed' | 'inactivated', trigger: string, timestamp: number): void {
-    const from = this._data.state;
-    this._data.state = to;
-    const t: GateTransition = { from, to, trigger, timestamp };
-    this._transitions.push(t);
-    if (this._transitions.length > 30) {
-      this._transitions.shift();
+  private _initMarkovMatrix(): void {
+    const states: ChannelState[] = ['closed', 'open', 'inactivated'];
+    for (const s of states) {
+      const map = new Map<ChannelState, number>();
+      for (const t of states) {
+        map.set(t, s === t ? 0.7 : 0.15);
+      }
+      this._markovMatrix.set(s, map);
     }
   }
 
-  private _computeFlux(): number {
-    if (this._data.state !== 'open') {
-      return 0;
+  registerChannel(channel: ChannelRecord): void {
+    this._channels.set(channel.id, channel);
+    this._updateStateEntropy();
+  }
+
+  private _boltzmannProbability(energy: number): number {
+    const kB = 8.617e-5;
+    return Math.exp(-energy / (kB * this._boltzmannTemperature));
+  }
+
+  step(channelId: string, voltage: number): TransitionEvent | null {
+    const channel = this._channels.get(channelId);
+    if (!channel) return null;
+    const transitions = this._markovMatrix.get(channel.state);
+    if (!transitions) return null;
+    const pOpen = this._boltzmannProbability(channel.activationEnergy - voltage * 0.1);
+    const pInact = this._boltzmannProbability(voltage * 0.05);
+    const roll = Math.random();
+    let nextState = channel.state;
+    if (channel.state === 'closed') {
+      if (roll < pOpen) nextState = 'open';
+      else if (roll < pOpen + pInact * 0.1) nextState = 'inactivated';
+    } else if (channel.state === 'open') {
+      if (roll < pInact) nextState = 'inactivated';
+      else if (roll < pInact + 0.1) nextState = 'closed';
+    } else {
+      if (roll < 0.3) nextState = 'closed';
     }
-    const drivingForce = Math.abs(this._currentPotential - this._data.thresholdPotential);
-    const flux = this._data.conductance * drivingForce;
-    this._ionFlux += flux;
-    return flux;
+    if (nextState === channel.state) return null;
+    const event: TransitionEvent = {
+      channelId,
+      from: channel.state,
+      to: nextState,
+      timestamp: Date.now(),
+      voltage,
+    };
+    channel.state = nextState;
+    this._events.push(event);
+    if (this._events.length > 200) this._events.shift();
+    this._updateStateEntropy();
+    this._updateOpenProbability();
+    return event;
   }
 
-  public resetGate(): void {
-    this._data.state = 'closed';
-    this._refractoryTimer = 0;
-  }
-
-  public adjustConductance(factor: number): void {
-    this._data.conductance = Math.max(0, this._data.conductance * factor);
-  }
-
-  public setThreshold(newThreshold: number): void {
-    this._data.thresholdPotential = Math.max(0, newThreshold);
-  }
-
-  public block(channelBlocker: string): boolean {
-    if (channelBlocker === this._data.ionType) {
-      this._data.state = 'inactivated';
-      this._refractoryTimer = 10;
-      return true;
+  private _updateStateEntropy(): void {
+    const counts: Record<string, number> = {};
+    for (const c of this._channels.values()) {
+      counts[c.state] = (counts[c.state] ?? 0) + 1;
     }
-    return false;
+    const total = this._channels.size;
+    if (total === 0) {
+      this._stateEntropy = 0;
+      return;
+    }
+    let entropy = 0;
+    for (const count of Object.values(counts)) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    this._stateEntropy = entropy;
   }
 
-  public measureConductivity(): number {
-    return this._data.state === 'open' ? this._data.conductance : 0;
+  private _updateOpenProbability(): void {
+    const open = Array.from(this._channels.values()).filter(c => c.state === 'open').length;
+    this._openProbability = this._channels.size > 0 ? open / this._channels.size : 0;
   }
 
-  public gateReport(): Record<string, unknown> {
+  getChannel(id: string): ChannelRecord | null {
+    return this._channels.get(id) ?? null;
+  }
+
+  totalConductance(): number {
+    return Array.from(this._channels.values()).filter(c => c.state === 'open').reduce((s, c) => s + c.conductance, 0);
+  }
+
+  averageConductance(): number {
+    if (this._channels.size === 0) return 0;
+    return Array.from(this._channels.values()).reduce((s, c) => s + c.conductance, 0) / this._channels.size;
+  }
+
+  listByState(state: ChannelState): ChannelRecord[] {
+    return Array.from(this._channels.values()).filter(c => c.state === state);
+  }
+
+  setTemperature(temp: number): void {
+    this._boltzmannTemperature = Math.max(1, temp);
+  }
+
+  get eventCount(): number {
+    return this._events.length;
+  }
+
+  get stateEntropy(): number {
+    return this._stateEntropy;
+  }
+
+  get openProbability(): number {
+    return this._openProbability;
+  }
+
+  gateReport(): Record<string, unknown> {
     return {
-      gateId: this.gateId,
-      ionType: this._data.ionType,
-      state: this._data.state,
-      conductance: this._data.conductance.toFixed(3),
-      threshold: this._data.thresholdPotential.toFixed(2),
-      currentPotential: this._currentPotential.toFixed(2),
-      ionFlux: this._ionFlux.toFixed(2),
-      refractoryTimer: this._refractoryTimer,
-      transitionCount: this._transitions.length,
-      conductivity: this.measureConductivity().toFixed(3),
+      channelCount: this._channels.size,
+      openCount: this.listByState('open').length,
+      closedCount: this.listByState('closed').length,
+      inactivatedCount: this.listByState('inactivated').length,
+      totalConductance: this.totalConductance().toFixed(4),
+      openProbability: this._openProbability.toFixed(4),
+      stateEntropy: this._stateEntropy.toFixed(4),
+      eventCount: this._events.length,
+      temperature: this._boltzmannTemperature.toFixed(2),
+      state: this._state,
     };
   }
 }

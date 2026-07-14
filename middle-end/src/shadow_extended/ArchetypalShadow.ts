@@ -1,106 +1,144 @@
-/**
- * 原型影子模块：集体无意识中普遍存在的黑暗原型。
- * 用于建模跨模块共享的深层原型模式。
- */
-
-export interface ArchetypeShadowData {
+export interface ArchetypeInstance {
   id: string;
-  name: string;
-  prevalence: number;
-  shadowIntensity: number;
-  activations: number;
+  archetype: string;
+  frequency: number;
+  projectionAngle: number;
+  resonance: number;
+  shadowDepth: number;
 }
 
-export type ArchetypeProjection = {
+export interface ShadowResonance {
   archetype: string;
-  target: string;
-  intensity: number;
-};
-
-export interface ArchetypeConfig {
-  resonanceThreshold: number;
-  decayRate: number;
-  maxArchetypes: number;
+  mode: number;
+  amplitude: number;
+  phase: number;
 }
 
 export class ArchetypalShadow {
-  private _config: ArchetypeConfig;
-  private _archetypes: ArchetypeShadowData[] = [];
-  private _projections: ArchetypeProjection[] = [];
+  private _instances: Map<string, ArchetypeInstance> = new Map();
+  private _frequencies: Map<string, number> = new Map();
   private _state: Record<string, unknown> = {};
+  private _resonanceModes: ShadowResonance[] = [];
+  private _projectionMatrix: number[][] = [];
 
-  constructor(config: ArchetypeConfig) {
-    this._config = config;
+  constructor() {}
+
+  get instanceCount(): number {
+    return this._instances.size;
   }
 
   get archetypeCount(): number {
-    return this._archetypes.length;
+    return this._frequencies.size;
   }
 
-  get projectionCount(): number {
-    return this._projections.length;
+  manifest(id: string, archetype: string, projectionAngle: number, shadowDepth: number): ArchetypeInstance {
+    const frequency = (this._frequencies.get(archetype) ?? 0) + 1;
+    this._frequencies.set(archetype, frequency);
+    const resonance = Math.sin(projectionAngle) * shadowDepth;
+    const instance: ArchetypeInstance = { id, archetype, frequency, projectionAngle, resonance, shadowDepth };
+    this._instances.set(id, instance);
+    this._updateResonanceModes();
+    this._updateProjectionMatrix();
+    return instance;
   }
 
-  register(archetype: ArchetypeShadowData): void {
-    this._archetypes.push(archetype);
-    if (this._archetypes.length > this._config.maxArchetypes) {
-      this._archetypes.shift();
+  private _updateResonanceModes(): void {
+    this._resonanceModes = [];
+    for (const [archetype, freq] of this._frequencies) {
+      const instances = Array.from(this._instances.values()).filter((i) => i.archetype === archetype);
+      const avgResonance = instances.reduce((s, i) => s + i.resonance, 0) / (instances.length || 1);
+      this._resonanceModes.push({
+        archetype,
+        mode: freq,
+        amplitude: avgResonance,
+        phase: Math.atan2(avgResonance, freq),
+      });
     }
   }
 
-  activate(id: string): boolean {
-    const a = this._archetypes.find((x) => x.id === id);
-    if (!a) return false;
-    a.activations++;
-    a.shadowIntensity = Math.min(1, a.shadowIntensity + 0.1);
-    this._state.lastActivation = id;
-    return true;
-  }
-
-  project(archetypeId: string, target: string): ArchetypeProjection | null {
-    const a = this._archetypes.find((x) => x.id === archetypeId);
-    if (!a || a.shadowIntensity < this._config.resonanceThreshold) return null;
-    const projection: ArchetypeProjection = {
-      archetype: archetypeId,
-      target,
-      intensity: a.shadowIntensity * a.prevalence,
-    };
-    this._projections.push(projection);
-    if (this._projections.length > 30) this._projections.shift();
-    return projection;
-  }
-
-  decayAll(): void {
-    for (const a of this._archetypes) {
-      a.shadowIntensity *= 1 - this._config.decayRate;
-    }
-  }
-
-  dominantArchetype(): ArchetypeShadowData | null {
-    if (this._archetypes.length === 0) return null;
-    return this._archetypes.reduce((best, a) =>
-      a.shadowIntensity * a.prevalence > best.shadowIntensity * best.prevalence ? a : best
+  private _updateProjectionMatrix(): void {
+    const n = this._instances.size;
+    this._projectionMatrix = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => {
+        const a = Array.from(this._instances.values())[i];
+        const b = Array.from(this._instances.values())[j];
+        return Math.cos(a.projectionAngle - b.projectionAngle);
+      })
     );
   }
 
-  totalShadowIntensity(): number {
-    return this._archetypes.reduce((acc, a) => acc + a.shadowIntensity, 0);
+  project(instanceId: string, targetAngle: number): number {
+    const instance = this._instances.get(instanceId);
+    if (!instance) return 0;
+    return instance.shadowDepth * Math.cos(instance.projectionAngle - targetAngle);
   }
 
-  averagePrevalence(): number {
-    if (this._archetypes.length === 0) return 0;
-    return this._archetypes.reduce((acc, a) => acc + a.prevalence, 0) / this._archetypes.length;
+  amplify(archetype: string, factor: number): void {
+    for (const instance of this._instances.values()) {
+      if (instance.archetype === archetype) {
+        instance.shadowDepth = Math.min(1, instance.shadowDepth * factor);
+        instance.resonance = Math.sin(instance.projectionAngle) * instance.shadowDepth;
+      }
+    }
+    this._updateResonanceModes();
   }
 
-  isCollectiveActive(): boolean {
-    return this.totalShadowIntensity() > this._config.resonanceThreshold * this._archetypes.length;
+  suppress(archetype: string): void {
+    for (const instance of this._instances.values()) {
+      if (instance.archetype === archetype) {
+        instance.shadowDepth *= 0.5;
+        instance.resonance = Math.sin(instance.projectionAngle) * instance.shadowDepth;
+      }
+    }
+    this._updateResonanceModes();
+  }
+
+  archetypeEntropy(): number {
+    const total = Array.from(this._frequencies.values()).reduce((s, v) => s + v, 0);
+    if (total === 0) return 0;
+    return -Array.from(this._frequencies.values()).reduce((s, v) => {
+      const p = v / total;
+      return p > 0 ? s + p * Math.log2(p) : s;
+    }, 0);
+  }
+
+  strongestArchetype(): string | null {
+    if (this._frequencies.size === 0) return null;
+    let best = '';
+    let maxFreq = 0;
+    for (const [a, f] of this._frequencies) {
+      if (f > maxFreq) {
+        maxFreq = f;
+        best = a;
+      }
+    }
+    return best;
+  }
+
+  eigenvalueSpectrum(): number[] {
+    const n = this._projectionMatrix.length;
+    if (n === 0) return [];
+    let vec = Array(n).fill(1 / n);
+    for (let iter = 0; iter < 20; iter++) {
+      const next = Array(n).fill(0);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          next[i] += this._projectionMatrix[i][j] * vec[j];
+        }
+      }
+      const norm = Math.sqrt(next.reduce((s, v) => s + v * v, 0));
+      vec = next.map((v) => v / (norm || 1));
+    }
+    return vec;
   }
 
   report(): Record<string, unknown> {
     return {
-      archetypes: this._archetypes.length,
-      projections: this._projections.length,
-      dominant: this.dominantArchetype(),
+      instances: this._instances.size,
+      archetypes: this._frequencies.size,
+      entropy: this.archetypeEntropy(),
+      strongest: this.strongestArchetype(),
+      resonanceModes: this._resonanceModes.length,
       state: this._state,
     };
   }

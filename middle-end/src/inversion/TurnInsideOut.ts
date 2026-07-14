@@ -1,89 +1,158 @@
-/**
- * 内外翻转：将内部状态与外部表现互换。
- * 将原本的内部状态外显化，同时将原本的外部表现内化，造成视角上的彻底翻转。
- */
-
-export interface InnerState {
-  id: string;
-  content: string;
-  visibility: 'hidden' | 'exposed';
+export interface SurfacePoint {
+  x: number;
+  y: number;
+  z: number;
+  normal: [number, number, number];
+  insideOut: boolean;
 }
 
-export interface OuterExpression {
-  id: string;
-  content: string;
-  location: 'external' | 'internalized';
+export type InversionResult = {
+  centroid: [number, number, number];
+  volume: number;
+  surfaceArea: number;
+};
+
+export interface TurnInsideOutConfig {
+  sphereRadius: number;
+  centerX: number;
+  centerY: number;
+  centerZ: number;
+  stepResolution: number;
 }
 
 export class TurnInsideOut {
-  private _inner: Map<string, InnerState> = new Map();
-  private _outer: Map<string, OuterExpression> = new Map();
-  private _flipped: Set<string> = new Set();
-  private _flipCount = 0;
+  private _config: TurnInsideOutConfig;
+  private _points: SurfacePoint[] = [];
+  private _result: InversionResult | null = null;
+  private _state: Record<string, unknown> = {};
+  private _gaussianCurvature: number = 0;
+  private _meanCurvature: number = 0;
+  private _eulerCharacteristic: number = 0;
 
-  addInner(state: InnerState): void {
-    this._inner.set(state.id, state);
+  constructor(config: TurnInsideOutConfig) {
+    this._config = config;
   }
 
-  addOuter(expr: OuterExpression): void {
-    this._outer.set(expr.id, expr);
+  get pointCount(): number {
+    return this._points.length;
   }
 
-  flip(id: string): { inner?: InnerState; outer?: OuterExpression } | null {
-    const inner = this._inner.get(id);
-    const outer = this._outer.get(id);
-    if (!inner && !outer) return null;
-    if (inner) {
-      inner.visibility = inner.visibility === 'hidden' ? 'exposed' : 'hidden';
-      this._flipped.add(id);
+  get gaussianCurvature(): number {
+    return this._gaussianCurvature;
+  }
+
+  get eulerCharacteristic(): number {
+    return this._eulerCharacteristic;
+  }
+
+  private _computeCentroid(): [number, number, number] {
+    let sumX = 0;
+    let sumY = 0;
+    let sumZ = 0;
+    for (const p of this._points) {
+      sumX += p.x;
+      sumY += p.y;
+      sumZ += p.z;
     }
-    if (outer) {
-      outer.location = outer.location === 'external' ? 'internalized' : 'external';
-      this._flipped.add(id);
+    const n = this._points.length;
+    return [sumX / n, sumY / n, sumZ / n];
+  }
+
+  private _computeCurvatures(): void {
+    if (this._points.length < 3) return;
+    const centroid = this._computeCentroid();
+    let sumK = 0;
+    let sumH = 0;
+    for (const p of this._points) {
+      const dx = p.x - centroid[0];
+      const dy = p.y - centroid[1];
+      const dz = p.z - centroid[2];
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const r = this._config.sphereRadius;
+      const k = 1 / (r * r);
+      const h = 1 / r;
+      sumK += k;
+      sumH += h;
     }
-    this._flipCount++;
-    return { inner: inner ?? undefined, outer: outer ?? undefined };
+    this._gaussianCurvature = sumK / this._points.length;
+    this._meanCurvature = sumH / this._points.length;
+    this._eulerCharacteristic = 2;
   }
 
-  flipAll(): void {
-    for (const inner of this._inner.values()) {
-      inner.visibility = inner.visibility === 'hidden' ? 'exposed' : 'hidden';
-      this._flipped.add(inner.id);
+  addPoint(x: number, y: number, z: number, normal: [number, number, number]): SurfacePoint {
+    const point: SurfacePoint = { x, y, z, normal, insideOut: false };
+    this._points.push(point);
+    if (this._points.length > 60) this._points.shift();
+    this._computeCurvatures();
+    return point;
+  }
+
+  invert(): SurfacePoint[] {
+    const centroid = this._computeCentroid();
+    for (const p of this._points) {
+      p.normal[0] = -p.normal[0];
+      p.normal[1] = -p.normal[1];
+      p.normal[2] = -p.normal[2];
+      const dx = p.x - centroid[0];
+      const dy = p.y - centroid[1];
+      const dz = p.z - centroid[2];
+      p.x = centroid[0] - dx;
+      p.y = centroid[1] - dy;
+      p.z = centroid[2] - dz;
+      p.insideOut = true;
     }
-    for (const outer of this._outer.values()) {
-      outer.location = outer.location === 'external' ? 'internalized' : 'external';
-      this._flipped.add(outer.id);
+    this._computeCurvatures();
+    this._state.invertedAt = Date.now();
+    return this._points;
+  }
+
+  computeResult(): InversionResult {
+    const centroid = this._computeCentroid();
+    let volume = 0;
+    let surfaceArea = 0;
+    for (let i = 0; i < this._points.length - 1; i++) {
+      const p1 = this._points[i];
+      const p2 = this._points[i + 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const dz = p2.z - p1.z;
+      surfaceArea += Math.sqrt(dx * dx + dy * dy + dz * dz);
+      const r1 = Math.sqrt(p1.x * p1.x + p1.y * p1.y + p1.z * p1.z);
+      const r2 = Math.sqrt(p2.x * p2.x + p2.y * p2.y + p2.z * p2.z);
+      volume += (4 / 3) * Math.PI * Math.abs(r2 * r2 * r2 - r1 * r1 * r1) / this._points.length;
     }
-    this._flipCount++;
+    this._result = { centroid, volume, surfaceArea };
+    return this._result;
   }
 
-  exposeInner(id: string): InnerState | null {
-    const s = this._inner.get(id);
-    if (!s) return null;
-    s.visibility = 'exposed';
-    return s;
+  isInsideOut(): boolean {
+    return this._points.some((p) => p.insideOut);
   }
 
-  internalizeOuter(id: string): OuterExpression | null {
-    const e = this._outer.get(id);
-    if (!e) return null;
-    e.location = 'internalized';
-    return e;
+  computeWillmoreEnergy(): number {
+    if (this._points.length === 0) return 0;
+    const h2 = this._meanCurvature * this._meanCurvature;
+    return h2 * this._config.sphereRadius * this._config.sphereRadius * this._points.length;
   }
 
-  getFlipped(): string[] {
-    return Array.from(this._flipped);
+  reset(): void {
+    this._points = [];
+    this._result = null;
+    this._gaussianCurvature = 0;
+    this._meanCurvature = 0;
+    this._eulerCharacteristic = 0;
+    this._state = {};
   }
 
-  getInner(id: string): InnerState | null {
-    return this._inner.get(id) ?? null;
-  }
-
-  getOuter(id: string): OuterExpression | null {
-    return this._outer.get(id) ?? null;
-  }
-
-  get flipCount(): number {
-    return this._flipCount;
+  report(): Record<string, unknown> {
+    return {
+      points: this._points.length,
+      insideOut: this.isInsideOut(),
+      result: this._result,
+      state: this._state,
+      gaussianCurvature: this._gaussianCurvature.toFixed(4),
+      eulerCharacteristic: this._eulerCharacteristic,
+      willmoreEnergy: this.computeWillmoreEnergy().toFixed(4),
+    };
   }
 }

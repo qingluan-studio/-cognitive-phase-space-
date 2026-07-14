@@ -1,118 +1,151 @@
-/**
- * 折痕图样：预设的折叠模式，决定数据重构方式。
- * 定义可复用的折痕图样，作为折叠操作的蓝图，决定数据如何被重构成新结构。
- */
-
-export type CreaseType = 'mountain' | 'valley' | 'flat' | 'cut';
-
 export interface Crease {
-  id: string;
-  type: CreaseType;
-  position: number;
   angle: number;
+  depth: number;
+  mirrored: boolean;
+  type: 'mountain' | 'valley';
 }
 
-export type PatternSymmetry = 'none' | 'bilateral' | 'radial' | 'quad';
+export type FlatFoldability = {
+  flat: boolean;
+  kawasakiSum: number;
+  maekawaDifference: number;
+};
 
-export interface PatternDefinition {
-  id: string;
-  name: string;
-  creases: Crease[];
-  symmetry: PatternSymmetry;
-  createdAt: number;
+export interface CreasePatternConfig {
+  symmetry: number;
+  minAngle: number;
+  maxDepth: number;
 }
 
-export interface AppliedPattern {
-  patternId: string;
-  input: number[];
-  output: number[];
-  creasesApplied: number;
-  appliedAt: number;
-}
+export class CreasePattern {
+  private _config: CreasePatternConfig;
+  private _creases: Crease[] = [];
+  private _foldability: FlatFoldability | null = null;
+  private _state: Record<string, unknown> = {};
+  private _angleSequence: number[] = [];
+  private _kawasakiResidual: number = 0;
+  private _maekawaDeviation: number = 0;
 
-export class CreasePattern implements PatternDefinition {
-  private _patterns: Map<string, PatternDefinition> = new Map();
-  private _applications: AppliedPattern[] = [];
-  public id: string;
-  public name: string;
-  public creases: Crease[];
-  public symmetry: PatternSymmetry;
-  public createdAt: number;
-
-  constructor(id: string, name: string, symmetry: PatternSymmetry = 'none') {
-    this.id = id;
-    this.name = name;
-    this.creases = [];
-    this.symmetry = symmetry;
-    this.createdAt = Date.now();
-  }
-
-  addCrease(crease: Crease): void {
-    this.creases.push(crease);
-  }
-
-  removeCrease(creaseId: string): boolean {
-    const idx = this.creases.findIndex(c => c.id === creaseId);
-    if (idx === -1) return false;
-    this.creases.splice(idx, 1);
-    return true;
-  }
-
-  register(pattern: PatternDefinition): void {
-    this._patterns.set(pattern.id, pattern);
-  }
-
-  apply(patternId: string, input: number[]): AppliedPattern | null {
-    const pattern = this._patterns.get(patternId);
-    if (!pattern) return null;
-    const output = this._fold(input, pattern);
-    const application: AppliedPattern = {
-      patternId,
-      input: [...input],
-      output,
-      creasesApplied: pattern.creases.length,
-      appliedAt: Date.now(),
-    };
-    this._applications.push(application);
-    if (this._applications.length > 100) this._applications.shift();
-    return application;
-  }
-
-  private _fold(input: number[], pattern: PatternDefinition): number[] {
-    let output = [...input];
-    for (const crease of pattern.creases) {
-      const pos = Math.min(output.length - 1, Math.max(0, Math.floor(crease.position * output.length)));
-      switch (crease.type) {
-        case 'mountain':
-          output = output.map((v, i) => i < pos ? v : -v);
-          break;
-        case 'valley':
-          output = output.map((v, i) => i < pos ? -v : v);
-          break;
-        case 'flat':
-          output = output.map((v, i) => i === pos ? 0 : v);
-          break;
-        case 'cut':
-          output = [...output.slice(0, pos), ...output.slice(pos + 1)];
-          break;
-      }
-    }
-    return output;
-  }
-
-  getApplications(): AppliedPattern[] {
-    return [...this._applications];
-  }
-
-  getPattern(id: string): PatternDefinition | null {
-    return this._patterns.get(id) ?? null;
+  constructor(config: CreasePatternConfig) {
+    this._config = config;
   }
 
   get creaseCount(): number {
-    return this.creases.length;
+    return this._creases.length;
   }
 
-  get patternCount(): number {
-    return this._patterns.size;
+  get kawasakiResidual(): number {
+    return this._kawasakiResidual;
+  }
+
+  get maekawaDeviation(): number {
+    return this._maekawaDeviation;
+  }
+
+  private _computeKawasaki(angles: number[]): number {
+    if (angles.length < 4) return 0;
+    let oddSum = 0;
+    let evenSum = 0;
+    for (let i = 0; i < angles.length; i++) {
+      if (i % 2 === 0) {
+        evenSum += angles[i];
+      } else {
+        oddSum += angles[i];
+      }
+    }
+    return Math.abs(evenSum - oddSum - Math.PI);
+  }
+
+  private _computeMaekawa(creases: Crease[]): number {
+    let mountains = 0;
+    let valleys = 0;
+    for (const c of creases) {
+      if (c.type === 'mountain') mountains++;
+      else valleys++;
+    }
+    return Math.abs(mountains - valleys);
+  }
+
+  addCrease(angle: number, depth: number, type: 'mountain' | 'valley', mirrored: boolean = false): Crease {
+    const crease: Crease = { angle, depth, mirrored, type };
+    this._creases.push(crease);
+    this._angleSequence.push(angle);
+    if (this._angleSequence.length > 20) this._angleSequence.shift();
+    this._kawasakiResidual = this._computeKawasaki(this._angleSequence);
+    this._maekawaDeviation = this._computeMaekawa(this._creases);
+    if (this._creases.length > 40) this._creases.shift();
+    return crease;
+  }
+
+  checkFlatFoldability(): FlatFoldability {
+    const kawasakiSum = this._computeKawasaki(this._angleSequence);
+    const maekawaDifference = this._computeMaekawa(this._creases);
+    const flat = kawasakiSum < 0.1 && maekawaDifference === 2;
+    this._foldability = { flat, kawasakiSum, maekawaDifference };
+    return this._foldability;
+  }
+
+  mirror(): void {
+    for (const c of this._creases) {
+      c.angle = this._config.symmetry - c.angle;
+      c.mirrored = !c.mirrored;
+    }
+    this._angleSequence = this._creases.map((c) => c.angle);
+    this._kawasakiResidual = this._computeKawasaki(this._angleSequence);
+    this._state.mirroredAt = Date.now();
+  }
+
+  rotate(offset: number): void {
+    for (const c of this._creases) {
+      c.angle = (c.angle + offset) % (2 * Math.PI);
+    }
+    this._angleSequence = this._creases.map((c) => c.angle);
+    this._kawasakiResidual = this._computeKawasaki(this._angleSequence);
+  }
+
+  totalDepth(): number {
+    return this._creases.reduce((acc, c) => acc + c.depth, 0);
+  }
+
+  deepestCrease(): Crease | null {
+    if (this._creases.length === 0) return null;
+    return this._creases.reduce((best, c) => (c.depth > best.depth ? c : best));
+  }
+
+  computeAngularVariance(): number {
+    if (this._angleSequence.length === 0) return 0;
+    const mean = this._angleSequence.reduce((a, b) => a + b, 0) / this._angleSequence.length;
+    return this._angleSequence.reduce((a, b) => a + (b - mean) * (b - mean), 0) / this._angleSequence.length;
+  }
+
+  generateTessellation(repetitions: number): Crease[] {
+    const result: Crease[] = [];
+    for (let r = 0; r < repetitions; r++) {
+      const rot = (r * 2 * Math.PI) / repetitions;
+      for (const c of this._creases) {
+        result.push({ ...c, angle: (c.angle + rot) % (2 * Math.PI) });
+      }
+    }
+    return result;
+  }
+
+  reset(): void {
+    this._creases = [];
+    this._angleSequence = [];
+    this._foldability = null;
+    this._kawasakiResidual = 0;
+    this._maekawaDeviation = 0;
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      creases: this._creases.length,
+      foldability: this._foldability,
+      state: this._state,
+      kawasakiResidual: this._kawasakiResidual.toFixed(4),
+      maekawaDeviation: this._maekawaDeviation,
+      angularVariance: this.computeAngularVariance().toFixed(4),
+    };
   }
 }

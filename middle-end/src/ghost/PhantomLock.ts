@@ -1,134 +1,167 @@
-/**
- * 幻象锁模块：已释放的锁仍产生效果，资源看似被锁实则未锁，
- * 其他线程误以为资源被占用，导致虚假的阻塞与等待。
- */
-
-export type LockPhantomState = 'held' | 'released' | 'phantom' | 'dispelled';
-
-export interface PhantomLockEntry {
+export interface LockRecord {
   id: string;
-  resourceId: string;
+  resource: string;
   holder: string;
-  state: LockPhantomState;
   acquiredAt: number;
   releasedAt: number | null;
-  phantomWaiters: string[];
+  spinCount: number;
 }
 
-export interface WaiterReport {
-  resourceId: string;
-  waiterId: string;
-  blocked: boolean;
-  reason: string;
+export interface LockWaitRecord {
+  waiter: string;
+  requestedAt: number;
+  waitDuration: number;
 }
 
 export class PhantomLock {
-  private _locks: Map<string, PhantomLockEntry> = new Map();
-  private _waiterReports: WaiterReport[] = [];
-  private _phantomDecayMs = 30000;
-  private _maxWaiters = 10;
+  private _locks: Map<string, LockRecord> = new Map();
+  private _waitQueue: Map<string, LockWaitRecord[]> = new Map();
+  private _history: LockRecord[] = [];
+  private _state: Record<string, unknown> = {};
+  private _waitTimeDistribution: number[] = [];
+  private _queueLengthHistory: number[] = [];
+  private _contentionIndex: number = 0;
 
-  acquire(lockId: string, resourceId: string, holder: string): PhantomLockEntry | null {
-    if (this._isHeld(resourceId)) return null;
-    const entry: PhantomLockEntry = {
-      id: lockId,
-      resourceId,
+  acquire(resource: string, holder: string): boolean {
+    if (this._locks.has(resource)) {
+      const queue = this._waitQueue.get(resource) ?? [];
+      queue.push({ waiter: holder, requestedAt: Date.now(), waitDuration: 0 });
+      this._waitQueue.set(resource, queue);
+      this._queueLengthHistory.push(queue.length);
+      if (this._queueLengthHistory.length > 100) this._queueLengthHistory.shift();
+      this._updateContentionIndex();
+      return false;
+    }
+    const record: LockRecord = {
+      id: `lock-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      resource,
       holder,
-      state: 'held',
       acquiredAt: Date.now(),
       releasedAt: null,
-      phantomWaiters: [],
+      spinCount: 0,
     };
-    this._locks.set(lockId, entry);
-    return entry;
+    this._locks.set(resource, record);
+    this._history.push(record);
+    if (this._history.length > 200) this._history.shift();
+    return true;
   }
 
-  private _isHeld(resourceId: string): boolean {
-    for (const lock of this._locks.values()) {
-      if (lock.resourceId === resourceId && lock.state === 'held') return true;
+  release(resource: string, holder: string): boolean {
+    const record = this._locks.get(resource);
+    if (!record || record.holder !== holder) return false;
+    record.releasedAt = Date.now();
+    this._locks.delete(resource);
+    const queue = this._waitQueue.get(resource) ?? [];
+    if (queue.length > 0) {
+      const next = queue.shift()!;
+      next.waitDuration = Date.now() - next.requestedAt;
+      this._waitTimeDistribution.push(next.waitDuration);
+      if (this._waitTimeDistribution.length > 100) this._waitTimeDistribution.shift();
+      this.acquire(resource, next.waiter);
+    }
+    this._updateContentionIndex();
+    return true;
+  }
+
+  private _updateContentionIndex(): void {
+    const totalQueue = Array.from(this._waitQueue.values()).reduce((s, q) => s + q.length, 0);
+    this._contentionIndex = totalQueue / (this._locks.size + 1);
+  }
+
+  spin(resource: string, holder: string, spins: number): boolean {
+    const record = this._locks.get(resource);
+    if (!record) {
+      return this.acquire(resource, holder);
+    }
+    if (record.holder === holder) return true;
+    const queue = this._waitQueue.get(resource) ?? [];
+    const entry = queue.find(w => w.waiter === holder);
+    if (entry) {
+      entry.waitDuration += spins;
     }
     return false;
   }
 
-  release(lockId: string): boolean {
-    const lock = this._locks.get(lockId);
-    if (!lock || lock.state !== 'held') return false;
-    lock.state = 'released';
-    lock.releasedAt = Date.now();
-    if (lock.phantomWaiters.length > 0) {
-      lock.state = 'phantom';
-    }
-    return true;
+  isLocked(resource: string): boolean {
+    return this._locks.has(resource);
   }
 
-  attemptWait(resourceId: string, waiterId: string): WaiterReport {
-    let blocked = false;
-    let reason = 'resource available';
-    for (const lock of this._locks.values()) {
-      if (lock.resourceId !== resourceId) continue;
-      if (lock.state === 'held' || lock.state === 'phantom') {
-        blocked = true;
-        reason = lock.state === 'phantom' ? 'phantom lock blocking' : 'lock genuinely held';
-        if (lock.phantomWaiters.length < this._maxWaiters) {
-          lock.phantomWaiters.push(waiterId);
-        }
-        break;
+  getHolder(resource: string): string | null {
+    return this._locks.get(resource)?.holder ?? null;
+  }
+
+  getWaitQueue(resource: string): LockWaitRecord[] {
+    return [...(this._waitQueue.get(resource) ?? [])];
+  }
+
+  averageWaitTime(): number {
+    if (this._waitTimeDistribution.length === 0) return 0;
+    return this._waitTimeDistribution.reduce((a, b) => a + b, 0) / this._waitTimeDistribution.length;
+  }
+
+  maxWaitTime(): number {
+    if (this._waitTimeDistribution.length === 0) return 0;
+    return Math.max(...this._waitTimeDistribution);
+  }
+
+  getLockHistory(limit: number = 50): LockRecord[] {
+    return this._history.slice(-limit);
+  }
+
+  detectDeadlock(): string[][] {
+    const graph = new Map<string, Set<string>>();
+    for (const [resource, record] of this._locks) {
+      const waiters = this._waitQueue.get(resource) ?? [];
+      for (const w of waiters) {
+        const edges = graph.get(record.holder) ?? new Set();
+        edges.add(w.waiter);
+        graph.set(record.holder, edges);
       }
     }
-    const report: WaiterReport = { resourceId, waiterId, blocked, reason };
-    this._waiterReports.push(report);
-    if (this._waiterReports.length > 300) this._waiterReports.shift();
-    return report;
-  }
-
-  scanForPhantoms(): number {
-    const now = Date.now();
-    let dispelled = 0;
-    for (const lock of this._locks.values()) {
-      if (lock.state === 'phantom' && lock.releasedAt) {
-        if (now - lock.releasedAt > this._phantomDecayMs) {
-          lock.state = 'dispelled';
-          lock.phantomWaiters = [];
-          dispelled++;
+    const cycles: string[][] = [];
+    const visited = new Set<string>();
+    const stack = new Set<string>();
+    const path: string[] = [];
+    const dfs = (node: string) => {
+      visited.add(node);
+      stack.add(node);
+      path.push(node);
+      for (const neighbor of graph.get(node) ?? []) {
+        if (!visited.has(neighbor)) {
+          dfs(neighbor);
+        } else if (stack.has(neighbor)) {
+          const cycleStart = path.indexOf(neighbor);
+          cycles.push(path.slice(cycleStart));
         }
       }
+      path.pop();
+      stack.delete(node);
+    };
+    for (const node of graph.keys()) {
+      if (!visited.has(node)) dfs(node);
     }
-    return dispelled;
+    return cycles;
   }
 
-  dispel(lockId: string): boolean {
-    const lock = this._locks.get(lockId);
-    if (!lock || lock.state !== 'phantom') return false;
-    lock.state = 'dispelled';
-    lock.phantomWaiters = [];
-    return true;
+  get contentionIndex(): number {
+    return this._contentionIndex;
   }
 
-  getPhantomLocks(): PhantomLockEntry[] {
-    return Array.from(this._locks.values()).filter(l => l.state === 'phantom');
+  get averageQueueLength(): number {
+    if (this._queueLengthHistory.length === 0) return 0;
+    return this._queueLengthHistory.reduce((a, b) => a + b, 0) / this._queueLengthHistory.length;
   }
 
-  getLocksByResource(resourceId: string): PhantomLockEntry[] {
-    return Array.from(this._locks.values()).filter(l => l.resourceId === resourceId);
-  }
-
-  setPhantomDecay(ms: number): void {
-    this._phantomDecayMs = Math.max(1000, ms);
-  }
-
-  getWaiterReports(limit: number = 50): WaiterReport[] {
-    return this._waiterReports.slice(-limit);
-  }
-
-  listAllLocks(): PhantomLockEntry[] {
-    return Array.from(this._locks.values());
-  }
-
-  get lockCount(): number {
-    return this._locks.size;
-  }
-
-  get phantomCount(): number {
-    return this.getPhantomLocks().length;
+  lockReport(): Record<string, unknown> {
+    return {
+      activeLocks: this._locks.size,
+      historyCount: this._history.length,
+      averageWaitTime: this.averageWaitTime().toFixed(2),
+      maxWaitTime: this.maxWaitTime(),
+      contentionIndex: this._contentionIndex.toFixed(4),
+      averageQueueLength: this.averageQueueLength.toFixed(2),
+      deadlockCycles: this.detectDeadlock().length,
+      state: this._state,
+    };
   }
 }

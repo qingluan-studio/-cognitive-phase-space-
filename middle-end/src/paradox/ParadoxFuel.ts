@@ -1,88 +1,100 @@
-/**
- * 悖论燃料：将逻辑矛盾转化为可利用的能量。
- * 通过捕获悖论中的张力差，将其转化为驱动推理引擎前进的燃料。
- */
-
-export interface ParadoxSource {
-  id: string;
-  description: string;
-  tension: number;
-  convertible: boolean;
-  harvestedAt: number | null;
-}
-
-export interface FuelCell {
-  id: string;
-  sourceId: string;
-  energy: number;
-  stability: number;
-  createdAt: number;
+export interface ParadoxFuelData {
+  fuelLevel: number;
+  efficiency: number;
+  paradoxesConsumed: number;
+  output: number;
 }
 
 export class ParadoxFuel {
-  private _sources: Map<string, ParadoxSource> = new Map();
-  private _cells: FuelCell[] = [];
-  private _totalEnergy = 0;
-  private _conversionRate = 0.7;
-  private _volatilityThreshold = 0.9;
+  private _fuelLevel: number;
+  private _efficiency: number;
+  private _paradoxesConsumed: number;
+  private _output: number;
+  private _fuelHistory: number[];
+  private _thermodynamicLimit: number;
 
-  registerParadox(source: ParadoxSource): void {
-    this._sources.set(source.id, source);
+  constructor(efficiency: number = 0.3) {
+    this._fuelLevel = 0;
+    this._efficiency = efficiency;
+    this._paradoxesConsumed = 0;
+    this._output = 0;
+    this._fuelHistory = [];
+    this._thermodynamicLimit = 1.0;
   }
 
-  measureTension(id: string): number {
-    const src = this._sources.get(id);
-    if (!src) return 0;
-    src.tension = Math.min(1, src.tension + Math.random() * 0.1);
-    if (src.tension >= this._volatilityThreshold) src.convertible = true;
-    return src.tension;
+  get fuelLevel(): number {
+    return this._fuelLevel;
   }
 
-  harvest(id: string): FuelCell | null {
-    const src = this._sources.get(id);
-    if (!src || !src.convertible) return null;
-    const energy = src.tension * this._conversionRate * 100;
-    const cell: FuelCell = {
-      id: `cell-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      sourceId: id,
-      energy,
-      stability: 1 - src.tension * 0.5,
-      createdAt: Date.now(),
+  get efficiency(): number {
+    return this._efficiency;
+  }
+
+  get output(): number {
+    return this._output;
+  }
+
+  public feed(paradoxStrength: number): void {
+    this._fuelLevel += paradoxStrength;
+    this._paradoxesConsumed++;
+    this._fuelHistory.push(paradoxStrength);
+    if (this._fuelHistory.length > 50) this._fuelHistory.shift();
+  }
+
+  public burn(): number {
+    const generated = this._fuelLevel * this._efficiency;
+    this._output += generated;
+    this._fuelLevel = 0;
+    return generated;
+  }
+
+  public convert(work: number): number {
+    const required = work / Math.max(this._efficiency, 1e-10);
+    if (this._fuelLevel >= required) {
+      this._fuelLevel -= required;
+      this._output += work;
+      return work;
+    }
+    const partial = this._fuelLevel * this._efficiency;
+    this._output += partial;
+    this._fuelLevel = 0;
+    return partial;
+  }
+
+  public report(): ParadoxFuelData {
+    return {
+      fuelLevel: this._fuelLevel,
+      efficiency: this._efficiency,
+      paradoxesConsumed: this._paradoxesConsumed,
+      output: this._output,
     };
-    this._cells.push(cell);
-    this._totalEnergy += energy;
-    src.harvestedAt = Date.now();
-    src.tension *= 0.2;
-    src.convertible = false;
-    return cell;
   }
 
-  burn(cellId: string): number {
-    const idx = this._cells.findIndex(c => c.id === cellId);
-    if (idx < 0) return 0;
-    const cell = this._cells[idx];
-    const usable = cell.energy * cell.stability;
-    this._totalEnergy -= cell.energy;
-    this._cells.splice(idx, 1);
-    return usable;
+  public setEfficiency(value: number): void {
+    this._efficiency = Math.max(0, Math.min(this._thermodynamicLimit, value));
   }
 
-  stabilize(cellId: string, amount: number): FuelCell | null {
-    const cell = this._cells.find(c => c.id === cellId);
-    if (!cell) return null;
-    cell.stability = Math.min(1, cell.stability + amount);
-    return cell;
+  public computeFuelEntropy(): number {
+    if (this._fuelHistory.length === 0) return 0;
+    const mean = this._fuelHistory.reduce((a, b) => a + b, 0) / this._fuelHistory.length;
+    const variance = this._fuelHistory.reduce((s, v) => s + (v - mean) ** 2, 0) / this._fuelHistory.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
   }
 
-  getConvertibleSources(): ParadoxSource[] {
-    return Array.from(this._sources.values()).filter(s => s.convertible);
+  public computeCarnotEfficiency(heatSinkTemp: number, heatSourceTemp: number): number {
+    if (heatSourceTemp <= heatSinkTemp) return 0;
+    return 1 - heatSinkTemp / heatSourceTemp;
   }
 
-  getCells(): FuelCell[] {
-    return [...this._cells];
+  public optimizeEfficiency(targetOutput: number): number {
+    const requiredFuel = targetOutput / Math.max(this._efficiency, 1e-10);
+    if (this._fuelLevel >= requiredFuel) return this._efficiency;
+    const optimal = this._fuelLevel > 0 ? targetOutput / this._fuelLevel : this._efficiency;
+    this._efficiency = Math.min(this._thermodynamicLimit, optimal);
+    return this._efficiency;
   }
 
-  get totalEnergy(): number {
-    return this._totalEnergy;
+  public computeExergy(): number {
+    return this._fuelLevel * (1 - 298 / 500);
   }
 }

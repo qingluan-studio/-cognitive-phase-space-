@@ -1,118 +1,123 @@
-/**
- * 创伤循环模块：主动重复创伤场景训练系统应对能力，
- * 通过反复暴露于威胁来逐步脱敏并强化反应策略。
- */
-
-export type DesensitizationLevel = 'acute' | 'sensitive' | 'tolerant' | 'resilient' | 'numb';
-
-export interface TraumaScenario {
+export interface TraumaState {
   id: string;
-  name: string;
-  trigger: string;
-  severity: number;
+  intensity: number;
   exposureCount: number;
-  desensitization: DesensitizationLevel;
+  habituation: number;
+  qValue: number;
+  extinctionBurst: boolean;
 }
 
-export interface LoopIteration {
-  scenarioId: string;
-  iteration: number;
-  responseTime: number;
-  damageTaken: number;
-  learningGain: number;
-  occurredAt: number;
+export interface ExposureEvent {
+  stateId: string;
+  intensity: number;
+  deltaQ: number;
+  reward: number;
+  habituationCurve: number;
 }
 
 export class TraumaLoop {
-  private _scenarios: Map<string, TraumaScenario> = new Map();
-  private _iterations: LoopIteration[] = [];
-  private _maxExposure = 10;
-  private _learningRate = 0.15;
-  private _desensitizationOrder: DesensitizationLevel[] = ['acute', 'sensitive', 'tolerant', 'resilient', 'numb'];
+  private _states: Map<string, TraumaState> = new Map();
+  private _exposureHistory: ExposureEvent[] = [];
+  private _state: Record<string, unknown> = {};
+  private _learningRate: number = 0.1;
+  private _discountFactor: number = 0.95;
+  private _extinctionThreshold: number = 0.05;
+  private _habituationRate: number = 0.15;
 
-  registerScenario(scenario: TraumaScenario): void {
-    this._scenarios.set(scenario.id, scenario);
+  constructor() {}
+
+  get stateCount(): number {
+    return this._states.size;
   }
 
-  private _advanceDesensitization(scenario: TraumaScenario): void {
-    const currentIndex = this._desensitizationOrder.indexOf(scenario.desensitization);
-    if (currentIndex >= 0 && currentIndex < this._desensitizationOrder.length - 1) {
-      const threshold = (currentIndex + 1) * 2;
-      if (scenario.exposureCount >= threshold) {
-        scenario.desensitization = this._desensitizationOrder[currentIndex + 1];
-      }
+  get exposureCount(): number {
+    return this._exposureHistory.length;
+  }
+
+  registerState(id: string, intensity: number): void {
+    this._states.set(id, {
+      id,
+      intensity,
+      exposureCount: 0,
+      habituation: 0,
+      qValue: intensity,
+      extinctionBurst: false,
+    });
+  }
+
+  expose(stateId: string, duration: number): ExposureEvent | null {
+    const state = this._states.get(stateId);
+    if (!state) return null;
+    state.exposureCount++;
+    const habituationCurve = 1 - Math.exp(-state.exposureCount * this._habituationRate);
+    state.habituation = habituationCurve;
+    const reward = -state.intensity * (1 - habituationCurve);
+    const oldQ = state.qValue;
+    const maxNextQ = state.qValue;
+    const deltaQ = this._learningRate * (reward + this._discountFactor * maxNextQ - oldQ);
+    state.qValue += deltaQ;
+    if (state.qValue < this._extinctionThreshold && state.intensity > 0.3) {
+      state.extinctionBurst = true;
+      state.intensity *= 1.2;
+    } else {
+      state.extinctionBurst = false;
     }
+    const event: ExposureEvent = { stateId, intensity: state.intensity, deltaQ, reward, habituationCurve };
+    this._exposureHistory.push(event);
+    if (this._exposureHistory.length > 100) this._exposureHistory.shift();
+    return event;
   }
 
-  runIteration(scenarioId: string): LoopIteration | null {
-    const scenario = this._scenarios.get(scenarioId);
-    if (!scenario) return null;
-    if (scenario.exposureCount >= this._maxExposure && scenario.desensitization === 'numb') return null;
-    scenario.exposureCount++;
-    const reductionFactor = scenario.exposureCount / (scenario.exposureCount + 5);
-    const damageTaken = scenario.severity * (1 - reductionFactor);
-    const responseTime = Math.max(10, 1000 * (1 - reductionFactor));
-    const learningGain = scenario.severity * this._learningRate * reductionFactor;
-    this._advanceDesensitization(scenario);
-    const iteration: LoopIteration = {
-      scenarioId,
-      iteration: scenario.exposureCount,
-      responseTime,
-      damageTaken,
-      learningGain,
-      occurredAt: Date.now(),
+  reinforcementSchedule(stateId: string, rewardProbability: number): number {
+    const state = this._states.get(stateId);
+    if (!state) return 0;
+    const reward = Math.random() < rewardProbability ? 1 : -1;
+    state.qValue += this._learningRate * (reward - state.qValue);
+    return reward;
+  }
+
+  averageQValue(): number {
+    if (this._states.size === 0) return 0;
+    return Array.from(this._states.values()).reduce((s, st) => s + st.qValue, 0) / this._states.size;
+  }
+
+  totalIntensity(): number {
+    return Array.from(this._states.values()).reduce((s, st) => s + st.intensity, 0);
+  }
+
+  mostHabituated(): TraumaState | null {
+    if (this._states.size === 0) return null;
+    return Array.from(this._states.values()).reduce((best, st) => (st.habituation > best.habituation ? st : best));
+  }
+
+  extinctionBursts(): TraumaState[] {
+    return Array.from(this._states.values()).filter((st) => st.extinctionBurst);
+  }
+
+  exposureSchedule(steps: number): { step: number; intensity: number; qValue: number }[] {
+    const schedule: { step: number; intensity: number; qValue: number }[] = [];
+    for (let i = 0; i < steps; i++) {
+      const intensity = Math.exp(-i * this._habituationRate);
+      const q = this._learningRate * (1 - intensity);
+      schedule.push({ step: i, intensity, qValue: q });
+    }
+    return schedule;
+  }
+
+  habituationCurve(): number {
+    const total = this._states.size;
+    if (total === 0) return 0;
+    return Array.from(this._states.values()).reduce((s, st) => s + st.habituation, 0) / total;
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      states: this._states.size,
+      exposures: this._exposureHistory.length,
+      avgQ: this.averageQValue(),
+      totalIntensity: this.totalIntensity(),
+      bursts: this.extinctionBursts().length,
+      state: this._state,
     };
-    this._iterations.push(iteration);
-    if (this._iterations.length > 300) this._iterations.shift();
-    return iteration;
-  }
-
-  runLoop(scenarioId: string, count: number): LoopIteration[] {
-    const results: LoopIteration[] = [];
-    for (let i = 0; i < count; i++) {
-      const iteration = this.runIteration(scenarioId);
-      if (!iteration) break;
-      results.push(iteration);
-    }
-    return results;
-  }
-
-  isDesensitized(scenarioId: string): boolean {
-    const scenario = this._scenarios.get(scenarioId);
-    if (!scenario) return false;
-    const index = this._desensitizationOrder.indexOf(scenario.desensitization);
-    return index >= 2;
-  }
-
-  resetScenario(scenarioId: string): boolean {
-    const scenario = this._scenarios.get(scenarioId);
-    if (!scenario) return false;
-    scenario.exposureCount = 0;
-    scenario.desensitization = 'acute';
-    return true;
-  }
-
-  setLearningRate(rate: number): void {
-    this._learningRate = Math.max(0, Math.min(1, rate));
-  }
-
-  getIterationsByScenario(scenarioId: string): LoopIteration[] {
-    return this._iterations.filter(i => i.scenarioId === scenarioId);
-  }
-
-  findDesensitizedScenarios(): TraumaScenario[] {
-    return Array.from(this._scenarios.values()).filter(s => this.isDesensitized(s.id));
-  }
-
-  getScenario(scenarioId: string): TraumaScenario | null {
-    return this._scenarios.get(scenarioId) ?? null;
-  }
-
-  get scenarioCount(): number {
-    return this._scenarios.size;
-  }
-
-  get totalIterations(): number {
-    return this._iterations.length;
   }
 }

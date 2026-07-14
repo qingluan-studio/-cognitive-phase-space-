@@ -1,122 +1,178 @@
-/**
- * MorphicField - 形态场
- * 非局部的影响场，通过无形的场结构影响远处实体的形态
- * 与行为，类似形态共振假设中的全局协调机制。
- */
-
-export interface MorphicFieldData {
-  readonly fieldId: string;
-  fieldStrength: number;
-  resonanceFrequency: number;
-  influenceRadius: number;
-  pattern: string;
+export interface Morphogen {
+  id: string;
+  x: number;
+  y: number;
+  concentration: number;
+  diffusionRate: number;
 }
 
-export interface FieldInfluence {
-  targetId: string;
-  distance: number;
-  influenceMagnitude: number;
-  aligned: boolean;
+export type FieldGradient = {
+  dx: number;
+  dy: number;
+  magnitude: number;
+};
+
+export interface MorphicConfig {
+  width: number;
+  height: number;
+  resolution: number;
+  decayRate: number;
 }
 
 export class MorphicField {
-  private _data: MorphicFieldData;
-  private _influences: FieldInfluence[] = [];
-  private _resonanceHistory: number[] = [];
-  private _entrainedEntities: Set<string> = new Set();
-  private _fieldStability: number = 0.5;
+  private _config: MorphicConfig;
+  private _morphogens: Morphogen[] = [];
+  private _field: number[][] = [];
+  private _gradients: FieldGradient[][] = [];
+  private _meta: Record<string, unknown> = {};
+  private _laplacian: number[][] = [];
 
-  constructor(data: MorphicFieldData) {
-    this._data = { ...data };
+  constructor(config: MorphicConfig) {
+    this._config = config;
+    this._initField();
   }
 
-  get fieldId(): string {
-    return this._data.fieldId;
+  get morphogenCount(): number {
+    return this._morphogens.length;
   }
 
-  get fieldStrength(): number {
-    return this._data.fieldStrength;
+  get fieldResolution(): number {
+    return this._config.resolution;
   }
 
-  get resonanceFrequency(): number {
-    return this._data.resonanceFrequency;
-  }
-
-  public propagate(targetId: string, distance: number): FieldInfluence {
-    const withinRadius = distance <= this._data.influenceRadius;
-    const falloff = withinRadius ? 1 - distance / this._data.influenceRadius : 0;
-    const magnitude = this._data.fieldStrength * falloff * this._fieldStability;
-    const aligned = magnitude > 0.3;
-    const influence: FieldInfluence = {
-      targetId,
-      distance,
-      influenceMagnitude: magnitude,
-      aligned,
-    };
-    this._influences.push(influence);
-    if (this._influences.length > 40) {
-      this._influences.shift();
+  get totalConcentration(): number {
+    let sum = 0;
+    for (const row of this._field) {
+      for (const v of row) {
+        sum += v;
+      }
     }
-    if (aligned) {
-      this._entrainedEntities.add(targetId);
-    }
-    return influence;
+    return sum;
   }
 
-  public entrain(entityId: string, entityFrequency: number): boolean {
-    const freqDiff = Math.abs(entityFrequency - this._data.resonanceFrequency);
-    const entrainmentChance = Math.max(0, 1 - freqDiff / this._data.resonanceFrequency);
-    if (Math.random() < entrainmentChance * this._data.fieldStrength) {
-      this._entrainedEntities.add(entityId);
-      this._fieldStability = Math.min(1, this._fieldStability + 0.05);
-      return true;
-    }
-    return false;
-  }
-
-  public strengthenField(amount: number): void {
-    this._data.fieldStrength = Math.min(1, this._data.fieldStrength + amount);
-    this._fieldStability = Math.min(1, this._fieldStability + amount * 0.3);
-  }
-
-  public adjustFrequency(newFreq: number): void {
-    this._data.resonanceFrequency = Math.max(0.001, newFreq);
-    this._resonanceHistory.push(newFreq);
-    if (this._resonanceHistory.length > 20) {
-      this._resonanceHistory.shift();
+  private _initField(): void {
+    const res = this._config.resolution;
+    this._field = [];
+    this._gradients = [];
+    this._laplacian = [];
+    for (let i = 0; i < res; i++) {
+      const row: number[] = [];
+      const gRow: FieldGradient[] = [];
+      const lRow: number[] = [];
+      for (let j = 0; j < res; j++) {
+        row.push(0);
+        gRow.push({ dx: 0, dy: 0, magnitude: 0 });
+        lRow.push(0);
+      }
+      this._field.push(row);
+      this._gradients.push(gRow);
+      this._laplacian.push(lRow);
     }
   }
 
-  public expandRadius(delta: number): void {
-    this._data.influenceRadius = Math.max(0, this._data.influenceRadius + delta);
+  private _mapToGrid(x: number, y: number): [number, number] {
+    const gx = Math.floor((x / this._config.width) * this._config.resolution);
+    const gy = Math.floor((y / this._config.height) * this._config.resolution);
+    return [
+      Math.max(0, Math.min(this._config.resolution - 1, gx)),
+      Math.max(0, Math.min(this._config.resolution - 1, gy)),
+    ];
   }
 
-  public setPattern(pattern: string): void {
-    this._data.pattern = pattern;
+  private _computeLaplacian(): void {
+    const res = this._config.resolution;
+    for (let i = 1; i < res - 1; i++) {
+      for (let j = 1; j < res - 1; j++) {
+        this._laplacian[i][j] =
+          this._field[i - 1][j] +
+          this._field[i + 1][j] +
+          this._field[i][j - 1] +
+          this._field[i][j + 1] -
+          4 * this._field[i][j];
+      }
+    }
   }
 
-  public detectResonance(): boolean {
-    return this._entrainedEntities.size > 3 && this._fieldStability > 0.7;
+  private _computeGradients(): void {
+    const res = this._config.resolution;
+    for (let i = 1; i < res - 1; i++) {
+      for (let j = 1; j < res - 1; j++) {
+        const dx = (this._field[i + 1][j] - this._field[i - 1][j]) / 2;
+        const dy = (this._field[i][j + 1] - this._field[i][j - 1]) / 2;
+        this._gradients[i][j] = { dx, dy, magnitude: Math.sqrt(dx * dx + dy * dy) };
+      }
+    }
   }
 
-  public dissipate(): void {
-    this._data.fieldStrength *= 0.5;
-    this._fieldStability *= 0.8;
-    this._entrainedEntities.clear();
-    this._influences = [];
+  addMorphogen(id: string, x: number, y: number, concentration: number, diffusionRate: number): void {
+    const morphogen: Morphogen = { id, x, y, concentration, diffusionRate };
+    this._morphogens.push(morphogen);
+    const [gx, gy] = this._mapToGrid(x, y);
+    this._field[gx][gy] += concentration;
+    if (this._morphogens.length > 20) {
+      this._morphogens.shift();
+    }
   }
 
-  public fieldReport(): Record<string, unknown> {
+  diffuse(dt: number): void {
+    this._computeLaplacian();
+    const res = this._config.resolution;
+    for (let i = 1; i < res - 1; i++) {
+      for (let j = 1; j < res - 1; j++) {
+        const rate = this._morphogens.reduce((max, m) => Math.max(max, m.diffusionRate), 0.1);
+        this._field[i][j] += rate * this._laplacian[i][j] * dt;
+        this._field[i][j] *= Math.exp(-this._config.decayRate * dt);
+      }
+    }
+    this._computeGradients();
+  }
+
+  gradientAt(x: number, y: number): FieldGradient {
+    const [gx, gy] = this._mapToGrid(x, y);
+    return this._gradients[gx][gy];
+  }
+
+  concentrationAt(x: number, y: number): number {
+    const [gx, gy] = this._mapToGrid(x, y);
+    return this._field[gx][gy];
+  }
+
+  findPeaks(): { x: number; y: number; value: number }[] {
+    const peaks: { x: number; y: number; value: number }[] = [];
+    const res = this._config.resolution;
+    for (let i = 1; i < res - 1; i++) {
+      for (let j = 1; j < res - 1; j++) {
+        const v = this._field[i][j];
+        if (
+          v > this._field[i - 1][j] &&
+          v > this._field[i + 1][j] &&
+          v > this._field[i][j - 1] &&
+          v > this._field[i][j + 1]
+        ) {
+          peaks.push({
+            x: (i / res) * this._config.width,
+            y: (j / res) * this._config.height,
+            value: v,
+          });
+        }
+      }
+    }
+    return peaks;
+  }
+
+  reset(): void {
+    this._morphogens = [];
+    this._initField();
+    this._meta = {};
+  }
+
+  report(): Record<string, unknown> {
     return {
-      fieldId: this.fieldId,
-      fieldStrength: this._data.fieldStrength.toFixed(3),
-      resonanceFrequency: this._data.resonanceFrequency.toFixed(3),
-      influenceRadius: this._data.influenceRadius.toFixed(2),
-      fieldStability: this._fieldStability.toFixed(3),
-      pattern: this._data.pattern,
-      entrainedCount: this._entrainedEntities.size,
-      influenceCount: this._influences.length,
-      resonating: this.detectResonance(),
+      morphogens: this._morphogens.length,
+      resolution: this._config.resolution,
+      totalConcentration: this.totalConcentration.toFixed(3),
+      peaks: this.findPeaks().length,
+      meta: this._meta,
     };
   }
 }

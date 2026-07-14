@@ -1,9 +1,3 @@
-/**
- * ParasiticModule - 寄生模块
- * 消耗宿主资源的同时提供负价值，隐蔽地依附于宿主，
- * 在不被察觉的情况下持续汲取能量与算力。
- */
-
 export interface ParasiticModuleData {
   readonly parasiteId: string;
   hostId: string;
@@ -16,6 +10,7 @@ export interface DrainResult {
   resource: string;
   amount: number;
   detected: boolean;
+  probability: number;
 }
 
 export class ParasiticModule {
@@ -25,6 +20,10 @@ export class ParasiticModule {
   private _detectionRisk: number = 0;
   private _hostResources: Record<string, number> = {};
   private _feedLog: DrainResult[] = [];
+  private _lotkaVolterraAlpha: number = 0.1;
+  private _lotkaVolterraBeta: number = 0.02;
+  private _hostPopulation: number = 100;
+  private _parasitePopulation: number = 10;
 
   constructor(data: ParasiticModuleData) {
     this._data = { ...data };
@@ -46,6 +45,10 @@ export class ParasiticModule {
     return this._data.stealthLevel;
   }
 
+  get detectionRisk(): number {
+    return this._detectionRisk;
+  }
+
   public attachToHost(hostResources: Record<string, number>): boolean {
     if (hostResources[this._data.hostId] === undefined) {
       return false;
@@ -57,22 +60,32 @@ export class ParasiticModule {
 
   public drain(resource: string, amount: number): DrainResult {
     if (!this._data.attached) {
-      return { resource, amount: 0, detected: false };
+      return { resource, amount: 0, detected: false, probability: 0 };
     }
     const available = this._hostResources[resource] ?? 0;
     const actual = Math.min(amount * this._data.drainRate, available);
     this._hostResources[resource] = available - actual;
     this._drainedTotal += actual;
-    const detected = Math.random() > this._data.stealthLevel;
+    const detectionProb = 1 - this._data.stealthLevel;
+    const detected = Math.random() < detectionProb;
     if (detected) {
       this._detectionRisk = Math.min(1, this._detectionRisk + 0.1);
     }
-    const result: DrainResult = { resource, amount: actual, detected };
+    const result: DrainResult = { resource, amount: actual, detected, probability: detectionProb };
     this._feedLog.push(result);
     if (this._feedLog.length > 30) {
       this._feedLog.shift();
     }
+    this._updateLotkaVolterra(actual);
     return result;
+  }
+
+  private _updateLotkaVolterra(drainAmount: number): void {
+    const dt = 0.1;
+    const dHost = this._lotkaVolterraAlpha * this._hostPopulation - this._lotkaVolterraBeta * this._hostPopulation * this._parasitePopulation;
+    const dParasite = this._lotkaVolterraBeta * drainAmount * this._hostPopulation * this._parasitePopulation - 0.1 * this._parasitePopulation;
+    this._hostPopulation = Math.max(0, this._hostPopulation + dHost * dt);
+    this._parasitePopulation = Math.max(0, this._parasitePopulation + dParasite * dt);
   }
 
   public provideNegativeValue(payload: Record<string, unknown>): number {
@@ -110,6 +123,12 @@ export class ParasiticModule {
     this._hostResources = {};
   }
 
+  public equilibriumPoint(): { host: number; parasite: number } {
+    const hostEq = 0.1 / (this._lotkaVolterraBeta || 1e-9);
+    const parasiteEq = this._lotkaVolterraAlpha / (this._lotkaVolterraBeta || 1e-9);
+    return { host: hostEq, parasite: parasiteEq };
+  }
+
   public statusReport(): Record<string, unknown> {
     return {
       parasiteId: this.parasiteId,
@@ -120,6 +139,8 @@ export class ParasiticModule {
       stealth: this._data.stealthLevel.toFixed(3),
       detectionRisk: this._detectionRisk.toFixed(3),
       feedEvents: this._feedLog.length,
+      hostPopulation: this._hostPopulation.toFixed(2),
+      parasitePopulation: this._parasitePopulation.toFixed(2),
     };
   }
 }

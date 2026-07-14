@@ -1,129 +1,148 @@
-/**
- * 镜面回声：输出与输入相同，但带有微小变异。
- * 接收输入并以近乎相同的形式回声，但每次回声都带有微小变异，模拟镜面瑕疵。
- */
-
-export type EchoVariant = 'phase' | 'amplitude' | 'temporal' | 'spectral' | 'noise';
-
-export interface EchoPayload {
-  input: unknown;
-  output: unknown;
-  variant: EchoVariant;
-  delta: number;
-  echoedAt: number;
+export interface EchoPoint {
+  timestamp: number;
+  intensity: number;
+  angleOfIncidence: number;
+  specular: boolean;
 }
 
-export interface EchoStats {
-  totalEchoes: number;
-  averageDelta: number;
-  variantDistribution: Record<EchoVariant, number>;
+export type EchoProfile = {
+  decayRate: number;
+  reverberationTime: number;
+  clarity: number;
+};
+
+export interface SpecularEchoConfig {
+  reflectivity: number;
+  roomVolume: number;
+  surfaceArea: number;
 }
 
 export class SpecularEcho {
-  private _payloads: EchoPayload[] = [];
-  private _variantWeights: Record<EchoVariant, number> = {
-    phase: 0.2,
-    amplitude: 0.2,
-    temporal: 0.2,
-    spectral: 0.2,
-    noise: 0.2,
-  };
-  private _mutationRate = 0.05;
+  private _config: SpecularEchoConfig;
+  private _echoes: EchoPoint[] = [];
+  private _profile: EchoProfile | null = null;
+  private _state: Record<string, unknown> = {};
+  private _energyDecayCurve: number[] = [];
+  private _schroederIntegration: number[] = [];
+  private _meanFreePath: number = 0;
 
-  echo(input: unknown): EchoPayload {
-    const variant = this._selectVariant();
-    const output = this._applyVariant(input, variant);
-    const delta = this._computeDelta(input, output);
+  constructor(config: SpecularEchoConfig) {
+    this._config = config;
+    this._meanFreePath = (4 * config.roomVolume) / config.surfaceArea;
+  }
 
-    const payload: EchoPayload = {
-      input,
-      output,
-      variant,
-      delta,
-      echoedAt: Date.now(),
+  get echoCount(): number {
+    return this._echoes.length;
+  }
+
+  get meanFreePath(): number {
+    return this._meanFreePath;
+  }
+
+  get sabineAbsorption(): number {
+    return this._computeSabineAbsorption();
+  }
+
+  private _computeSabineAbsorption(): number {
+    const c = 343;
+    const rt60 = this._computeRT60();
+    return (0.161 * this._config.roomVolume) / (rt60 * this._config.surfaceArea + 0.001);
+  }
+
+  private _computeRT60(): number {
+    const c = 343;
+    const alpha = 1 - this._config.reflectivity;
+    return (0.161 * this._config.roomVolume) / (-this._config.surfaceArea * Math.log(1 - alpha) + 0.001);
+  }
+
+  private _schroederIntegrate(): void {
+    this._schroederIntegration = [];
+    let sum = 0;
+    for (let i = this._energyDecayCurve.length - 1; i >= 0; i--) {
+      sum += this._energyDecayCurve[i];
+      this._schroederIntegration.unshift(sum);
+    }
+  }
+
+  emit(intensity: number, angleOfIncidence: number): EchoPoint {
+    const specular = angleOfIncidence < Math.PI / 4;
+    const echo: EchoPoint = {
+      timestamp: Date.now(),
+      intensity,
+      angleOfIncidence,
+      specular,
     };
-    this._payloads.push(payload);
-    if (this._payloads.length > 200) this._payloads.shift();
-    return payload;
+    this._echoes.push(echo);
+    if (this._echoes.length > 50) this._echoes.shift();
+    this._energyDecayCurve.push(intensity);
+    if (this._energyDecayCurve.length > 50) this._energyDecayCurve.shift();
+    this._schroederIntegrate();
+    return echo;
   }
 
-  private _selectVariant(): EchoVariant {
-    const variants = Object.keys(this._variantWeights) as EchoVariant[];
-    const total = Object.values(this._variantWeights).reduce((s, v) => s + v, 0);
-    let r = Math.random() * total;
-    for (const v of variants) {
-      r -= this._variantWeights[v];
-      if (r <= 0) return v;
-    }
-    return 'noise';
-  }
-
-  private _applyVariant(input: unknown, variant: EchoVariant): unknown {
-    if (typeof input === 'string') {
-      switch (variant) {
-        case 'phase':
-          return input.split('').reverse().join('');
-        case 'amplitude':
-          return input.toUpperCase();
-        case 'temporal':
-          return input.replace(/./g, (c, i) => i % 2 === 0 ? c : '');
-        case 'spectral':
-          return input.split('').map((c, i) => i % 3 === 0 ? c.toUpperCase() : c).join('');
-        case 'noise':
-          return input.split('').map(c => Math.random() < this._mutationRate ? '_' : c).join('');
-      }
-    }
-    if (typeof input === 'number') {
-      switch (variant) {
-        case 'phase': return -input;
-        case 'amplitude': return input * 1.01;
-        case 'temporal': return Math.floor(input);
-        case 'spectral': return input + Math.sin(input);
-        case 'noise': return input + (Math.random() - 0.5) * this._mutationRate;
-      }
-    }
-    return input;
-  }
-
-  private _computeDelta(input: unknown, output: unknown): number {
-    if (typeof input === 'number' && typeof output === 'number') {
-      return Math.abs(input - output);
-    }
-    const a = String(input);
-    const b = String(output);
-    let diffs = 0;
-    const max = Math.max(a.length, b.length);
-    for (let i = 0; i < max; i++) {
-      if (a[i] !== b[i]) diffs++;
-    }
-    return diffs / Math.max(1, max);
-  }
-
-  setVariantWeight(variant: EchoVariant, weight: number): void {
-    this._variantWeights[variant] = Math.max(0, weight);
-  }
-
-  setMutationRate(rate: number): void {
-    this._mutationRate = Math.max(0, Math.min(1, rate));
-  }
-
-  getStats(): EchoStats {
-    const distribution: Record<EchoVariant, number> = {
-      phase: 0, amplitude: 0, temporal: 0, spectral: 0, noise: 0,
+  reflect(echo: EchoPoint): EchoPoint {
+    const reflected: EchoPoint = {
+      timestamp: Date.now(),
+      intensity: echo.intensity * this._config.reflectivity,
+      angleOfIncidence: echo.angleOfIncidence,
+      specular: echo.specular,
     };
-    let totalDelta = 0;
-    for (const p of this._payloads) {
-      distribution[p.variant]++;
-      totalDelta += p.delta;
+    this._echoes.push(reflected);
+    if (this._echoes.length > 50) this._echoes.shift();
+    this._energyDecayCurve.push(reflected.intensity);
+    if (this._energyDecayCurve.length > 50) this._energyDecayCurve.shift();
+    this._schroederIntegrate();
+    return reflected;
+  }
+
+  computeProfile(): EchoProfile {
+    const rt60 = this._computeRT60();
+    const intensities = this._echoes.map((e) => e.intensity);
+    const clarity = intensities.length > 0 ? intensities[0] / (intensities.reduce((a, b) => a + b, 0) + 0.001) : 0;
+    let decayRate = 0;
+    if (intensities.length >= 2) {
+      for (let i = 1; i < intensities.length; i++) {
+        if (intensities[i - 1] > 0) {
+          decayRate += Math.log(intensities[i] / intensities[i - 1]);
+        }
+      }
+      decayRate /= intensities.length - 1;
     }
+    this._profile = { decayRate, reverberationTime: rt60, clarity };
+    return this._profile;
+  }
+
+  totalReflectedEnergy(): number {
+    return this._echoes.reduce((acc, e) => acc + e.intensity, 0);
+  }
+
+  isSpecular(): boolean {
+    return this._echoes.every((e) => e.specular);
+  }
+
+  earlyDecayTime(): number {
+    if (this._schroederIntegration.length < 2) return 0;
+    const edt = -10 / (Math.log(this._schroederIntegration[Math.min(9, this._schroederIntegration.length - 1)] / (this._schroederIntegration[0] + 0.001)) / Math.log(10));
+    return isFinite(edt) ? edt : 0;
+  }
+
+  reset(): void {
+    this._echoes = [];
+    this._profile = null;
+    this._energyDecayCurve = [];
+    this._schroederIntegration = [];
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
     return {
-      totalEchoes: this._payloads.length,
-      averageDelta: this._payloads.length > 0 ? totalDelta / this._payloads.length : 0,
-      variantDistribution: distribution,
+      echoes: this._echoes.length,
+      totalEnergy: this.totalReflectedEnergy().toFixed(3),
+      profile: this._profile,
+      state: this._state,
+      meanFreePath: this._meanFreePath.toFixed(3),
+      sabineAbsorption: this.sabineAbsorption.toFixed(4),
+      earlyDecayTime: this.earlyDecayTime().toFixed(4),
     };
-  }
-
-  getPayloads(limit: number = 50): EchoPayload[] {
-    return this._payloads.slice(-limit);
   }
 }

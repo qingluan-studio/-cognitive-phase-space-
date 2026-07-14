@@ -1,8 +1,3 @@
-/**
- * 次谐波发生器模块：从基频生成低于基频整数分之一的振动成分。
- * 用于在系统中注入深沉的底层支撑频率。
- */
-
 export interface SubharmonicTone {
   divisor: number;
   frequency: number;
@@ -26,6 +21,8 @@ export class SubharmonicGenerator {
   private _tones: SubharmonicTone[] = [];
   private _mix: SubharmonicMix | null = null;
   private _state: Record<string, unknown> = {};
+  private _centsDeviation: number[] = [];
+  private _inharmonicityCoeff: number = 0.001;
 
   constructor(config: SubharmonicConfig) {
     this._config = config;
@@ -47,12 +44,18 @@ export class SubharmonicGenerator {
 
   private _generate(): void {
     this._tones = [];
+    this._centsDeviation = [];
     for (let d = 1; d <= this._config.maxDivisor; d++) {
+      const inharmonicity = this._inharmonicityCoeff * d * d;
+      const exactFreq = this._config.fundamental / d;
+      const stretchedFreq = exactFreq * (1 + inharmonicity);
+      const cents = 1200 * Math.log2(stretchedFreq / exactFreq);
       this._tones.push({
         divisor: d,
-        frequency: this._config.fundamental / d,
+        frequency: stretchedFreq,
         amplitude: 1 / Math.pow(d, this._config.amplitudeDecay),
       });
+      this._centsDeviation.push(cents);
     }
   }
 
@@ -107,5 +110,42 @@ export class SubharmonicGenerator {
       lowest: this.lowestFrequency,
       state: this._state,
     };
+  }
+
+  computeRationalApproximation(targetRatio: number): { numerator: number; denominator: number; error: number } {
+    let bestNum = 1;
+    let bestDen = 1;
+    let bestError = Infinity;
+    for (let d = 1; d <= this._config.maxDivisor; d++) {
+      const n = Math.round(targetRatio * d);
+      if (n < 1) continue;
+      const error = Math.abs(targetRatio - n / d);
+      if (error < bestError) {
+        bestError = error;
+        bestNum = n;
+        bestDen = d;
+      }
+    }
+    return { numerator: bestNum, denominator: bestDen, error: bestError };
+  }
+
+  computeInharmonicity(): number {
+    return this._centsDeviation.reduce((a, c) => a + Math.abs(c), 0) / this._centsDeviation.length;
+  }
+
+  setInharmonicityCoeff(b: number): void {
+    this._inharmonicityCoeff = Math.max(0, b);
+    this._generate();
+  }
+
+  computeOvertoneAlignment(): number {
+    const fundamental = this._config.fundamental;
+    let alignment = 0;
+    for (const t of this._tones) {
+      const harmonicNum = fundamental / t.frequency;
+      const nearestInteger = Math.round(harmonicNum);
+      alignment += Math.abs(harmonicNum - nearestInteger);
+    }
+    return this._tones.length > 0 ? 1 - alignment / this._tones.length : 0;
   }
 }

@@ -1,123 +1,139 @@
-/**
- * BarrierCollapse - 屏障崩溃
- * 临时完全开放边界，使原本隔离的两侧发生剧烈的物质交换，
- * 通常作为应急机制或异常事件触发。
- */
-
-export interface BarrierCollapseData {
-  readonly barrierId: string;
-  integrity: number;
-  collapseThreshold: number;
-  rebuildRate: number;
+export interface BarrierPoint {
+  position: number;
+  strength: number;
+  permeability: number;
+  stress: number;
 }
 
-export interface CollapseEvent {
-  timestamp: number;
-  integrityBefore: number;
-  integrityAfter: number;
-  exchangeVolume: number;
+export interface CollapseThreshold {
+  stressLimit: number;
+  permeabilityLimit: number;
+  hysteresisWidth: number;
 }
 
 export class BarrierCollapse {
-  private _data: BarrierCollapseData;
-  private _events: CollapseEvent[] = [];
+  private _points: BarrierPoint[] = [];
+  private _threshold: CollapseThreshold;
   private _collapsed: boolean = false;
-  private _exchangeTotal: number = 0;
-  private _rebuildProgress: number = 0;
+  private _collapseHistory: number[] = [];
+  private _state: Record<string, unknown> = {};
+  private _percolationProbability: number = 0;
+  private _hysteresisState: number = 0;
 
-  constructor(data: BarrierCollapseData) {
-    this._data = { ...data };
+  constructor(threshold: CollapseThreshold, resolution: number = 100) {
+    this._threshold = { ...threshold };
+    for (let i = 0; i < resolution; i++) {
+      this._points.push({
+        position: i,
+        strength: 1 - i / resolution,
+        permeability: i / resolution,
+        stress: 0,
+      });
+    }
   }
 
-  get barrierId(): string {
-    return this._data.barrierId;
-  }
-
-  get integrity(): number {
-    return this._data.integrity;
+  get pointCount(): number {
+    return this._points.length;
   }
 
   get collapsed(): boolean {
     return this._collapsed;
   }
 
-  public applyStress(stress: number): boolean {
-    this._data.integrity = Math.max(0, this._data.integrity - stress);
-    if (this._data.integrity <= this._data.collapseThreshold && !this._collapsed) {
-      this.triggerCollapse(Date.now());
-      return true;
-    }
-    return false;
+  get percolationProbability(): number {
+    return this._percolationProbability;
   }
 
-  public triggerCollapse(timestamp: number): CollapseEvent {
-    const before = this._data.integrity;
-    this._data.integrity = 0;
-    this._collapsed = true;
-    const exchange = 100 * (1 + Math.random());
-    this._exchangeTotal += exchange;
-    this._rebuildProgress = 0;
-    const event: CollapseEvent = {
-      timestamp,
-      integrityBefore: before,
-      integrityAfter: 0,
-      exchangeVolume: exchange,
-    };
-    this._events.push(event);
-    if (this._events.length > 15) {
-      this._events.shift();
-    }
-    return event;
+  applyStress(position: number, magnitude: number): void {
+    const idx = Math.floor(position);
+    if (idx < 0 || idx >= this._points.length) return;
+    this._points[idx].stress += magnitude;
+    this._propagateStress(idx, magnitude * 0.3);
+    this._checkCollapse();
+    this._updatePercolation();
   }
 
-  public rebuild(): number {
-    if (!this._collapsed) {
-      return this._data.integrity;
+  private _propagateStress(origin: number, magnitude: number): void {
+    for (let i = 0; i < this._points.length; i++) {
+      const distance = Math.abs(i - origin);
+      const decay = magnitude * Math.exp(-distance * 0.1);
+      this._points[i].stress += decay;
     }
-    this._rebuildProgress += this._data.rebuildRate;
-    this._data.integrity = Math.min(1, this._data.integrity + this._data.rebuildRate);
-    if (this._data.integrity >= 0.8) {
+  }
+
+  private _checkCollapse(): void {
+    const avgStress = this._points.reduce((s, p) => s + p.stress, 0) / this._points.length;
+    const avgPerm = this._points.reduce((s, p) => s + p.permeability, 0) / this._points.length;
+    if (!this._collapsed && avgStress > this._threshold.stressLimit && avgPerm > this._threshold.permeabilityLimit) {
+      this._collapsed = true;
+      this._collapseHistory.push(Date.now());
+      this._hysteresisState = 1;
+    } else if (this._collapsed && avgStress < this._threshold.stressLimit - this._threshold.hysteresisWidth) {
       this._collapsed = false;
-    }
-    return this._data.integrity;
-  }
-
-  public reinforce(amount: number): void {
-    this._data.integrity = Math.min(1, this._data.integrity + amount);
-    if (this._data.integrity > this._data.collapseThreshold) {
-      this._collapsed = false;
+      this._hysteresisState = 0;
     }
   }
 
-  public adjustCollapseThreshold(newThreshold: number): void {
-    this._data.collapseThreshold = Math.max(0, Math.min(1, newThreshold));
+  private _updatePercolation(): void {
+    const occupied = this._points.filter((p) => p.permeability > 0.5).length;
+    this._percolationProbability = occupied / (this._points.length || 1);
   }
 
-  public measureVulnerability(): number {
-    const margin = this._data.integrity - this._data.collapseThreshold;
-    return Math.max(0, 1 - margin);
-  }
-
-  public emergencySeal(): boolean {
-    if (this._rebuildProgress < 0.3) {
-      return false;
+  calculateBreakthroughProbability(): number {
+    let product = 1;
+    for (const p of this._points) {
+      product *= 1 - p.permeability;
     }
-    this._data.integrity = Math.max(0.5, this._data.integrity);
+    return 1 - Math.pow(product, 1 / (this._points.length || 1));
+  }
+
+  getStressDistribution(): { mean: number; variance: number; max: number } {
+    const stresses = this._points.map((p) => p.stress);
+    const mean = stresses.reduce((s, v) => s + v, 0) / stresses.length;
+    const variance = stresses.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / stresses.length;
+    const max = Math.max(...stresses);
+    return { mean, variance, max };
+  }
+
+  strengthenBarrier(position: number, amount: number): void {
+    const idx = Math.floor(position);
+    if (idx >= 0 && idx < this._points.length) {
+      this._points[idx].strength = Math.min(1, this._points[idx].strength + amount);
+      this._points[idx].permeability = Math.max(0, this._points[idx].permeability - amount * 0.5);
+    }
+    this._updatePercolation();
+  }
+
+  phaseTransitionCurve(): { stress: number[]; permeability: number[] } {
+    const stress: number[] = [];
+    const permeability: number[] = [];
+    for (let s = 0; s <= 1; s += 0.05) {
+      stress.push(s);
+      const p = s > this._threshold.stressLimit ? Math.min(1, (s - this._threshold.stressLimit) * 5) : 0;
+      permeability.push(p);
+    }
+    return { stress, permeability };
+  }
+
+  reset(): void {
+    this._points.forEach((p) => {
+      p.stress = 0;
+      p.strength = 1 - p.position / this._points.length;
+      p.permeability = p.position / this._points.length;
+    });
     this._collapsed = false;
-    return true;
+    this._hysteresisState = 0;
+    this._state.resetAt = Date.now();
   }
 
-  public collapseReport(): Record<string, unknown> {
+  report(): Record<string, unknown> {
     return {
-      barrierId: this.barrierId,
-      integrity: this._data.integrity.toFixed(3),
-      collapseThreshold: this._data.collapseThreshold.toFixed(3),
-      rebuildRate: this._data.rebuildRate.toFixed(3),
+      points: this._points.length,
       collapsed: this._collapsed,
-      rebuildProgress: this._rebuildProgress.toFixed(3),
-      vulnerability: this.measureVulnerability().toFixed(3),
-      collapseEvents: this._events.length,
-      exchangeTotal: this._exchangeTotal.toFixed(2),
+      collapseCount: this._collapseHistory.length,
+      percolation: this._percolationProbability,
+      hysteresis: this._hysteresisState,
+      state: this._state,
     };
   }
 }

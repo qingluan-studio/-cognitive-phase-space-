@@ -1,121 +1,129 @@
-/**
- * ExocytosisBurst - 胞吐爆发
- * 一次性释放大量预先储备的信息包/神经递质，模拟细胞通过
- * 胞吐作用将囊泡内容物批量释放到细胞外的瞬间过程。
- */
-
-export interface ExocytosisBurstData {
-  readonly burstId: string;
-  vesicleCount: number;
-  payloadPerVesicle: number;
-  triggerThreshold: number;
-  readiness: number;
+export interface Vesicle {
+  id: string;
+  cargo: string;
+  size: number;
+  calciumSensitivity: number;
+  docked: boolean;
+  fused: boolean;
 }
 
-export interface BurstEvent {
-  vesiclesReleased: number;
-  totalPayload: number;
+export interface ExocytosisEvent {
+  vesicleId: string;
+  calciumConcentration: number;
+  releaseProbability: number;
+  cargoReleased: string;
   timestamp: number;
-  complete: boolean;
 }
 
 export class ExocytosisBurst {
-  private _data: ExocytosisBurstData;
-  private _events: BurstEvent[] = [];
-  private _accumulatedSignal: number = 0;
-  private _releasedTotal: number = 0;
-  private _replenishTimer: number = 0;
+  private _vesicles: Map<string, Vesicle> = new Map();
+  private _events: ExocytosisEvent[] = [];
+  private _state: Record<string, unknown> = {};
+  private _snareComplexStability: number = 0.8;
+  private _calciumThreshold: number = 10;
+  private _releaseEntropy: number = 0;
+  private _cargoDistribution: Map<string, number> = new Map();
 
-  constructor(data: ExocytosisBurstData) {
-    this._data = { ...data };
+  dockVesicle(vesicle: Vesicle): void {
+    vesicle.docked = true;
+    vesicle.fused = false;
+    this._vesicles.set(vesicle.id, vesicle);
+    this._cargoDistribution.set(vesicle.cargo, (this._cargoDistribution.get(vesicle.cargo) ?? 0) + 1);
   }
 
-  get burstId(): string {
-    return this._data.burstId;
-  }
-
-  get vesicleCount(): number {
-    return this._data.vesicleCount;
-  }
-
-  get readiness(): number {
-    return this._data.readiness;
-  }
-
-  public accumulateSignal(intensity: number): boolean {
-    this._accumulatedSignal += intensity;
-    if (this._accumulatedSignal >= this._data.triggerThreshold && this._data.readiness > 0.5) {
-      this.triggerBurst(Date.now());
-      return true;
+  stimulate(calciumConcentration: number): ExocytosisEvent[] {
+    const events: ExocytosisEvent[] = [];
+    for (const vesicle of this._vesicles.values()) {
+      if (!vesicle.docked || vesicle.fused) continue;
+      const prob = this._computeReleaseProbability(calciumConcentration, vesicle.calciumSensitivity);
+      if (Math.random() < prob) {
+        vesicle.fused = true;
+        const event: ExocytosisEvent = {
+          vesicleId: vesicle.id,
+          calciumConcentration,
+          releaseProbability: prob,
+          cargoReleased: vesicle.cargo,
+          timestamp: Date.now(),
+        };
+        this._events.push(event);
+        if (this._events.length > 200) this._events.shift();
+        events.push(event);
+      }
     }
-    return false;
+    this._updateReleaseEntropy();
+    return events;
   }
 
-  public triggerBurst(timestamp: number): BurstEvent {
-    const available = this._data.vesicleCount;
-    const released = Math.floor(available * this._data.readiness);
-    const payload = released * this._data.payloadPerVesicle;
-    this._data.vesicleCount -= released;
-    this._releasedTotal += payload;
-    this._data.readiness = Math.max(0, this._data.readiness - 0.5);
-    this._accumulatedSignal = 0;
-    this._replenishTimer = 10;
-    const event: BurstEvent = {
-      vesiclesReleased: released,
-      totalPayload: payload,
-      timestamp,
-      complete: released === available,
-    };
-    this._events.push(event);
-    if (this._events.length > 20) {
-      this._events.shift();
-    }
-    return event;
+  private _computeReleaseProbability(ca: number, sensitivity: number): number {
+    const hillCoefficient = 4;
+    const ec50 = this._calciumThreshold / sensitivity;
+    return Math.pow(ca, hillCoefficient) / (Math.pow(ec50, hillCoefficient) + Math.pow(ca, hillCoefficient));
   }
 
-  public replenishVesicles(count: number): void {
-    if (this._replenishTimer > 0) {
-      this._replenishTimer--;
+  private _updateReleaseEntropy(): void {
+    const total = this._events.length;
+    if (total === 0) {
+      this._releaseEntropy = 0;
       return;
     }
-    this._data.vesicleCount += count;
-    this._data.readiness = Math.min(1, this._data.readiness + 0.1);
+    const cargoCounts: Record<string, number> = {};
+    for (const e of this._events) {
+      cargoCounts[e.cargoReleased] = (cargoCounts[e.cargoReleased] ?? 0) + 1;
+    }
+    let entropy = 0;
+    for (const count of Object.values(cargoCounts)) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    this._releaseEntropy = entropy;
   }
 
-  public primeReadiness(amount: number): void {
-    this._data.readiness = Math.min(1, this._data.readiness + amount);
+  recycle(vesicleId: string): boolean {
+    const vesicle = this._vesicles.get(vesicleId);
+    if (!vesicle) return false;
+    vesicle.fused = false;
+    vesicle.docked = false;
+    return true;
   }
 
-  public adjustThreshold(newThreshold: number): void {
-    this._data.triggerThreshold = Math.max(0, newThreshold);
+  getVesicle(id: string): Vesicle | null {
+    return this._vesicles.get(id) ?? null;
   }
 
-  public partialRelease(fraction: number): number {
-    const release = Math.floor(this._data.vesicleCount * fraction);
-    this._data.vesicleCount -= release;
-    const payload = release * this._data.payloadPerVesicle;
-    this._releasedTotal += payload;
-    return payload;
+  dockedCount(): number {
+    return Array.from(this._vesicles.values()).filter(v => v.docked && !v.fused).length;
   }
 
-  public isDepleted(): boolean {
-    return this._data.vesicleCount === 0 || this._data.readiness < 0.1;
+  fusedCount(): number {
+    return Array.from(this._vesicles.values()).filter(v => v.fused).length;
   }
 
-  public burstReport(): Record<string, unknown> {
-    const lastBurst = this._events[this._events.length - 1];
+  setSnareStability(stability: number): void {
+    this._snareComplexStability = Math.max(0, Math.min(1, stability));
+  }
+
+  setCalciumThreshold(threshold: number): void {
+    this._calciumThreshold = Math.max(0, threshold);
+  }
+
+  get eventCount(): number {
+    return this._events.length;
+  }
+
+  get releaseEntropy(): number {
+    return this._releaseEntropy;
+  }
+
+  burstReport(): Record<string, unknown> {
     return {
-      burstId: this.burstId,
-      vesicleCount: this._data.vesicleCount,
-      payloadPerVesicle: this._data.payloadPerVesicle,
-      triggerThreshold: this._data.triggerThreshold,
-      readiness: this._data.readiness.toFixed(3),
-      accumulatedSignal: this._accumulatedSignal.toFixed(2),
-      releasedTotal: this._releasedTotal.toFixed(2),
+      vesicleCount: this._vesicles.size,
+      dockedCount: this.dockedCount(),
+      fusedCount: this.fusedCount(),
       eventCount: this._events.length,
-      lastBurstVesicles: lastBurst?.vesiclesReleased ?? 0,
-      depleted: this.isDepleted(),
-      replenishTimer: this._replenishTimer,
+      releaseEntropy: this._releaseEntropy.toFixed(4),
+      snareStability: this._snareComplexStability.toFixed(4),
+      calciumThreshold: this._calciumThreshold.toFixed(4),
+      state: this._state,
     };
   }
 }

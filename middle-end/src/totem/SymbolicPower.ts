@@ -1,8 +1,3 @@
-/**
- * 象征力量模块：符号本身携带实际控制力，
- * 通过符号认证、符号授权来对系统资源进行控制。
- */
-
 export interface SymbolicToken {
   id: string;
   symbol: string;
@@ -26,23 +21,33 @@ export class SymbolicPower {
   private _symbolRegistry: Map<string, number> = new Map();
   private _maxPower = 100;
   private _decayPerDay = 5;
+  private _powerCurve: Map<string, number[]> = new Map();
+  private _bearerReputation: Map<string, number> = new Map();
 
   registerSymbol(symbol: string, basePower: number): void {
-    this._symbolRegistry.set(symbol, Math.min(basePower, this._maxPower));
+    const normalized = Math.min(basePower, this._maxPower);
+    this._symbolRegistry.set(symbol, normalized);
+    this._powerCurve.set(symbol, [normalized]);
   }
 
   issue(symbol: string, bearer: string): SymbolicToken | null {
     const basePower = this._symbolRegistry.get(symbol);
     if (basePower === undefined) return null;
+    const reputation = this._bearerReputation.get(bearer) ?? 0.5;
+    const scaledPower = basePower * (0.5 + reputation);
     const token: SymbolicToken = {
       id: `tok-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       symbol,
-      power: basePower,
+      power: Math.min(this._maxPower, scaledPower),
       bearer,
       issuedAt: Date.now(),
       expiresAt: Date.now() + 24 * 60 * 60 * 1000,
     };
     this._tokens.set(token.id, token);
+    const curve = this._powerCurve.get(symbol) ?? [];
+    curve.push(token.power);
+    if (curve.length > 50) curve.shift();
+    this._powerCurve.set(symbol, curve);
     return token;
   }
 
@@ -64,7 +69,13 @@ export class SymbolicPower {
     this._exertions.push(exertion);
     if (this._exertions.length > 300) this._exertions.shift();
     if (effective) {
-      token.power = Math.max(0, token.power - requiredPower * 0.1);
+      const fatigue = requiredPower * 0.1;
+      token.power = Math.max(0, token.power - fatigue);
+      const rep = this._bearerReputation.get(token.bearer) ?? 0.5;
+      this._bearerReputation.set(token.bearer, Math.min(1, rep + 0.02));
+    } else {
+      const rep = this._bearerReputation.get(token.bearer) ?? 0.5;
+      this._bearerReputation.set(token.bearer, Math.max(0, rep - 0.01));
     }
     return exertion;
   }
@@ -132,5 +143,17 @@ export class SymbolicPower {
 
   get symbolCount(): number {
     return this._symbolRegistry.size;
+  }
+
+  computeSymbolEntropy(symbol: string): number {
+    const curve = this._powerCurve.get(symbol) ?? [];
+    if (curve.length === 0) return 0;
+    const mean = curve.reduce((a, b) => a + b, 0) / curve.length;
+    const variance = curve.reduce((a, b) => a + (b - mean) ** 2, 0) / curve.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * (variance + 0.001));
+  }
+
+  getBearerReputation(bearer: string): number {
+    return this._bearerReputation.get(bearer) ?? 0.5;
   }
 }

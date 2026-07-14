@@ -1,8 +1,3 @@
-/**
- * 墓志铭作者模块：为每个废弃模块撰写墓志铭，
- * 总结模块的功能、贡献与死亡原因，作为永久的纪念与档案。
- */
-
 export interface EpitaphRecord {
   id: string;
   moduleId: string;
@@ -24,6 +19,9 @@ export class EpitaphWriter {
   private _drafts: EpitaphDraft[] = [];
   private _maxLines = 6;
   private _templates: Map<EpitaphRecord['tone'], string[]> = new Map();
+  private _markovChain: Map<string, string[]> = new Map();
+  private _nGramFrequency: Map<string, number> = new Map();
+  private _sentimentEntropy: number = 0;
 
   constructor() {
     this._templates.set('reverent', ['这里安息着{name}，尽职至最后一刻', '它服务了{n}次请求，从不抱怨']);
@@ -31,13 +29,46 @@ export class EpitaphWriter {
     this._templates.set('tragic', ['{name}死于无法预料的边界条件', '它的最后一次调用再未返回']);
     this._templates.set('forgotten', ['{name}已无人记得它做过什么', '只留下空日志和静默的指针']);
     this._templates.set('triumphant', ['{name}完成任务后光荣退役', '它消除了{n}个隐患，方才长眠']);
+    this._buildMarkovChain();
+  }
+
+  private _buildMarkovChain(): void {
+    const corpus = ['module', 'function', 'error', 'promise', 'async', 'await', 'return', 'void'];
+    for (let i = 0; i < corpus.length - 1; i++) {
+      const key = corpus[i];
+      const next = corpus[i + 1];
+      const list = this._markovChain.get(key) ?? [];
+      list.push(next);
+      this._markovChain.set(key, list);
+    }
   }
 
   draft(moduleId: string, summary: string, cause: string, contribution: string): EpitaphDraft {
     const draft: EpitaphDraft = { moduleId, summary, cause, contribution };
     this._drafts.push(draft);
     if (this._drafts.length > 100) this._drafts.shift();
+    this._updateNGramFrequency(summary);
     return draft;
+  }
+
+  private _updateNGramFrequency(text: string): void {
+    const words = text.split(/\s+/);
+    for (let i = 0; i < words.length - 1; i++) {
+      const gram = `${words[i]} ${words[i + 1]}`;
+      this._nGramFrequency.set(gram, (this._nGramFrequency.get(gram) ?? 0) + 1);
+    }
+    this._updateSentimentEntropy();
+  }
+
+  private _updateSentimentEntropy(): void {
+    const total = Array.from(this._nGramFrequency.values()).reduce((a, b) => a + b, 0);
+    if (total === 0) return;
+    let entropy = 0;
+    for (const count of this._nGramFrequency.values()) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    this._sentimentEntropy = entropy;
   }
 
   private _composeLines(moduleName: string, tone: EpitaphRecord['tone'], contribution: string): string[] {
@@ -50,6 +81,18 @@ export class EpitaphWriter {
     }
     lines.push(`贡献: ${contribution}`);
     return lines;
+  }
+
+  private _generateMarkovLine(start: string, length: number): string {
+    let current = start;
+    const result = [current];
+    for (let i = 0; i < length; i++) {
+      const neighbors = this._markovChain.get(current);
+      if (!neighbors || neighbors.length === 0) break;
+      current = neighbors[Math.floor(Math.random() * neighbors.length)];
+      result.push(current);
+    }
+    return result.join(' ');
   }
 
   write(moduleId: string, moduleName: string, tone: EpitaphRecord['tone'], contribution: string): EpitaphRecord {
@@ -109,5 +152,13 @@ export class EpitaphWriter {
 
   get draftCount(): number {
     return this._drafts.length;
+  }
+
+  get sentimentEntropy(): number {
+    return this._sentimentEntropy;
+  }
+
+  get nGramCount(): number {
+    return this._nGramFrequency.size;
   }
 }

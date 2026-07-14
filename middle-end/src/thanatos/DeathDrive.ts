@@ -1,102 +1,165 @@
-/**
- * 死亡驱动：注入可控的自我毁灭欲，定期杀死低效部分。
- * 在弗洛伊德意义上的 Thanatos 驱动下，定期评估并杀死
- * 系统中低效、停滞的子部分，以维持整体活力。
- */
-
-export interface KillTarget {
-  id: string;
-  component: string;
-  efficiency: number;
-  markedAt: number;
-  killed: boolean;
+export interface DeathDrive {
+  target: string;
+  aggression: number;
+  decayFactor: number;
+  terminalState: boolean;
 }
 
-export type DriveLevel = 'dormant' | 'controlled' | 'aggressive';
+export interface DriveSnapshot {
+  timestamp: number;
+  remainingLife: number;
+  destructiveImpulse: number;
+  entropy: number;
+}
 
 export class DeathDrive {
-  private _killList: KillTarget[] = [];
-  private _threshold: number = 0.3;
-  private _drive: DriveLevel = 'dormant';
-  private _casualties: number = 0;
-  private _cycle: number = 0;
+  private _drive: DeathDrive;
+  private _snapshots: DriveSnapshot[] = [];
+  private _destructionLog: string[] = [];
+  private _selfHarmProbability: number = 0;
+  private _logisticCarryingCapacity: number = 100;
+  private _decayRate: number = 0.05;
+  private _predationCoefficients: Map<string, number> = new Map();
+  private _phasePortrait: { aggression: number; remaining: number }[] = [];
 
-  /** 注入毁灭欲，提升驱动级别。 */
-  inject(level: DriveLevel): DriveLevel {
-    this._drive = level;
-    if (level === 'aggressive') this._threshold = 0.5;
-    else if (level === 'controlled') this._threshold = 0.3;
-    else this._threshold = 0.1;
-    return this._drive;
+  constructor(drive: DeathDrive) {
+    this._drive = { ...drive };
+    this._decayRate = Math.max(0.01, drive.decayFactor);
+    this._logisticCarryingCapacity = Math.max(10, 100 / (drive.aggression + 0.1));
   }
 
-  /** 评估各组件效率，给低效者打上死亡标记。 */
-  evaluate(components: { id: string; component: string; efficiency: number }[]): KillTarget[] {
-    this._cycle++;
-    const marked: KillTarget[] = [];
-    for (const c of components) {
-      if (c.efficiency < this._threshold) {
-        const target: KillTarget = {
-          id: c.id,
-          component: c.component,
-          efficiency: c.efficiency,
-          markedAt: Date.now(),
-          killed: false,
-        };
-        this._killList.push(target);
-        marked.push(target);
-      }
-    }
-    return marked;
+  get target(): string {
+    return this._drive.target;
   }
 
-  /** 把指定组件标记为死亡目标。 */
-  markForDeath(id: string, component: string, efficiency: number): KillTarget {
-    const target: KillTarget = {
-      id,
-      component,
-      efficiency,
-      markedAt: Date.now(),
-      killed: false,
+  get aggression(): number {
+    return this._drive.aggression;
+  }
+
+  get terminalState(): boolean {
+    return this._drive.terminalState;
+  }
+
+  public impulse(): number {
+    const logisticDecay = this._logisticCarryingCapacity / (1 + Math.exp(this._decayRate * this._snapshots.length));
+    const destructiveImpulse = this._drive.aggression * (1 - logisticDecay / this._logisticCarryingCapacity);
+    const entropy = this._computeEntropy();
+    const remainingLife = Math.max(0, this._logisticCarryingCapacity - destructiveImpulse - entropy);
+    const snapshot: DriveSnapshot = {
+      timestamp: Date.now(),
+      remainingLife,
+      destructiveImpulse,
+      entropy,
     };
-    this._killList.push(target);
-    return target;
-  }
-
-  /** 执行屠杀：杀死所有已标记但未杀死的低效部分。 */
-  execute(): number {
-    let killed = 0;
-    for (const t of this._killList) {
-      if (!t.killed) {
-        t.killed = true;
-        killed++;
-        this._casualties++;
-      }
+    this._snapshots.push(snapshot);
+    if (this._snapshots.length > 50) this._snapshots.shift();
+    this._phasePortrait.push({ aggression: this._drive.aggression, remaining: remainingLife });
+    if (this._phasePortrait.length > 50) this._phasePortrait.shift();
+    this._selfHarmProbability = destructiveImpulse / (destructiveImpulse + remainingLife + 0.001);
+    if (remainingLife <= 0) {
+      this._drive.terminalState = true;
     }
-    return killed;
+    return destructiveImpulse;
   }
 
-  /** 复活某个被杀死的部分（例外情况）。 */
-  revive(id: string): boolean {
-    const t = this._killList.find(x => x.id === id);
-    if (!t || !t.killed) return false;
-    t.killed = false;
-    return true;
+  private _computeEntropy(): number {
+    const n = this._snapshots.length;
+    if (n < 2) return 0;
+    const deltas = [];
+    for (let i = 1; i < n; i++) {
+      deltas.push(this._snapshots[i].remainingLife - this._snapshots[i - 1].remainingLife);
+    }
+    const meanDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+    const variance = deltas.reduce((a, b) => a + Math.pow(b - meanDelta, 2), 0) / deltas.length;
+    return 0.5 * Math.log(2 * Math.PI * Math.E * (variance + 0.001));
   }
 
-  get casualties(): number {
-    return this._casualties;
+  public decay(): void {
+    if (this._drive.terminalState) return;
+    this._drive.aggression *= 1 + this._decayRate;
+    for (const [target, coeff] of this._predationCoefficients) {
+      this._predationCoefficients.set(target, coeff * (1 + this._decayRate));
+    }
+    this.impulse();
   }
 
-  get drive(): DriveLevel {
-    return this._drive;
+  public direct(target: string): void {
+    this._drive.target = target;
+    this._predationCoefficients.set(target, (this._predationCoefficients.get(target) ?? 0) + this._drive.aggression);
   }
 
-  get cycle(): number {
-    return this._cycle;
+  public selfDestruct(): void {
+    this._destructionLog.push(this._drive.target);
+    this._drive.terminalState = true;
   }
 
-  getKillList(): KillTarget[] {
-    return [...this._killList];
+  public suppress(amount: number): void {
+    this._drive.aggression = Math.max(0, this._drive.aggression - amount);
+    this._decayRate *= 0.9;
+  }
+
+  public isActive(): boolean {
+    return !this._drive.terminalState && this._drive.aggression > 0;
+  }
+
+  public remainingLife(): number {
+    if (this._snapshots.length === 0) return this._logisticCarryingCapacity;
+    return this._snapshots[this._snapshots.length - 1].remainingLife;
+  }
+
+  public destructiveImpulse(): number {
+    if (this._snapshots.length === 0) return 0;
+    return this._snapshots[this._snapshots.length - 1].destructiveImpulse;
+  }
+
+  public calculateRisk(): number {
+    return this._selfHarmProbability;
+  }
+
+  public getSnapshots(): DriveSnapshot[] {
+    return [...this._snapshots];
+  }
+
+  public getDestructionLog(): string[] {
+    return [...this._destructionLog];
+  }
+
+  public getPhasePortrait(): { aggression: number; remaining: number }[] {
+    return [...this._phasePortrait];
+  }
+
+  public setDecayRate(rate: number): void {
+    this._decayRate = Math.max(0.001, rate);
+  }
+
+  public computeLotkaVolterra(competitorAggression: number): { coexistence: boolean; equilibrium: number } {
+    const r1 = this._drive.aggression;
+    const r2 = competitorAggression;
+    const K1 = this._logisticCarryingCapacity;
+    const K2 = this._logisticCarryingCapacity;
+    const alpha = 0.5;
+    const beta = 0.5;
+    const det = 1 - alpha * beta;
+    if (det === 0) return { coexistence: false, equilibrium: 0 };
+    const N1 = (K1 - alpha * K2) / det;
+    const N2 = (K2 - beta * K1) / det;
+    return { coexistence: N1 > 0 && N2 > 0, equilibrium: N1 };
+  }
+
+  public computeLyapunovExponent(): number {
+    if (this._phasePortrait.length < 3) return 0;
+    let divergence = 0;
+    for (let i = 1; i < this._phasePortrait.length; i++) {
+      const d0 = Math.sqrt(
+        Math.pow(this._phasePortrait[i - 1].aggression - this._phasePortrait[0].aggression, 2) +
+        Math.pow(this._phasePortrait[i - 1].remaining - this._phasePortrait[0].remaining, 2)
+      );
+      const d1 = Math.sqrt(
+        Math.pow(this._phasePortrait[i].aggression - this._phasePortrait[1].aggression, 2) +
+        Math.pow(this._phasePortrait[i].remaining - this._phasePortrait[1].remaining, 2)
+      );
+      if (d0 > 0) divergence += Math.log(d1 / d0 + 0.001);
+    }
+    return divergence / (this._phasePortrait.length - 1);
   }
 }

@@ -1,12 +1,8 @@
-/**
- * 极限环稳定器：将混沌稳定到周期轨道。
- * 通过反馈控制将混沌轨迹引导到稳定的极限环上，避免发散与塌缩。
- */
-
 export interface ChaosTrajectory {
   id: string;
   points: number[][];
   entropy: number;
+  lyapunovExponent: number;
 }
 
 export interface LimitCycle {
@@ -15,6 +11,7 @@ export interface LimitCycle {
   radius: number;
   frequency: number;
   stabilized: boolean;
+  floquetMultiplier: number;
 }
 
 export class LimitCycleStabilizer {
@@ -22,6 +19,8 @@ export class LimitCycleStabilizer {
   private _cycles: Map<string, LimitCycle> = new Map();
   private _gain = 0.3;
   private _maxSteps = 1000;
+  private _vanDerPolMu = 1.0;
+  private _poincareSection: number[][] = [];
 
   ingestTrajectory(t: ChaosTrajectory): void {
     this._trajectories.set(t.id, t);
@@ -47,6 +46,7 @@ export class LimitCycleStabilizer {
       radius,
       frequency: 1 / (t.points.length || 1),
       stabilized: false,
+      floquetMultiplier: 0,
     };
     this._cycles.set(cycle.id, cycle);
     return cycle;
@@ -61,8 +61,46 @@ export class LimitCycleStabilizer {
       cycle.radius += -this._gain * error;
       cycle.radius = Math.max(0.01, cycle.radius);
     }
-    cycle.stabilized = true;
+    cycle.floquetMultiplier = this._computeFloquetMultiplier(cycle);
+    cycle.stabilized = cycle.floquetMultiplier < 1;
     return cycle;
+  }
+
+  vanDerPolStep(x: number, y: number, dt: number): [number, number] {
+    const dx = y * dt;
+    const dy = (this._vanDerPolMu * (1 - x * x) * y - x) * dt;
+    return [x + dx, y + dy];
+  }
+
+  integrateVanDerPol(initialX: number, initialY: number, steps: number): number[][] {
+    const points: number[][] = [[initialX, initialY]];
+    let [x, y] = [initialX, initialY];
+    const dt = 0.01;
+    for (let i = 0; i < steps; i++) {
+      [x, y] = this.vanDerPolStep(x, y, dt);
+      points.push([x, y]);
+    }
+    return points;
+  }
+
+  computeHopfBifurcation(mu: number): { stable: boolean; radius: number } {
+    if (mu <= 0) return { stable: true, radius: 0 };
+    return { stable: false, radius: Math.sqrt(mu) };
+  }
+
+  computePoincareMap(cycleId: string): number[][] {
+    const cycle = this._cycles.get(cycleId);
+    if (!cycle) return [];
+    const section: number[][] = [];
+    for (let i = 0; i < 50; i++) {
+      const theta = (i / 50) * Math.PI * 2;
+      const r = cycle.radius + 0.1 * (Math.random() - 0.5);
+      const x = cycle.center[0] + r * Math.cos(theta);
+      const y = cycle.center[1] + r * Math.sin(theta);
+      section.push([x, y]);
+    }
+    this._poincareSection = section;
+    return section;
   }
 
   setGain(value: number): void {
@@ -83,11 +121,42 @@ export class LimitCycleStabilizer {
     return entropy;
   }
 
+  computeLyapunovExponent(trajectoryId: string): number {
+    const t = this._trajectories.get(trajectoryId);
+    if (!t || t.points.length < 2) return 0;
+    let sum = 0;
+    for (let i = 1; i < t.points.length; i++) {
+      const d0 = this._distance(t.points[i - 1], [0, 0]);
+      const d1 = this._distance(t.points[i], [0, 0]);
+      if (d0 > 0) sum += Math.log(d1 / d0);
+    }
+    t.lyapunovExponent = sum / t.points.length;
+    return t.lyapunovExponent;
+  }
+
   getCycle(id: string): LimitCycle | null {
     return this._cycles.get(id) ?? null;
   }
 
   getCycles(): LimitCycle[] {
     return Array.from(this._cycles.values());
+  }
+
+  get poincareSection(): number[][] {
+    return this._poincareSection.map((p) => [...p]);
+  }
+
+  private _computeFloquetMultiplier(cycle: LimitCycle): number {
+    const mu = this._vanDerPolMu;
+    const r = cycle.radius;
+    return Math.exp(-mu * (r * r - 1) * 2 * Math.PI);
+  }
+
+  private _distance(a: number[], b: number[]): number {
+    let sum = 0;
+    for (let i = 0; i < Math.min(a.length, b.length); i++) {
+      sum += (a[i] - b[i]) ** 2;
+    }
+    return Math.sqrt(sum);
   }
 }

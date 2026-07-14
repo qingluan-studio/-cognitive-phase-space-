@@ -21,6 +21,8 @@ export class SilentMutation {
   ]);
   private _expressionThreshold: number = 0.7;
   private _maxRecords: number = 300;
+  private _degeneracyIndex: number = 0.5;
+  private _dNdSAccumulators: { dN: number; dS: number } = { dN: 0, dS: 0 };
 
   mutate(surface: string): SilentMutationRecord | null {
     const underlying = this._applySynonyms(surface);
@@ -78,6 +80,22 @@ export class SilentMutation {
     return expressed / this._records.length;
   }
 
+  computeCodonAdaptationIndex(surface: string): number {
+    const codons = this._extractCodons(surface);
+    if (codons.length === 0) return 0;
+    let cai = 0;
+    for (const codon of codons) {
+      const freq = this._synonymMap.has(codon) ? 0.8 : 0.4;
+      cai += Math.log(freq + 1e-9);
+    }
+    return Math.exp(cai / codons.length);
+  }
+
+  computeDnDsRatio(): number {
+    if (this._dNdSAccumulators.dS === 0) return 0;
+    return this._dNdSAccumulators.dN / this._dNdSAccumulators.dS;
+  }
+
   addSynonym(from: string, to: string): void {
     this._synonymMap.set(from, to);
   }
@@ -106,6 +124,10 @@ export class SilentMutation {
     return this._records.length;
   }
 
+  get degeneracyIndex(): number {
+    return this._degeneracyIndex;
+  }
+
   private _applySynonyms(surface: string): string {
     let result = surface;
     for (const [from, to] of this._synonymMap.entries()) {
@@ -123,10 +145,17 @@ export class SilentMutation {
     const minLen = Math.min(surfaceCodons.length, underlyingCodons.length);
     if (minLen === 0) return Math.random();
     let silentCount = 0;
+    let nonsynonymousCount = 0;
     for (let i = 0; i < minLen; i++) {
       const sAA = this._codonTable.get(surfaceCodons[i]) ?? '?';
       const uAA = this._codonTable.get(underlyingCodons[i]) ?? '?';
-      if (sAA === uAA && surfaceCodons[i] !== underlyingCodons[i]) silentCount++;
+      if (sAA === uAA && surfaceCodons[i] !== underlyingCodons[i]) {
+        silentCount++;
+        this._dNdSAccumulators.dS += 1;
+      } else if (sAA !== uAA) {
+        nonsynonymousCount++;
+        this._dNdSAccumulators.dN += 1;
+      }
     }
     return Math.min(1, silentCount / minLen + Math.random() * 0.1);
   }

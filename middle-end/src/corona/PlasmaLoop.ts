@@ -1,8 +1,3 @@
-/**
- * 等离子体环模块：磁通量管中循环流动的物质环。
- * 用于刻画系统中沿闭合磁力线循环的物质流。
- */
-
 export interface PlasmaLoopSegment {
   angle: number;
   density: number;
@@ -28,6 +23,11 @@ export class PlasmaLoop {
   private _segments: PlasmaLoopSegment[] = [];
   private _flow: LoopFlow | null = null;
   private _state: Record<string, unknown> = {};
+  private _magneticHelicity: number = 0;
+  private _kinkInstabilityIndex: number = 0;
+  private _circuitCurrent: number = 0;
+  private _resistance: number = 0.01;
+  private _inductance: number = 1;
 
   constructor(config: PlasmaLoopConfig) {
     this._config = config;
@@ -42,6 +42,14 @@ export class PlasmaLoop {
     return 2 * Math.PI * this._config.radius;
   }
 
+  get magneticHelicity(): number {
+    return this._magneticHelicity;
+  }
+
+  get kinkInstabilityIndex(): number {
+    return this._kinkInstabilityIndex;
+  }
+
   private _build(): void {
     this._segments = [];
     const n = this._config.segmentCount;
@@ -52,6 +60,23 @@ export class PlasmaLoop {
       const magneticField = this._config.baseField * (1 + 0.3 * Math.sin(angle));
       this._segments.push({ angle, density, velocity, magneticField });
     }
+    this._updateHelicity();
+    this._updateKink();
+  }
+
+  private _updateHelicity(): void {
+    let h = 0;
+    for (let i = 0; i < this._segments.length; i++) {
+      const s = this._segments[i];
+      h += s.magneticField * s.velocity * s.density;
+    }
+    this._magneticHelicity = h / this._segments.length;
+  }
+
+  private _updateKink(): void {
+    const b = this._config.baseField;
+    const r = this._config.radius;
+    this._kinkInstabilityIndex = (b * b) / (r * r);
   }
 
   computeFlow(): LoopFlow {
@@ -91,6 +116,18 @@ export class PlasmaLoop {
     return this._segments.reduce((acc, s) => acc + s.magneticField, 0) / this._segments.length;
   }
 
+  computeCircuitEquation(): number {
+    const emf = this.averageField() * this.circumference;
+    this._circuitCurrent = emf / (this._resistance + this._inductance * 0.1);
+    return this._circuitCurrent;
+  }
+
+  computeForceFreeParameter(): number {
+    const avgV = this._segments.reduce((s, seg) => s + seg.velocity, 0) / this._segments.length;
+    const avgB = this.averageField();
+    return avgB > 1e-9 ? avgV / avgB : 0;
+  }
+
   setField(field: number): void {
     this._config.baseField = field;
     this._build();
@@ -102,6 +139,10 @@ export class PlasmaLoop {
       segmentCount: this._segments.length,
       flow: this._flow,
       state: this._state,
+      magneticHelicity: this._magneticHelicity.toFixed(4),
+      kinkInstabilityIndex: this._kinkInstabilityIndex.toFixed(4),
+      circuitCurrent: this._circuitCurrent.toFixed(4),
+      forceFreeParameter: this.computeForceFreeParameter().toFixed(4),
     };
   }
 }

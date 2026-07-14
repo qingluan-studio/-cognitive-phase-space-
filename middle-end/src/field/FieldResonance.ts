@@ -1,127 +1,164 @@
-/**
- * FieldResonance - 场共振
- * 两个场频率匹配时发生能量传输，类似共振现象中能量从
- * 一个振动系统高效传递到另一个同频系统。
- */
-
-export interface FieldResonanceData {
-  readonly resonanceId: string;
-  sourceFrequency: number;
-  targetFrequency: number;
-  couplingStrength: number;
-  bandwidth: number;
+export interface ResonantMode {
+  frequency: number;
+  amplitude: number;
+  phase: number;
+  damping: number;
 }
 
-export interface ResonanceReading {
-  frequencyMatch: number;
-  energyTransfer: number;
-  inResonance: boolean;
-  phaseAlignment: number;
+export type ResonanceSnapshot = {
+  totalEnergy: number;
+  dominantFreq: number;
+  beatFrequency: number;
+};
+
+export interface ResonanceConfig {
+  sampleRate: number;
+  modeCount: number;
+  couplingStrength: number;
 }
 
 export class FieldResonance {
-  private _data: FieldResonanceData;
-  private _readings: ResonanceReading[] = [];
-  private _totalEnergyTransferred: number = 0;
-  private _phaseLock: number = 0;
-  private _resonanceSustained: number = 0;
+  private _config: ResonanceConfig;
+  private _modes: ResonantMode[] = [];
+  private _snapshots: ResonanceSnapshot[] = [];
+  private _energyEnvelope: number[] = [];
+  private _beatSpectrum: number[] = [];
+  private _meta: Record<string, unknown> = {};
 
-  constructor(data: FieldResonanceData) {
-    this._data = { ...data };
+  constructor(config: ResonanceConfig) {
+    this._config = config;
+    this._initModes();
   }
 
-  get resonanceId(): string {
-    return this._data.resonanceId;
+  get modeCount(): number {
+    return this._modes.length;
   }
 
-  get inResonance(): boolean {
-    return this._computeMatch() > 0.8;
-  }
-
-  private _computeMatch(): number {
-    const freqDiff = Math.abs(this._data.sourceFrequency - this._data.targetFrequency);
-    if (freqDiff > this._data.bandwidth) {
-      return 0;
+  get totalEnergy(): number {
+    let sum = 0;
+    for (const m of this._modes) {
+      sum += m.amplitude * m.amplitude;
     }
-    return 1 - freqDiff / this._data.bandwidth;
+    return sum;
   }
 
-  public measure(): ResonanceReading {
-    const match = this._computeMatch();
-    const energyTransfer = match * this._data.couplingStrength * (1 - this._phaseLock * 0.3);
-    const inResonance = match > 0.8;
-    const phaseAlignment = this._phaseLock;
-    if (inResonance) {
-      this._totalEnergyTransferred += energyTransfer;
-      this._phaseLock = Math.min(1, this._phaseLock + 0.05);
-      this._resonanceSustained++;
-    } else {
-      this._phaseLock = Math.max(0, this._phaseLock - 0.02);
-      this._resonanceSustained = Math.max(0, this._resonanceSustained - 1);
+  get spectralFlatness(): number {
+    return this._computeSpectralFlatness();
+  }
+
+  private _initModes(): void {
+    this._modes = [];
+    for (let i = 0; i < this._config.modeCount; i++) {
+      this._modes.push({
+        frequency: 100 + i * 50,
+        amplitude: 1,
+        phase: 0,
+        damping: 0.01 + i * 0.005,
+      });
     }
-    const reading: ResonanceReading = {
-      frequencyMatch: match,
-      energyTransfer,
-      inResonance,
-      phaseAlignment,
+  }
+
+  private _computeSpectralFlatness(): number {
+    if (this._modes.length === 0) return 0;
+    const amplitudes = this._modes.map((m) => m.amplitude);
+    const geometricMean = Math.exp(amplitudes.reduce((a, v) => a + Math.log(v + 0.001), 0) / amplitudes.length);
+    const arithmeticMean = amplitudes.reduce((a, v) => a + v, 0) / amplitudes.length;
+    return arithmeticMean > 0 ? geometricMean / arithmeticMean : 0;
+  }
+
+  private _updateBeatSpectrum(): void {
+    this._beatSpectrum = [];
+    for (let i = 0; i < this._modes.length; i++) {
+      for (let j = i + 1; j < this._modes.length; j++) {
+        this._beatSpectrum.push(Math.abs(this._modes[i].frequency - this._modes[j].frequency));
+      }
+    }
+  }
+
+  excite(frequency: number, amplitude: number): void {
+    let closest: ResonantMode | null = null;
+    let bestDiff = Infinity;
+    for (const m of this._modes) {
+      const diff = Math.abs(m.frequency - frequency);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        closest = m;
+      }
+    }
+    if (closest) {
+      closest.amplitude += amplitude / (1 + bestDiff * 0.1);
+      closest.phase += Math.atan2(amplitude, closest.amplitude);
+    }
+    this._energyEnvelope.push(this.totalEnergy);
+    if (this._energyEnvelope.length > 50) this._energyEnvelope.shift();
+    this._meta.lastExcite = frequency;
+  }
+
+  damp(dt: number): void {
+    for (const m of this._modes) {
+      m.amplitude *= Math.exp(-m.damping * dt);
+      m.phase += 2 * Math.PI * m.frequency * dt;
+    }
+    this._updateBeatSpectrum();
+  }
+
+  couple(): void {
+    const n = this._modes.length;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        const diff = Math.abs(this._modes[i].frequency - this._modes[j].frequency);
+        const coupling = this._config.couplingStrength / (1 + diff);
+        this._modes[i].amplitude += coupling * this._modes[j].amplitude * 0.01;
+        this._modes[j].amplitude += coupling * this._modes[i].amplitude * 0.01;
+      }
+    }
+  }
+
+  snapshot(): ResonanceSnapshot {
+    const dominant = this._modes.reduce((best, m) => (m.amplitude > best.amplitude ? m : best));
+    let beat = 0;
+    if (this._beatSpectrum.length > 0) {
+      beat = this._beatSpectrum.reduce((a, b) => a + b, 0) / this._beatSpectrum.length;
+    }
+    const snap: ResonanceSnapshot = {
+      totalEnergy: this.totalEnergy,
+      dominantFreq: dominant.frequency,
+      beatFrequency: beat,
     };
-    this._readings.push(reading);
-    if (this._readings.length > 50) {
-      this._readings.shift();
-    }
-    return reading;
+    this._snapshots.push(snap);
+    if (this._snapshots.length > 30) this._snapshots.shift();
+    return snap;
   }
 
-  public tuneSource(frequency: number): void {
-    this._data.sourceFrequency = Math.max(0.001, frequency);
+  dominantMode(): ResonantMode | null {
+    if (this._modes.length === 0) return null;
+    return this._modes.reduce((best, m) => (m.amplitude > best.amplitude ? m : best));
   }
 
-  public tuneTarget(frequency: number): void {
-    this._data.targetFrequency = Math.max(0.001, frequency);
+  isResonantAt(frequency: number, tolerance: number): boolean {
+    return this._modes.some((m) => Math.abs(m.frequency - frequency) <= tolerance);
   }
 
-  public adjustCoupling(delta: number): void {
-    this._data.couplingStrength = Math.max(0, Math.min(1, this._data.couplingStrength + delta));
+  averageFrequency(): number {
+    if (this._modes.length === 0) return 0;
+    return this._modes.reduce((acc, m) => acc + m.frequency, 0) / this._modes.length;
   }
 
-  public widenBandwidth(delta: number): void {
-    this._data.bandwidth = Math.max(0.001, this._data.bandwidth + delta);
+  reset(): void {
+    this._initModes();
+    this._snapshots = [];
+    this._energyEnvelope = [];
+    this._beatSpectrum = [];
+    this._meta = {};
   }
 
-  public synchronize(): boolean {
-    this._data.targetFrequency = this._data.sourceFrequency;
-    this._phaseLock = 1;
-    return this.inResonance;
-  }
-
-  public breakResonance(): void {
-    this._data.targetFrequency = this._data.sourceFrequency * 2;
-    this._phaseLock = 0;
-    this._resonanceSustained = 0;
-  }
-
-  public computeEfficiency(): number {
-    if (this._readings.length === 0) {
-      return 0;
-    }
-    const transfers = this._readings.map((r) => r.energyTransfer);
-    const sum = transfers.reduce((a, b) => a + b, 0);
-    return sum / transfers.length;
-  }
-
-  public resonanceReport(): Record<string, unknown> {
+  report(): Record<string, unknown> {
     return {
-      resonanceId: this.resonanceId,
-      sourceFrequency: this._data.sourceFrequency.toFixed(3),
-      targetFrequency: this._data.targetFrequency.toFixed(3),
-      couplingStrength: this._data.couplingStrength.toFixed(3),
-      bandwidth: this._data.bandwidth.toFixed(3),
-      frequencyMatch: this._computeMatch().toFixed(3),
-      inResonance: this.inResonance,
-      phaseLock: this._phaseLock.toFixed(3),
-      resonanceSustained: this._resonanceSustained,
-      totalEnergyTransferred: this._totalEnergyTransferred.toFixed(2),
-      efficiency: this.computeEfficiency().toFixed(3),
+      modes: this._modes.length,
+      totalEnergy: this.totalEnergy,
+      snapshots: this._snapshots.length,
+      meta: this._meta,
+      spectralFlatness: this.spectralFlatness.toFixed(4),
     };
   }
 }

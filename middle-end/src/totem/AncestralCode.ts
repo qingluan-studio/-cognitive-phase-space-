@@ -1,8 +1,3 @@
-/**
- * 祖先代码模块：尊崇最早的核心代码为图腾，
- * 后续所有代码都应保持与祖先代码的兼容性与精神延续。
- */
-
 export interface AncestralCode {
   id: string;
   source: string;
@@ -23,26 +18,62 @@ export class AncestralCode {
   private _claims: LineageClaim[] = [];
   private _sanctified: Set<string> = new Set();
   private _similarityThreshold = 0.3;
+  private _tokenFrequency: Map<string, Map<string, number>> = new Map();
+  private _entropyCache: Map<string, number> = new Map();
 
   sanctify(ancestor: AncestralCode): void {
     this._ancestors.set(ancestor.id, ancestor);
     this._sanctified.add(ancestor.id);
+    this._buildTfIdf(ancestor);
   }
 
   isSanctified(ancestorId: string): boolean {
     return this._sanctified.has(ancestorId);
   }
 
-  private _computeSimilarity(source: string, candidate: string): number {
-    const sourceTokens = source.split(/\W+/).filter(t => t.length > 0);
-    const candidateTokens = candidate.split(/\W+/).filter(t => t.length > 0);
-    if (sourceTokens.length === 0 || candidateTokens.length === 0) return 0;
-    const sourceSet = new Set(sourceTokens);
-    let common = 0;
-    for (const token of candidateTokens) {
-      if (sourceSet.has(token)) common++;
+  private _tokenize(source: string): string[] {
+    return source.split(/\W+/).filter(t => t.length > 2);
+  }
+
+  private _buildTfIdf(ancestor: AncestralCode): void {
+    const tokens = this._tokenize(ancestor.source);
+    const freq = new Map<string, number>();
+    const total = tokens.length;
+    for (const token of tokens) {
+      freq.set(token, (freq.get(token) ?? 0) + 1 / total);
     }
-    return common / Math.max(sourceTokens.length, candidateTokens.length);
+    this._tokenFrequency.set(ancestor.id, freq);
+    let entropy = 0;
+    for (const p of freq.values()) {
+      if (p > 0) entropy -= p * Math.log2(p);
+    }
+    this._entropyCache.set(ancestor.id, entropy);
+  }
+
+  private _computeSimilarity(source: string, candidate: string): number {
+    const sTokens = this._tokenize(source);
+    const cTokens = this._tokenize(candidate);
+    if (sTokens.length === 0 || cTokens.length === 0) return 0;
+    const sSet = new Set(sTokens);
+    const cSet = new Set(cTokens);
+    const union = new Set([...sSet, ...cSet]);
+    const intersection = new Set([...sSet].filter(x => cSet.has(x)));
+    const jaccard = intersection.size / union.size;
+    const sFreq = new Map<string, number>();
+    const cFreq = new Map<string, number>();
+    for (const t of sTokens) sFreq.set(t, (sFreq.get(t) ?? 0) + 1);
+    for (const t of cTokens) cFreq.set(t, (cFreq.get(t) ?? 0) + 1);
+    let dot = 0;
+    let sNorm = 0;
+    let cNorm = 0;
+    for (const [token, sf] of sFreq) {
+      const cf = cFreq.get(token) ?? 0;
+      dot += sf * cf;
+      sNorm += sf * sf;
+    }
+    for (const cf of cFreq.values()) cNorm += cf * cf;
+    const cosine = sNorm > 0 && cNorm > 0 ? dot / (Math.sqrt(sNorm) * Math.sqrt(cNorm)) : 0;
+    return 0.5 * jaccard + 0.5 * cosine;
   }
 
   claimLineage(moduleId: string, source: string): LineageClaim | null {
@@ -116,5 +147,17 @@ export class AncestralCode {
 
   get totalLineage(): number {
     return this._claims.length;
+  }
+
+  computeAncestorEntropy(ancestorId: string): number {
+    return this._entropyCache.get(ancestorId) ?? 0;
+  }
+
+  recomputeAllTfIdf(): void {
+    this._tokenFrequency.clear();
+    this._entropyCache.clear();
+    for (const ancestor of this._ancestors.values()) {
+      this._buildTfIdf(ancestor);
+    }
   }
 }

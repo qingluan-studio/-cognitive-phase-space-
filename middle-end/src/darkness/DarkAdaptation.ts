@@ -1,8 +1,3 @@
-/**
- * 暗适应模块：在黑暗中逐渐提高敏感度的过程。
- * 用于建模系统对低信号环境的渐进式适应能力。
- */
-
 export interface AdaptationStage {
   level: number;
   sensitivity: number;
@@ -28,9 +23,14 @@ export class DarkAdaptation {
   private _currentLevel: number = 0;
   private _curve: AdaptationCurve | null = null;
   private _state: Record<string, unknown> = {};
+  private _weberFraction: number = 0.02;
+  private _photonPool: number = 0;
+  private _gainModel: number[] = [];
+  private _poissonLambda: number = 5;
 
   constructor(config: DarkAdaptationConfig) {
     this._config = config;
+    this._initGainModel();
   }
 
   get stageCount(): number {
@@ -42,13 +42,39 @@ export class DarkAdaptation {
     return this._stages[this._stages.length - 1].sensitivity;
   }
 
+  get weberFraction(): number {
+    return this._weberFraction;
+  }
+
+  private _initGainModel(): void {
+    this._gainModel = [];
+    for (let i = 0; i < this._config.stepCount; i++) {
+      const sigmoid = 1 / (1 + Math.exp(-(i - this._config.stepCount * 0.5) * 0.3));
+      this._gainModel.push(sigmoid);
+    }
+  }
+
+  private _poissonProbability(k: number): number {
+    const lambda = this._poissonLambda;
+    let factorial = 1;
+    for (let i = 2; i <= k; i++) {
+      factorial *= i;
+    }
+    return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial;
+  }
+
+  private _weberLaw(intensity: number): number {
+    return this._weberFraction * intensity;
+  }
+
   adapt(): AdaptationStage {
     this._currentLevel++;
     const progress = Math.min(1, this._currentLevel / this._config.stepCount);
+    const gain = this._gainModel[Math.min(this._gainModel.length - 1, this._currentLevel - 1)];
     const sensitivity =
       this._config.initialSensitivity +
-      (this._config.finalSensitivity - this._config.initialSensitivity) * progress;
-    const threshold = 1 / sensitivity;
+      (this._config.finalSensitivity - this._config.initialSensitivity) * progress * (1 + gain);
+    const threshold = this._weberLaw(1 / sensitivity);
     const stage: AdaptationStage = {
       level: this._currentLevel,
       sensitivity,
@@ -57,6 +83,7 @@ export class DarkAdaptation {
     };
     this._stages.push(stage);
     this._state.lastAdaptation = stage.level;
+    this._photonPool += this._poissonProbability(this._currentLevel % 10);
     return stage;
   }
 
@@ -82,6 +109,7 @@ export class DarkAdaptation {
     if (brightness > this.currentSensitivity * 0.5) {
       this._currentLevel = Math.max(0, this._currentLevel - 2);
       this._state.exposureReset = brightness;
+      this._photonPool = Math.max(0, this._photonPool - brightness * 0.1);
     }
   }
 
@@ -94,10 +122,17 @@ export class DarkAdaptation {
     return this.currentSensitivity / this._config.initialSensitivity;
   }
 
+  computeSignalToNoise(): number {
+    if (this._photonPool <= 0) return 0;
+    const shotNoise = Math.sqrt(this._photonPool);
+    return this._photonPool / shotNoise;
+  }
+
   reset(): void {
     this._stages = [];
     this._currentLevel = 0;
     this._state.resetAt = Date.now();
+    this._photonPool = 0;
   }
 
   report(): Record<string, unknown> {
@@ -106,6 +141,8 @@ export class DarkAdaptation {
       currentLevel: this._currentLevel,
       currentSensitivity: this.currentSensitivity,
       state: this._state,
+      weberFraction: this._weberFraction,
+      signalToNoise: this.computeSignalToNoise().toFixed(3),
     };
   }
 }

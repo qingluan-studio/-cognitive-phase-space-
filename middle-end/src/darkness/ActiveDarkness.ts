@@ -1,8 +1,3 @@
-/**
- * 主动黑暗模块：有目的地隐藏和遮蔽信息的机制。
- * 用于在系统中实施选择性信息封锁与策略性遮蔽。
- */
-
 export interface OcclusionZone {
   id: string;
   target: string;
@@ -28,9 +23,13 @@ export class ActiveDarkness {
   private _zones: OcclusionZone[] = [];
   private _report: OcclusionReport | null = null;
   private _state: Record<string, unknown> = {};
+  private _opacityField: number[][] = [];
+  private _gridResolution: number = 16;
+  private _laplacianMask: number[][] = [[0, 1, 0], [1, -4, 1], [0, 1, 0]];
 
   constructor(config: ActiveDarknessConfig) {
     this._config = config;
+    this._initField();
   }
 
   get zoneCount(): number {
@@ -39,6 +38,74 @@ export class ActiveDarkness {
 
   get activeCount(): number {
     return this._zones.filter((z) => z.active).length;
+  }
+
+  get fieldSmoothness(): number {
+    return this._computeLaplacianEnergy();
+  }
+
+  private _initField(): void {
+    this._opacityField = [];
+    for (let i = 0; i < this._gridResolution; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < this._gridResolution; j++) {
+        row.push(0);
+      }
+      this._opacityField.push(row);
+    }
+  }
+
+  private _mapZoneToField(zone: OcclusionZone): void {
+    const cx = Math.floor(this._gridResolution / 2);
+    const cy = Math.floor(this._gridResolution / 2);
+    const radius = Math.floor(zone.opacity * this._gridResolution * 0.5);
+    for (let i = 0; i < this._gridResolution; i++) {
+      for (let j = 0; j < this._gridResolution; j++) {
+        const dx = i - cx;
+        const dy = j - cy;
+        if (dx * dx + dy * dy <= radius * radius) {
+          this._opacityField[i][j] = Math.min(1, this._opacityField[i][j] + zone.opacity);
+        }
+      }
+    }
+  }
+
+  private _computeLaplacianEnergy(): number {
+    let energy = 0;
+    const n = this._gridResolution;
+    for (let i = 1; i < n - 1; i++) {
+      for (let j = 1; j < n - 1; j++) {
+        let conv = 0;
+        for (let ki = -1; ki <= 1; ki++) {
+          for (let kj = -1; kj <= 1; kj++) {
+            conv += this._opacityField[i + ki][j + kj] * this._laplacianMask[ki + 1][kj + 1];
+          }
+        }
+        energy += conv * conv;
+      }
+    }
+    return energy / ((n - 2) * (n - 2));
+  }
+
+  private _diffuseOpacity(dt: number): void {
+    const next: number[][] = [];
+    const n = this._gridResolution;
+    for (let i = 0; i < n; i++) {
+      next.push([...this._opacityField[i]]);
+    }
+    const diffusionCoeff = this._config.decayRate * 0.1;
+    for (let i = 1; i < n - 1; i++) {
+      for (let j = 1; j < n - 1; j++) {
+        let laplacian = 0;
+        for (let ki = -1; ki <= 1; ki++) {
+          for (let kj = -1; kj <= 1; kj++) {
+            laplacian += this._opacityField[i + ki][j + kj] * this._laplacianMask[ki + 1][kj + 1];
+          }
+        }
+        next[i][j] = Math.max(0, Math.min(1, this._opacityField[i][j] + diffusionCoeff * laplacian * dt));
+      }
+    }
+    this._opacityField = next;
   }
 
   occlude(target: string, duration: number): OcclusionZone {
@@ -53,6 +120,7 @@ export class ActiveDarkness {
     if (this._zones.length > this._config.maxZones) {
       this._zones.shift();
     }
+    this._mapZoneToField(zone);
     this._state.lastOccluded = target;
     return zone;
   }
@@ -61,6 +129,12 @@ export class ActiveDarkness {
     const zone = this._zones.find((z) => z.id === id);
     if (!zone) return false;
     zone.opacity = Math.max(0, Math.min(1, opacity));
+    this._initField();
+    for (const z of this._zones) {
+      if (z.active) {
+        this._mapZoneToField(z);
+      }
+    }
     return true;
   }
 
@@ -70,6 +144,7 @@ export class ActiveDarkness {
       if (zone.duration <= 0) zone.active = false;
       zone.opacity *= 1 - this._config.decayRate * dt;
     }
+    this._diffuseOpacity(dt);
     this._state.decayApplied = dt;
   }
 
@@ -104,6 +179,7 @@ export class ActiveDarkness {
   purge(): void {
     this._zones = [];
     this._state.purgedAt = Date.now();
+    this._initField();
   }
 
   report(): Record<string, unknown> {
@@ -112,6 +188,7 @@ export class ActiveDarkness {
       active: this.activeCount,
       report: this._report,
       state: this._state,
+      fieldSmoothness: this.fieldSmoothness.toFixed(4),
     };
   }
 }

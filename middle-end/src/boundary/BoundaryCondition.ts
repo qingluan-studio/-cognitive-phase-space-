@@ -1,9 +1,3 @@
-/**
- * BoundaryCondition - 边界条件
- * 定义系统终止的极限条件，包括上下界、奇点与渐近行为，
- * 当状态触及边界时触发终止或重置逻辑。
- */
-
 export interface BoundaryConditionData {
   readonly conditionId: string;
   lowerBound: number;
@@ -25,6 +19,10 @@ export class BoundaryCondition {
   private _violationCount: number = 0;
   private _asymptotePoint: number | null = null;
   private _terminated: boolean = false;
+  private _lyapunovExponent: number = 0;
+  private _fractalDimension: number = 1;
+  private _criticalExponent: number = 0.5;
+  private _phaseAccum: number = 0;
 
   constructor(data: BoundaryConditionData) {
     this._data = { ...data };
@@ -44,6 +42,50 @@ export class BoundaryCondition {
 
   get violationCount(): number {
     return this._violationCount;
+  }
+
+  get lyapunovExponent(): number {
+    return this._lyapunovExponent;
+  }
+
+  get fractalDimension(): number {
+    return this._fractalDimension;
+  }
+
+  private _computeLyapunov(sequence: number[]): number {
+    if (sequence.length < 2) {
+      return 0;
+    }
+    let sum = 0;
+    for (let i = 1; i < sequence.length; i++) {
+      const delta = Math.abs(sequence[i] - sequence[i - 1]);
+      const prev = Math.abs(sequence[i - 1]);
+      if (prev > 0 && delta > 0) {
+        sum += Math.log(delta / prev);
+      }
+    }
+    return sum / Math.max(1, sequence.length - 1);
+  }
+
+  private _boxCountDimension(values: number[]): number {
+    if (values.length === 0) {
+      return 1;
+    }
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min;
+    if (range === 0) {
+      return 1;
+    }
+    let boxes = 0;
+    const epsilon = range / 10;
+    for (let b = min; b <= max; b += epsilon) {
+      const occupied = values.some((v) => v >= b && v < b + epsilon);
+      if (occupied) {
+        boxes++;
+      }
+    }
+    return boxes > 0 ? Math.log(boxes) / Math.log(1 / epsilon * range) : 1;
   }
 
   public checkValue(value: number, timestamp: number): BoundaryCheck {
@@ -67,6 +109,9 @@ export class BoundaryCondition {
     if (this._checkLog.length > 50) {
       this._checkLog.shift();
     }
+    const recentValues = this._checkLog.slice(-20).map((c) => c.value);
+    this._lyapunovExponent = this._computeLyapunov(recentValues);
+    this._fractalDimension = this._boxCountDimension(recentValues);
     return check;
   }
 
@@ -79,7 +124,9 @@ export class BoundaryCondition {
       return current + step;
     }
     const remaining = this._asymptotePoint - current;
-    const next = current + Math.sign(remaining) * Math.min(Math.abs(step), Math.abs(remaining) * 0.5);
+    const dampedStep = step * Math.exp(-this._phaseAccum * 0.1);
+    const next = current + Math.sign(remaining) * Math.min(Math.abs(dampedStep), Math.abs(remaining) * 0.5);
+    this._phaseAccum += Math.abs(remaining);
     if (Math.abs(this._asymptotePoint - next) < 0.001) {
       this._terminated = true;
     }
@@ -91,6 +138,7 @@ export class BoundaryCondition {
     const reduction = range * (1 - factor) / 2;
     this._data.lowerBound += reduction;
     this._data.upperBound -= reduction;
+    this._criticalExponent *= factor;
   }
 
   public relaxBounds(factor: number): void {
@@ -98,11 +146,15 @@ export class BoundaryCondition {
     const expansion = range * (factor - 1) / 2;
     this._data.lowerBound -= expansion;
     this._data.upperBound += expansion;
+    this._criticalExponent = Math.min(1, this._criticalExponent * factor);
   }
 
   public reset(): void {
     this._terminated = false;
     this._violationCount = 0;
+    this._lyapunovExponent = 0;
+    this._fractalDimension = 1;
+    this._phaseAccum = 0;
   }
 
   public executeTermination(): string {
@@ -110,6 +162,13 @@ export class BoundaryCondition {
       return 'no_action';
     }
     return this._data.terminationAction;
+  }
+
+  public computeCriticalScaling(distanceFromBound: number): number {
+    if (distanceFromBound <= 0) {
+      return 0;
+    }
+    return Math.pow(distanceFromBound, -this._criticalExponent);
   }
 
   public boundaryReport(): Record<string, unknown> {
@@ -123,6 +182,9 @@ export class BoundaryCondition {
       checkCount: this._checkLog.length,
       asymptote: this._asymptotePoint,
       terminationAction: this._data.terminationAction,
+      lyapunovExponent: this._lyapunovExponent.toFixed(4),
+      fractalDimension: this._fractalDimension.toFixed(4),
+      criticalExponent: this._criticalExponent.toFixed(4),
     };
   }
 }

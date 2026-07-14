@@ -1,135 +1,180 @@
-/**
- * 出神超频模块：在自我丧失中突破性能极限，
- * 临时越过安全限制获取超额算力，事后需支付恢复代价。
- */
+export type ClockState = 'idle' | 'warming' | 'overclocked' | 'throttled' | 'shutdown';
 
-export interface OverclockProfile {
-  id: string;
-  baseFrequency: number;
-  overclockedFrequency: number;
-  currentFrequency: number;
-  thermalLoad: number;
-  active: boolean;
+export interface ClockReading {
+  frequency: number;
+  temperature: number;
+  load: number;
+  timestamp: number;
 }
 
-export interface OverclockSession {
-  profileId: string;
-  durationMs: number;
-  peakFrequency: number;
-  thermalPeak: number;
-  recoveryCost: number;
-  endedAt: number;
+export interface OverclockProfile {
+  baseFrequency: number;
+  maxFrequency: number;
+  thermalLimit: number;
+  coolingCoefficient: number;
 }
 
 export class EkstasisOverclock {
-  private _profiles: Map<string, OverclockProfile> = new Map();
-  private _sessions: OverclockSession[] = [];
-  private _maxThermal = 100;
-  private _thermalPerMs = 0.01;
-  private _recoveryCostPerThermal = 0.5;
-  private _maxMultiplier = 4.0;
+  private _profile: OverclockProfile;
+  private _state: ClockState = 'idle';
+  private _currentFrequency: number;
+  private _currentTemperature: number = 25;
+  private _readings: ClockReading[] = [];
+  private _pidIntegral: number = 0;
+  private _pidPreviousError: number = 0;
+  private _pidKp: number = 0.5;
+  private _pidKi: number = 0.1;
+  private _pidKd: number = 0.05;
+  private _thermalThrottleCount: number = 0;
+  private _stateTransitions: Map<string, number> = new Map();
 
-  registerProfile(profile: OverclockProfile): void {
-    profile.currentFrequency = profile.baseFrequency;
-    profile.thermalLoad = 0;
-    profile.active = false;
-    this._profiles.set(profile.id, profile);
+  constructor(profile: OverclockProfile) {
+    this._profile = { ...profile };
+    this._currentFrequency = profile.baseFrequency;
   }
 
-  activate(profileId: string): boolean {
-    const profile = this._profiles.get(profileId);
-    if (!profile || profile.active) return false;
-    if (profile.thermalLoad > this._maxThermal * 0.8) return false;
-    profile.active = true;
-    profile.currentFrequency = profile.overclockedFrequency;
-    return true;
+  get frequency(): number {
+    return this._currentFrequency;
   }
 
-  tick(elapsedMs: number): void {
-    for (const profile of this._profiles.values()) {
-      if (profile.active) {
-        profile.thermalLoad = Math.min(this._maxThermal, profile.thermalLoad + elapsedMs * this._thermalPerMs);
-        if (profile.thermalLoad >= this._maxThermal) {
-          this.deactivate(profile.id);
-        }
-      } else {
-        profile.thermalLoad = Math.max(0, profile.thermalLoad - elapsedMs * this._thermalPerMs * 0.5);
-      }
+  get temperature(): number {
+    return this._currentTemperature;
+  }
+
+  get state(): ClockState {
+    return this._state;
+  }
+
+  get thermalThrottleCount(): number {
+    return this._thermalThrottleCount;
+  }
+
+  private _transitionTo(newState: ClockState): void {
+    const key = `${this._state}->${newState}`;
+    this._stateTransitions.set(key, (this._stateTransitions.get(key) ?? 0) + 1);
+    this._state = newState;
+  }
+
+  tick(load: number): ClockReading {
+    const power = load * (this._currentFrequency / this._profile.baseFrequency) ** 2;
+    const deltaT = power * 0.5 - this._profile.coolingCoefficient * (this._currentTemperature - 25);
+    this._currentTemperature += deltaT * 0.1;
+    if (this._currentTemperature >= this._profile.thermalLimit) {
+      this._thermalThrottleCount++;
+      this._transitionTo('throttled');
+      const error = this._profile.thermalLimit - this._currentTemperature;
+      this._pidIntegral += error;
+      const derivative = error - this._pidPreviousError;
+      this._pidPreviousError = error;
+      const pidOutput = this._pidKp * error + this._pidKi * this._pidIntegral + this._pidKd * derivative;
+      this._currentFrequency = Math.max(
+        this._profile.baseFrequency * 0.5,
+        this._currentFrequency + pidOutput
+      );
+    } else if (this._currentTemperature < this._profile.thermalLimit * 0.7 && this._state === 'throttled') {
+      this._transitionTo('overclocked');
+      this._pidIntegral = 0;
+    } else if (load > 0.8 && this._state !== 'throttled') {
+      this._transitionTo('overclocked');
+      this._currentFrequency = Math.min(this._profile.maxFrequency, this._currentFrequency * 1.02);
+    } else if (load < 0.2 && this._state !== 'idle') {
+      this._transitionTo('idle');
+      this._currentFrequency = this._profile.baseFrequency;
+      this._pidIntegral = 0;
+    } else if (this._state === 'idle' && load > 0.2) {
+      this._transitionTo('warming');
+      this._currentFrequency = this._profile.baseFrequency * (1 + load * 0.1);
     }
-  }
-
-  deactivate(profileId: string): OverclockSession | null {
-    const profile = this._profiles.get(profileId);
-    if (!profile || !profile.active) return null;
-    const session: OverclockSession = {
-      profileId,
-      durationMs: 0,
-      peakFrequency: profile.currentFrequency,
-      thermalPeak: profile.thermalLoad,
-      recoveryCost: profile.thermalLoad * this._recoveryCostPerThermal,
-      endedAt: Date.now(),
+    if (this._currentTemperature > this._profile.thermalLimit * 1.2) {
+      this._transitionTo('shutdown');
+      this._currentFrequency = 0;
+    }
+    const reading: ClockReading = {
+      frequency: this._currentFrequency,
+      temperature: this._currentTemperature,
+      load,
+      timestamp: Date.now(),
     };
-    profile.active = false;
-    profile.currentFrequency = profile.baseFrequency;
-    this._sessions.push(session);
-    if (this._sessions.length > 200) this._sessions.shift();
-    return session;
+    this._readings.push(reading);
+    if (this._readings.length > 200) this._readings.shift();
+    return reading;
   }
 
-  boost(profileId: string, multiplier: number): boolean {
-    const profile = this._profiles.get(profileId);
-    if (!profile || !profile.active) return false;
-    const cappedMultiplier = Math.min(multiplier, this._maxMultiplier);
-    profile.currentFrequency = profile.baseFrequency * cappedMultiplier;
-    profile.thermalLoad = Math.min(this._maxThermal, profile.thermalLoad + 5);
-    return true;
+  manualOverride(frequency: number): void {
+    this._currentFrequency = Math.max(0, Math.min(this._profile.maxFrequency * 1.1, frequency));
+    this._transitionTo('overclocked');
   }
 
-  computeTotalOutput(): number {
-    let total = 0;
-    for (const profile of this._profiles.values()) {
-      total += profile.active ? profile.currentFrequency : 0;
+  coolDown(): void {
+    this._currentTemperature = Math.max(25, this._currentTemperature - 10);
+    this._pidIntegral = 0;
+    if (this._currentTemperature < this._profile.thermalLimit * 0.5 && this._state === 'shutdown') {
+      this._transitionTo('idle');
+      this._currentFrequency = this._profile.baseFrequency;
     }
-    return total;
   }
 
-  findHottest(): OverclockProfile | null {
-    let max = 0;
-    let result: OverclockProfile | null = null;
-    for (const profile of this._profiles.values()) {
-      if (profile.thermalLoad > max) {
-        max = profile.thermalLoad;
-        result = profile;
-      }
-    }
-    return result;
+  setPidGains(kp: number, ki: number, kd: number): void {
+    this._pidKp = kp;
+    this._pidKi = ki;
+    this._pidKd = kd;
   }
 
-  setMaxThermal(value: number): void {
-    this._maxThermal = Math.max(10, value);
+  averageLoad(): number {
+    if (this._readings.length === 0) return 0;
+    return this._readings.reduce((acc, r) => acc + r.load, 0) / this._readings.length;
   }
 
-  setThermalRate(rate: number): void {
-    this._thermalPerMs = Math.max(0, rate);
+  peakTemperature(): number {
+    if (this._readings.length === 0) return 0;
+    return Math.max(...this._readings.map(r => r.temperature));
   }
 
-  getActiveProfiles(): OverclockProfile[] {
-    return Array.from(this._profiles.values()).filter(p => p.active);
+  getReadings(limit: number = 50): ClockReading[] {
+    return this._readings.slice(-limit);
   }
 
-  getSessionHistory(limit: number = 50): OverclockSession[] {
-    return this._sessions.slice(-limit);
+  timeInState(state: ClockState): number {
+    return this._readings.filter(r => {
+      if (state === 'throttled') return r.temperature >= this._profile.thermalLimit;
+      if (state === 'idle') return r.frequency === this._profile.baseFrequency;
+      return false;
+    }).length;
   }
 
-  getProfile(profileId: string): OverclockProfile | null {
-    return this._profiles.get(profileId) ?? null;
+  computeThermalEfficiency(): number {
+    const perf = this._currentFrequency / this._profile.baseFrequency;
+    const tempRatio = this._currentTemperature / this._profile.thermalLimit;
+    return perf / (tempRatio + 0.01);
   }
 
-  get profileCount(): number {
-    return this._profiles.size;
+  getStateTransitionMatrix(): Record<string, number> {
+    return Object.fromEntries(this._stateTransitions);
   }
 
-  get activeCount(): number {
-    return this.getActiveProfiles().length;
+  reset(): void {
+    this._state = 'idle';
+    this._currentFrequency = this._profile.baseFrequency;
+    this._currentTemperature = 25;
+    this._readings = [];
+    this._pidIntegral = 0;
+    this._pidPreviousError = 0;
+    this._thermalThrottleCount = 0;
+    this._stateTransitions.clear();
+  }
+
+  overclockReport(): Record<string, unknown> {
+    return {
+      state: this._state,
+      frequency: this._currentFrequency.toFixed(2),
+      temperature: this._currentTemperature.toFixed(2),
+      profile: this._profile,
+      throttleCount: this._thermalThrottleCount,
+      averageLoad: this.averageLoad().toFixed(3),
+      peakTemperature: this.peakTemperature().toFixed(2),
+      thermalEfficiency: this.computeThermalEfficiency().toFixed(3),
+      readingsCount: this._readings.length,
+      stateTransitions: Object.fromEntries(this._stateTransitions),
+    };
   }
 }

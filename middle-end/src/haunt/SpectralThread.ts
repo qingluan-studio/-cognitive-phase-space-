@@ -1,112 +1,200 @@
-/**
- * 光谱线程：未完全结束的线程以幽灵形式存在。
- * 未完全结束的线程残留为光谱线程，在频谱中显现为周期性的幽灵信号。
- */
+export type ThreadState = 'ready' | 'running' | 'blocked' | 'sleeping' | 'terminated';
 
-export type SpectrumBand = 'alpha' | 'beta' | 'gamma' | 'delta' | 'theta';
-
-export interface SpectralThreadRecord {
+export interface ThreadRecord {
   id: string;
-  threadId: string;
-  band: SpectrumBand;
-  residualEnergy: number;
-  frequency: number;
-  lastObserved: number;
-  terminated: boolean;
+  state: ThreadState;
+  priority: number;
+  cpuAffinity: number;
+  contextSwitches: number;
+  totalRuntime: number;
+  blockedOn: string | null;
 }
 
-export interface SpectrumReading {
-  threads: SpectralThreadRecord[];
-  dominantBand: SpectrumBand | null;
-  totalResidual: number;
-  readAt: number;
+export interface SchedulerSnapshot {
+  timestamp: number;
+  runningThread: string | null;
+  readyQueueLength: number;
+  blockedCount: number;
+  cpuUtilization: number;
 }
 
 export class SpectralThread {
-  private _threads: Map<string, SpectralThreadRecord> = new Map();
-  private _readings: SpectrumReading[] = [];
-  private _terminationThreshold = 0.05;
+  private _threads: Map<string, ThreadRecord> = new Map();
+  private _readyQueue: string[] = [];
+  private _schedulerHistory: SchedulerSnapshot[] = [];
+  private _state: Record<string, unknown> = {};
+  private _contextSwitchEntropy: number = 0;
+  private _priorityInversionCount: number = 0;
+  private _cpuTimeDistribution: Map<string, number> = new Map();
 
-  register(threadId: string, band: SpectrumBand, frequency: number): SpectralThreadRecord {
-    const thread: SpectralThreadRecord = {
-      id: `spec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      threadId,
-      band,
-      residualEnergy: 1.0,
-      frequency,
-      lastObserved: Date.now(),
-      terminated: false,
+  spawn(id: string, priority: number, cpuAffinity: number = -1): ThreadRecord {
+    const thread: ThreadRecord = {
+      id,
+      state: 'ready',
+      priority,
+      cpuAffinity,
+      contextSwitches: 0,
+      totalRuntime: 0,
+      blockedOn: null,
     };
-    this._threads.set(thread.id, thread);
+    this._threads.set(id, thread);
+    this._readyQueue.push(id);
+    this._sortReadyQueue();
     return thread;
   }
 
-  observe(threadId: string): SpectralThreadRecord | null {
-    const thread = this._threads.get(threadId);
-    if (!thread || thread.terminated) return null;
-    thread.residualEnergy *= 0.9;
-    thread.lastObserved = Date.now();
-    if (thread.residualEnergy < this._terminationThreshold) {
-      thread.terminated = true;
-    }
-    return thread;
+  private _sortReadyQueue(): void {
+    this._readyQueue.sort((a, b) => {
+      const ta = this._threads.get(a)!;
+      const tb = this._threads.get(b)!;
+      return tb.priority - ta.priority;
+    });
   }
 
-  readSpectrum(): SpectrumReading {
-    const active = Array.from(this._threads.values()).filter(t => !t.terminated);
-    const bandTotals: Record<SpectrumBand, number> = {
-      alpha: 0, beta: 0, gamma: 0, delta: 0, theta: 0,
-    };
-    let totalResidual = 0;
-    for (const t of active) {
-      bandTotals[t.band] += t.residualEnergy;
-      totalResidual += t.residualEnergy;
-    }
-    let dominantBand: SpectrumBand | null = null;
-    let max = 0;
-    for (const band of Object.keys(bandTotals) as SpectrumBand[]) {
-      if (bandTotals[band] > max) {
-        max = bandTotals[band];
-        dominantBand = band;
+  schedule(): string | null {
+    if (this._readyQueue.length === 0) return null;
+    const nextId = this._readyQueue.shift()!;
+    const thread = this._threads.get(nextId);
+    if (!thread) return null;
+    for (const t of this._threads.values()) {
+      if (t.state === 'running') {
+        t.state = 'ready';
+        this._readyQueue.push(t.id);
       }
     }
-    const reading: SpectrumReading = {
-      threads: active.map(t => ({ ...t })),
-      dominantBand,
-      totalResidual,
-      readAt: Date.now(),
+    thread.state = 'running';
+    thread.contextSwitches++;
+    this._cpuTimeDistribution.set(thread.id, (this._cpuTimeDistribution.get(thread.id) ?? 0) + 1);
+    this._updateContextSwitchEntropy();
+    const snapshot: SchedulerSnapshot = {
+      timestamp: Date.now(),
+      runningThread: thread.id,
+      readyQueueLength: this._readyQueue.length,
+      blockedCount: Array.from(this._threads.values()).filter(t => t.state === 'blocked').length,
+      cpuUtilization: this._computeCpuUtilization(),
     };
-    this._readings.push(reading);
-    if (this._readings.length > 100) this._readings.shift();
-    return reading;
+    this._schedulerHistory.push(snapshot);
+    if (this._schedulerHistory.length > 200) this._schedulerHistory.shift();
+    this._detectPriorityInversion();
+    return thread.id;
   }
 
-  pulse(threadId: string, energy: number): SpectralThreadRecord | null {
+  private _updateContextSwitchEntropy(): void {
+    const total = Array.from(this._cpuTimeDistribution.values()).reduce((a, b) => a + b, 0);
+    if (total === 0) return;
+    let entropy = 0;
+    for (const count of this._cpuTimeDistribution.values()) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    this._contextSwitchEntropy = entropy;
+  }
+
+  private _computeCpuUtilization(): number {
+    const running = Array.from(this._threads.values()).filter(t => t.state === 'running').length;
+    return this._threads.size > 0 ? running / this._threads.size : 0;
+  }
+
+  private _detectPriorityInversion(): void {
+    const running = Array.from(this._threads.values()).find(t => t.state === 'running');
+    if (!running) return;
+    for (const t of this._threads.values()) {
+      if (t.state === 'blocked' && t.blockedOn && t.priority > running.priority) {
+        this._priorityInversionCount++;
+      }
+    }
+  }
+
+  block(threadId: string, resource: string): boolean {
     const thread = this._threads.get(threadId);
-    if (!thread) return null;
-    thread.residualEnergy = Math.min(1, thread.residualEnergy + energy);
-    thread.terminated = false;
-    thread.lastObserved = Date.now();
-    return thread;
+    if (!thread || thread.state !== 'running') return false;
+    thread.state = 'blocked';
+    thread.blockedOn = resource;
+    const idx = this._readyQueue.indexOf(threadId);
+    if (idx >= 0) this._readyQueue.splice(idx, 1);
+    return true;
+  }
+
+  unblock(threadId: string): boolean {
+    const thread = this._threads.get(threadId);
+    if (!thread || thread.state !== 'blocked') return false;
+    thread.state = 'ready';
+    thread.blockedOn = null;
+    this._readyQueue.push(threadId);
+    this._sortReadyQueue();
+    return true;
+  }
+
+  sleep(threadId: string): boolean {
+    const thread = this._threads.get(threadId);
+    if (!thread || thread.state !== 'running') return false;
+    thread.state = 'sleeping';
+    const idx = this._readyQueue.indexOf(threadId);
+    if (idx >= 0) this._readyQueue.splice(idx, 1);
+    return true;
+  }
+
+  wake(threadId: string): boolean {
+    const thread = this._threads.get(threadId);
+    if (!thread || thread.state !== 'sleeping') return false;
+    thread.state = 'ready';
+    this._readyQueue.push(threadId);
+    this._sortReadyQueue();
+    return true;
   }
 
   terminate(threadId: string): boolean {
     const thread = this._threads.get(threadId);
     if (!thread) return false;
-    thread.terminated = true;
-    thread.residualEnergy = 0;
+    thread.state = 'terminated';
+    const idx = this._readyQueue.indexOf(threadId);
+    if (idx >= 0) this._readyQueue.splice(idx, 1);
     return true;
   }
 
-  getReadings(limit: number = 50): SpectrumReading[] {
-    return this._readings.slice(-limit);
+  runQuantum(threadId: string, quantum: number): void {
+    const thread = this._threads.get(threadId);
+    if (thread && thread.state === 'running') {
+      thread.totalRuntime += quantum;
+    }
   }
 
-  get activeThreadCount(): number {
-    let count = 0;
-    for (const t of this._threads.values()) {
-      if (!t.terminated) count++;
-    }
-    return count;
+  getThread(id: string): ThreadRecord | null {
+    return this._threads.get(id) ?? null;
+  }
+
+  listByState(state: ThreadState): ThreadRecord[] {
+    return Array.from(this._threads.values()).filter(t => t.state === state);
+  }
+
+  averagePriority(): number {
+    if (this._threads.size === 0) return 0;
+    return Array.from(this._threads.values()).reduce((s, t) => s + t.priority, 0) / this._threads.size;
+  }
+
+  getSchedulerHistory(limit: number = 50): SchedulerSnapshot[] {
+    return this._schedulerHistory.slice(-limit);
+  }
+
+  get contextSwitchEntropy(): number {
+    return this._contextSwitchEntropy;
+  }
+
+  get priorityInversionCount(): number {
+    return this._priorityInversionCount;
+  }
+
+  threadReport(): Record<string, unknown> {
+    return {
+      threadCount: this._threads.size,
+      readyQueueLength: this._readyQueue.length,
+      runningCount: this.listByState('running').length,
+      blockedCount: this.listByState('blocked').length,
+      contextSwitchEntropy: this._contextSwitchEntropy.toFixed(4),
+      priorityInversionCount: this._priorityInversionCount,
+      cpuUtilization: this._computeCpuUtilization().toFixed(4),
+      averagePriority: this.averagePriority().toFixed(2),
+      state: this._state,
+    };
   }
 }

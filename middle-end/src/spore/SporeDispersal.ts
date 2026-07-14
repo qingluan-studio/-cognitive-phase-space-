@@ -1,96 +1,122 @@
-/**
- * 孢子散布模块：将休眠孢子广播到多个异质环境，
- * 以提高至少一个孢子成功萌发的概率。仿生自真菌孢子的风力传播。
- */
-
-export type DispersalMedium = 'air' | 'water' | 'soil' | 'digital' | 'memory';
-
-export interface DispersalTarget {
-  envId: string;
-  medium: DispersalMedium;
-  hostility: number;
-  reachable: boolean;
+export interface DispersalKernel {
+  distance: number;
+  probability: number;
+  density: number;
+  colonizationProb: number;
 }
 
-export interface DispersalRecord {
+export interface DispersalEvent {
   sporeId: string;
-  targets: string[];
-  dispatchedAt: number;
-  successCount: number;
+  originX: number;
+  originY: number;
+  landingX: number;
+  landingY: number;
+  distance: number;
+  survived: boolean;
 }
 
 export class SporeDispersal {
-  private _targets: Map<string, DispersalTarget> = new Map();
-  private _records: DispersalRecord[] = [];
-  private _maxRange = 12;
-  private _redundancy = 3;
+  private _events: DispersalEvent[] = [];
+  private _state: Record<string, unknown> = {};
+  private _alpha: number = 1.5;
+  private _islandDistance: number = 10;
+  private _colonizationHistory: Map<string, number> = new Map();
 
-  registerTarget(target: DispersalTarget): void {
-    this._targets.set(target.envId, target);
+  constructor() {}
+
+  get eventCount(): number {
+    return this._events.length;
   }
 
-  selectTargets(medium: DispersalMedium, count: number): DispersalTarget[] {
-    const candidates = Array.from(this._targets.values()).filter(
-      t => t.medium === medium && t.reachable
-    );
-    candidates.sort((a, b) => a.hostility - b.hostility);
-    return candidates.slice(0, Math.min(count, this._maxRange));
+  setLevyAlpha(alpha: number): void {
+    this._alpha = Math.max(1.1, Math.min(2, alpha));
   }
 
-  broadcast(sporeId: string, medium: DispersalMedium): DispersalRecord {
-    const targets = this.selectTargets(medium, this._redundancy);
-    const targetIds = targets.map(t => t.envId);
-    let successCount = 0;
-    for (const t of targets) {
-      if (Math.random() > t.hostility) successCount++;
+  sampleLevyStep(): number {
+    const u = Math.random();
+    const v = Math.random();
+    const step = Math.pow(Math.abs(u - 0.5) / Math.pow(Math.abs(v), 1 / this._alpha), 1 / this._alpha);
+    return Math.min(step, 50);
+  }
+
+  disperse(sporeId: string, originX: number, originY: number): DispersalEvent {
+    const step = this.sampleLevyStep();
+    const angle = Math.random() * Math.PI * 2;
+    const landingX = originX + step * Math.cos(angle);
+    const landingY = originY + step * Math.sin(angle);
+    const distance = Math.sqrt(Math.pow(landingX - originX, 2) + Math.pow(landingY - originY, 2));
+    const survivalProb = Math.exp(-distance / 10);
+    const survived = Math.random() < survivalProb;
+    const event: DispersalEvent = { sporeId, originX, originY, landingX, landingY, distance, survived };
+    this._events.push(event);
+    if (this._events.length > 200) this._events.shift();
+    if (survived) {
+      this._colonizationHistory.set(sporeId, (this._colonizationHistory.get(sporeId) ?? 0) + 1);
     }
-    const record: DispersalRecord = {
-      sporeId,
-      targets: targetIds,
-      dispatchedAt: Date.now(),
-      successCount,
-    };
-    this._records.push(record);
-    if (this._records.length > 500) this._records.shift();
-    return record;
+    return event;
   }
 
-  evaluateCoverage(): { medium: DispersalMedium; covered: number }[] {
-    const media: DispersalMedium[] = ['air', 'water', 'soil', 'digital', 'memory'];
-    return media.map(m => ({
-      medium: m,
-      covered: Array.from(this._targets.values()).filter(t => t.medium === m && t.reachable).length,
-    }));
-  }
-
-  pruneUnreachable(): number {
-    let removed = 0;
-    for (const [id, t] of this._targets) {
-      if (!t.reachable) {
-        this._targets.delete(id);
-        removed++;
+  kernelDensityEstimate(bandwidth: number): DispersalKernel[] {
+    const kernels: DispersalKernel[] = [];
+    const maxDist = Math.max(...this._events.map((e) => e.distance), 1);
+    for (let d = 0; d <= maxDist; d += 1) {
+      let density = 0;
+      for (const event of this._events) {
+        const k = Math.exp(-Math.pow(event.distance - d, 2) / (2 * bandwidth * bandwidth));
+        density += k;
       }
+      const probability = density / (this._events.length * bandwidth * Math.sqrt(2 * Math.PI));
+      const colonizationProb = this._events.filter((e) => e.distance >= d - 1 && e.distance < d + 1 && e.survived).length / (this._events.filter((e) => e.distance >= d - 1 && e.distance < d + 1).length || 1);
+      kernels.push({ distance: d, probability, density, colonizationProb });
     }
-    return removed;
+    return kernels;
   }
 
-  recallSpore(sporeId: string): DispersalRecord[] {
-    return this._records.filter(r => r.sporeId === sporeId);
+  islandBiogeography(islandArea: number, distanceToMainland: number): { immigration: number; extinction: number; equilibrium: number } {
+    const immigrationRate = Math.exp(-distanceToMainland / this._islandDistance) * islandArea;
+    const extinctionRate = 1 / islandArea;
+    const equilibrium = immigrationRate / (immigrationRate + extinctionRate);
+    return { immigration: immigrationRate, extinction: extinctionRate, equilibrium };
   }
 
-  getSuccessfulDispatches(): DispersalRecord[] {
-    return this._records.filter(r => r.successCount > 0);
+  meanDispersalDistance(): number {
+    if (this._events.length === 0) return 0;
+    return this._events.reduce((s, e) => s + e.distance, 0) / this._events.length;
   }
 
-  setRedundancy(n: number): void {
-    this._redundancy = Math.max(1, Math.min(n, this._maxRange));
+  colonizationRate(): number {
+    if (this._events.length === 0) return 0;
+    return this._events.filter((e) => e.survived).length / this._events.length;
   }
 
-  get targetCount(): number {
-    return this._targets.size;
+  dispersalKernelEntropy(): number {
+    const distances = this._events.map((e) => e.distance);
+    const total = distances.reduce((s, v) => s + v, 0);
+    if (total === 0) return 0;
+    return -distances.reduce((s, v) => {
+      const p = v / total;
+      return p > 0 ? s + p * Math.log2(p) : s;
+    }, 0);
   }
 
-  get totalDispatched(): number {
-    return this._records.length;
+  colonizationSuccessCurve(): { distance: number; success: number }[] {
+    const curve: { distance: number; success: number }[] = [];
+    const maxDist = Math.max(...this._events.map((e) => e.distance), 1);
+    for (let d = 0; d <= maxDist; d += 1) {
+      const events = this._events.filter((e) => Math.abs(e.distance - d) < 1);
+      const success = events.length > 0 ? events.filter((e) => e.survived).length / events.length : 0;
+      curve.push({ distance: d, success });
+    }
+    return curve;
+  }
+
+  report(): Record<string, unknown> {
+    return {
+      events: this._events.length,
+      meanDistance: this.meanDispersalDistance(),
+      colonizationRate: this.colonizationRate(),
+      colonizedIslands: this._colonizationHistory.size,
+      state: this._state,
+    };
   }
 }

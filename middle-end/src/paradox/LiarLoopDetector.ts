@@ -1,103 +1,140 @@
-/**
- * 说谎者循环检测：检测自指矛盾引发的无限循环。
- * 当一个命题断言自身的否定时会形成悖论回路，本模块负责识别、终止并降级此类循环。
- */
-
-export interface LiarStatement {
+export interface LoopNode {
   id: string;
-  text: string;
-  selfReferential: boolean;
-  negatesItself: boolean;
+  statement: string;
+  references: string[];
   truthValue: boolean | null;
 }
 
-export interface LoopDetectionResult {
+export interface LoopResult {
   loopId: string;
-  statements: string[];
-  depth: number;
+  nodes: string[];
+  paradoxical: boolean;
   detectedAt: number;
-  severity: 'low' | 'medium' | 'high';
 }
 
 export class LiarLoopDetector {
-  private _statements: Map<string, LiarStatement> = new Map();
-  private _loops: LoopDetectionResult[] = [];
-  private _visited: Set<string> = new Set();
-  private _stack: string[] = [];
-  private _maxDepth = 32;
+  private _nodes: Map<string, LoopNode> = new Map();
+  private _results: LoopResult[] = [];
+  private _adjacencyMatrix: Map<string, Map<string, number>> = new Map();
+  private _eigenvalueCache: number[] = [];
 
-  registerStatement(stmt: LiarStatement): void {
-    this._statements.set(stmt.id, stmt);
+  addNode(node: LoopNode): void {
+    this._nodes.set(node.id, node);
+    this._adjacencyMatrix.set(node.id, new Map());
   }
 
-  checkSelfReference(id: string): boolean {
-    const stmt = this._statements.get(id);
-    if (!stmt) return false;
-    stmt.selfReferential = stmt.text.includes(stmt.id) || /我(自己|本身)|self/i.test(stmt.text);
-    return stmt.selfReferential;
+  link(fromId: string, toId: string): void {
+    const from = this._nodes.get(fromId);
+    if (!from || !this._nodes.has(toId)) return;
+    if (!from.references.includes(toId)) from.references.push(toId);
+    this._adjacencyMatrix.get(fromId)?.set(toId, (this._adjacencyMatrix.get(fromId)?.get(toId) ?? 0) + 1);
+    this._updateEigenvalues();
   }
 
-  detectLoop(startId: string): LoopDetectionResult | null {
-    this._visited.clear();
-    this._stack = [];
-    const found = this._dfs(startId, 0);
-    if (found) {
-      const result: LoopDetectionResult = {
-        loopId: `loop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        statements: [...this._stack],
-        depth: this._stack.length,
-        detectedAt: Date.now(),
-        severity: this._stack.length > 8 ? 'high' : this._stack.length > 4 ? 'medium' : 'low',
-      };
-      this._loops.push(result);
-      if (this._loops.length > 50) this._loops.shift();
-      return result;
+  detect(startId: string): LoopResult | null {
+    const visited = new Set<string>();
+    const path: string[] = [];
+    const dfs = (current: string): string[] | null => {
+      if (visited.has(current)) {
+        const idx = path.indexOf(current);
+        return idx >= 0 ? path.slice(idx) : null;
+      }
+      visited.add(current);
+      path.push(current);
+      const node = this._nodes.get(current);
+      if (node) {
+        for (const ref of node.references) {
+          const loop = dfs(ref);
+          if (loop) return loop;
+        }
+      }
+      path.pop();
+      visited.delete(current);
+      return null;
+    };
+    const loop = dfs(startId);
+    if (!loop) return null;
+    const paradoxical = loop.length % 2 === 1;
+    const result: LoopResult = {
+      loopId: `loop-${Date.now()}`,
+      nodes: loop,
+      paradoxical,
+      detectedAt: Date.now(),
+    };
+    this._results.push(result);
+    if (this._results.length > 50) this._results.shift();
+    return result;
+  }
+
+  evaluateTruth(nodeId: string): boolean | null {
+    const node = this._nodes.get(nodeId);
+    if (!node) return null;
+    if (node.truthValue !== null) return node.truthValue;
+    const loop = this.detect(nodeId);
+    if (loop && loop.paradoxical) return null;
+    const negations = node.references.filter(ref => {
+      const refNode = this._nodes.get(ref);
+      return refNode && refNode.statement.includes('不');
+    }).length;
+    return negations % 2 === 0;
+  }
+
+  getNode(id: string): LoopNode | null {
+    return this._nodes.get(id) ?? null;
+  }
+
+  getResults(): LoopResult[] {
+    return [...this._results];
+  }
+
+  computeGraphEntropy(): number {
+    const degrees: number[] = [];
+    for (const adj of this._adjacencyMatrix.values()) {
+      degrees.push(Array.from(adj.values()).reduce((a, b) => a + b, 0));
     }
-    return null;
-  }
-
-  terminateLoop(loopId: string): boolean {
-    const loop = this._loops.find(l => l.loopId === loopId);
-    if (!loop) return false;
-    for (const sid of loop.statements) {
-      const stmt = this._statements.get(sid);
-      if (stmt) stmt.truthValue = null;
+    const total = degrees.reduce((a, b) => a + b, 0);
+    if (total === 0) return 0;
+    let entropy = 0;
+    for (const d of degrees) {
+      const p = d / total;
+      if (p > 0) entropy -= p * Math.log2(p);
     }
-    return true;
+    return entropy;
   }
 
-  downgradeContradiction(id: string): LiarStatement | null {
-    const stmt = this._statements.get(id);
-    if (!stmt || !stmt.negatesItself) return null;
-    stmt.truthValue = null;
-    stmt.selfReferential = true;
-    return stmt;
+  computeEigenvalueSpectrum(): number[] {
+    return [...this._eigenvalueCache];
   }
 
-  getActiveLoops(): LoopDetectionResult[] {
-    return [...this._loops];
+  computeAlgebraicConnectivity(): number {
+    if (this._eigenvalueCache.length < 2) return 0;
+    const sorted = [...this._eigenvalueCache].sort((a, b) => a - b);
+    return sorted[1] - sorted[0];
   }
 
-  get statementCount(): number {
-    return this._statements.size;
-  }
-
-  private _dfs(id: string, depth: number): boolean {
-    if (depth > this._maxDepth) return false;
-    if (this._stack.includes(id)) return true;
-    if (this._visited.has(id)) return false;
-    this._visited.add(id);
-    this._stack.push(id);
-    const stmt = this._statements.get(id);
-    if (stmt && stmt.negatesItself) return true;
-    const next = this._statements.get(id);
-    if (next) {
-      const refs = Array.from(this._statements.keys()).filter(k => k !== id && next.text.includes(k));
-      for (const r of refs) {
-        if (this._dfs(r, depth + 1)) return true;
+  private _updateEigenvalues(): void {
+    const ids = Array.from(this._nodes.keys());
+    const n = ids.length;
+    if (n === 0) return;
+    const matrix: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        matrix[i][j] = this._adjacencyMatrix.get(ids[i])?.get(ids[j]) ?? 0;
       }
     }
-    this._stack.pop();
-    return false;
+    const vec = new Array(n).fill(1 / n);
+    for (let iter = 0; iter < 20; iter++) {
+      const newVec = new Array(n).fill(0);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          newVec[i] += matrix[i][j] * vec[j];
+        }
+      }
+      const norm = Math.sqrt(newVec.reduce((s, v) => s + v * v, 0));
+      for (let i = 0; i < n; i++) vec[i] = newVec[i] / (norm || 1);
+    }
+    const eigenvalue = vec.reduce((s, v, i) => s + v * matrix[i].reduce((ss, m, j) => ss + m * vec[j], 0), 0);
+    this._eigenvalueCache.push(eigenvalue);
+    if (this._eigenvalueCache.length > 10) this._eigenvalueCache.shift();
   }
 }

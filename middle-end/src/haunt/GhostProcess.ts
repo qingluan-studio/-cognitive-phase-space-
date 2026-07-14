@@ -1,105 +1,177 @@
-/**
- * 幽灵进程：已死模块的幽灵仍在后台徘徊。
- * 已终止的模块仍以幽灵形式存在于后台，偶尔被检测到产生幻影活动。
- */
+export type ProcessState = 'running' | 'sleeping' | 'zombie' | 'orphan' | 'reaped';
 
-export type GhostState = 'dormant' | 'wandering' | 'manifesting' | 'exorcised';
-
-export interface GhostManifestation {
+export interface ProcessRecord {
   id: string;
-  moduleId: string;
-  state: GhostState;
-  activity: string;
-  intensity: number;
-  manifestedAt: number;
+  parentId: string | null;
+  state: ProcessState;
+  children: string[];
+  exitCode: number | null;
+  startTime: number;
+  endTime: number | null;
 }
 
 export class GhostProcess {
-  private _ghosts: Map<string, GhostManifestation> = new Map();
-  private _hauntingLog: GhostManifestation[] = [];
-  private _detectionThreshold = 0.3;
-  private _exorcisedCount = 0;
+  private _processes: Map<string, ProcessRecord> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _reapQueue: string[] = [];
+  private _orphanAdoptionChain: Map<string, string> = new Map();
+  private _processTreeDepth: number = 0;
 
-  summon(moduleId: string, activity: string = 'phantom-computation'): GhostManifestation {
-    const ghost: GhostManifestation = {
-      id: `ghost-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      moduleId,
-      state: 'wandering',
-      activity,
-      intensity: Math.random(),
-      manifestedAt: Date.now(),
+  spawn(id: string, parentId: string | null): ProcessRecord {
+    const process: ProcessRecord = {
+      id,
+      parentId,
+      state: 'running',
+      children: [],
+      exitCode: null,
+      startTime: Date.now(),
+      endTime: null,
     };
-    this._ghosts.set(ghost.id, ghost);
-    return ghost;
-  }
-
-  manifest(ghostId: string): GhostManifestation | null {
-    const ghost = this._ghosts.get(ghostId);
-    if (!ghost || ghost.state === 'exorcised') return null;
-    ghost.state = 'manifesting';
-    ghost.intensity = Math.min(1, ghost.intensity + 0.2);
-    ghost.manifestedAt = Date.now();
-    this._hauntingLog.push({ ...ghost });
-    if (this._hauntingLog.length > 200) this._hauntingLog.shift();
-    return ghost;
-  }
-
-  detect(): GhostManifestation[] {
-    const detected: GhostManifestation[] = [];
-    for (const ghost of this._ghosts.values()) {
-      if (ghost.state === 'exorcised') continue;
-      if (ghost.intensity >= this._detectionThreshold) {
-        detected.push({ ...ghost });
-      }
+    this._processes.set(id, process);
+    if (parentId) {
+      const parent = this._processes.get(parentId);
+      if (parent) parent.children.push(id);
     }
-    return detected;
+    this._updateTreeDepth();
+    return process;
   }
 
-  exorcise(ghostId: string): boolean {
-    const ghost = this._ghosts.get(ghostId);
-    if (!ghost) return false;
-    ghost.state = 'exorcised';
-    ghost.intensity = 0;
-    this._exorcisedCount++;
+  exit(id: string, exitCode: number): boolean {
+    const process = this._processes.get(id);
+    if (!process || process.state === 'zombie' || process.state === 'reaped') return false;
+    process.state = 'zombie';
+    process.exitCode = exitCode;
+    process.endTime = Date.now();
+    this._reapQueue.push(id);
     return true;
   }
 
-  banishAll(): number {
-    let count = 0;
-    for (const ghost of this._ghosts.values()) {
-      if (ghost.state !== 'exorcised') {
-        ghost.state = 'exorcised';
-        ghost.intensity = 0;
-        count++;
+  reap(id: string): boolean {
+    const process = this._processes.get(id);
+    if (!process || process.state !== 'zombie') return false;
+    process.state = 'reaped';
+    this._reapQueue = this._reapQueue.filter(pid => pid !== id);
+    const parent = process.parentId ? this._processes.get(process.parentId) : null;
+    if (parent) {
+      parent.children = parent.children.filter(cid => cid !== id);
+    }
+    for (const childId of process.children) {
+      const child = this._processes.get(childId);
+      if (child && child.state !== 'reaped') {
+        child.parentId = null;
+        child.state = 'orphan';
+        this._orphanAdoptionChain.set(childId, 'init');
       }
     }
-    this._exorcisedCount += count;
-    return count;
+    return true;
   }
 
-  decay(ghostId: string, amount: number = 0.1): GhostManifestation | null {
-    const ghost = this._ghosts.get(ghostId);
-    if (!ghost) return null;
-    ghost.intensity = Math.max(0, ghost.intensity - amount);
-    if (ghost.intensity < this._detectionThreshold) {
-      ghost.state = 'dormant';
+  adopt(orphanId: string, adopterId: string): boolean {
+    const orphan = this._processes.get(orphanId);
+    const adopter = this._processes.get(adopterId);
+    if (!orphan || !adopter || orphan.state !== 'orphan') return false;
+    orphan.parentId = adopterId;
+    orphan.state = 'running';
+    adopter.children.push(orphanId);
+    this._orphanAdoptionChain.set(orphanId, adopterId);
+    return true;
+  }
+
+  private _updateTreeDepth(): void {
+    let maxDepth = 0;
+    for (const process of this._processes.values()) {
+      let depth = 0;
+      let current: ProcessRecord | undefined = process;
+      while (current?.parentId) {
+        depth++;
+        current = this._processes.get(current.parentId);
+        if (depth > 100) break;
+      }
+      if (depth > maxDepth) maxDepth = depth;
     }
-    return ghost;
+    this._processTreeDepth = maxDepth;
   }
 
-  getHauntingLog(limit: number = 50): GhostManifestation[] {
-    return this._hauntingLog.slice(-limit);
+  getProcess(id: string): ProcessRecord | null {
+    return this._processes.get(id) ?? null;
   }
 
-  get activeGhostCount(): number {
-    let count = 0;
-    for (const g of this._ghosts.values()) {
-      if (g.state !== 'exorcised') count++;
+  getChildren(parentId: string): ProcessRecord[] {
+    const parent = this._processes.get(parentId);
+    if (!parent) return [];
+    return parent.children.map(cid => this._processes.get(cid)).filter((p): p is ProcessRecord => !!p);
+  }
+
+  listByState(state: ProcessState): ProcessRecord[] {
+    return Array.from(this._processes.values()).filter(p => p.state === state);
+  }
+
+  getAncestors(id: string): string[] {
+    const ancestors: string[] = [];
+    let current = this._processes.get(id);
+    while (current?.parentId) {
+      ancestors.push(current.parentId);
+      current = this._processes.get(current.parentId);
+      if (ancestors.length > 100) break;
     }
-    return count;
+    return ancestors;
   }
 
-  get exorcisedCount(): number {
-    return this._exorcisedCount;
+  getDescendants(id: string): string[] {
+    const descendants: string[] = [];
+    const queue = [id];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const process = this._processes.get(current);
+      if (!process) continue;
+      for (const child of process.children) {
+        if (!descendants.includes(child)) {
+          descendants.push(child);
+          queue.push(child);
+        }
+      }
+    }
+    return descendants;
+  }
+
+  reapAllZombies(): number {
+    let reaped = 0;
+    for (const id of [...this._reapQueue]) {
+      if (this.reap(id)) reaped++;
+    }
+    return reaped;
+  }
+
+  averageLifetime(): number {
+    const completed = Array.from(this._processes.values()).filter(p => p.endTime !== null);
+    if (completed.length === 0) return 0;
+    return completed.reduce((s, p) => s + (p.endTime! - p.startTime), 0) / completed.length;
+  }
+
+  get zombieCount(): number {
+    return this.listByState('zombie').length;
+  }
+
+  get orphanCount(): number {
+    return this.listByState('orphan').length;
+  }
+
+  get processTreeDepth(): number {
+    return this._processTreeDepth;
+  }
+
+  processReport(): Record<string, unknown> {
+    return {
+      processCount: this._processes.size,
+      runningCount: this.listByState('running').length,
+      zombieCount: this.zombieCount,
+      orphanCount: this.orphanCount,
+      reapedCount: this.listByState('reaped').length,
+      averageLifetime: this.averageLifetime().toFixed(2),
+      treeDepth: this._processTreeDepth,
+      reapQueueLength: this._reapQueue.length,
+      adoptionChainSize: this._orphanAdoptionChain.size,
+      state: this._state,
+    };
   }
 }

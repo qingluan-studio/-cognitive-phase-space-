@@ -1,96 +1,149 @@
-/**
- * 折纸数据：通过折叠数据产生新的结构。
- * 以折纸为隐喻，通过对数据序列的折叠操作生成具有层级性的新数据结构。
- */
-
-export type FoldAxis = 'horizontal' | 'vertical' | 'diagonal' | 'reverse';
-
-export interface FoldOperation {
-  axis: FoldAxis;
-  layers: number;
-  appliedAt: number;
+export interface DataFace {
+  id: string;
+  content: number;
+  orientation: number;
+  visible: boolean;
 }
 
-export interface FoldedStructure {
-  id: string;
-  original: number[];
-  folded: number[][];
-  operations: FoldOperation[];
-  depth: number;
+export type FoldTransform = {
+  axisAngle: number;
+  foldAngle: number;
+  layerOrder: number[];
+};
+
+export interface OrigamiConfig {
+  faceCount: number;
+  defaultOrientation: number;
+  foldResolution: number;
 }
 
 export class OrigamiData {
-  private _structures: FoldedStructure[] = [];
-  private _maxDepth = 8;
+  private _config: OrigamiConfig;
+  private _faces: DataFace[] = [];
+  private _transform: FoldTransform | null = null;
+  private _state: Record<string, unknown> = {};
+  private _rotationMatrix: number[][] = [[1, 0], [0, 1]];
+  private _faceAdjacency: Map<string, Set<string>> = new Map();
+  private _dihedralAngles: Map<string, number> = new Map();
 
-  fold(data: number[], axis: FoldAxis = 'horizontal'): FoldedStructure {
-    const operations: FoldOperation[] = [];
-    let working: number[] = [...data];
-    let depth = 0;
-    let folded: number[][] = [working];
+  constructor(config: OrigamiConfig) {
+    this._config = config;
+    this._initFaces();
+  }
 
-    while (working.length > 1 && depth < this._maxDepth) {
-      const foldedLayer = this._applyFold(working, axis);
-      operations.push({ axis, layers: depth + 1, appliedAt: Date.now() });
-      folded = this._mergeLayers(folded, foldedLayer);
-      working = foldedLayer.flat();
-      depth++;
+  get faceCount(): number {
+    return this._faces.length;
+  }
+
+  get visibleFaces(): number {
+    return this._faces.filter((f) => f.visible).length;
+  }
+
+  private _initFaces(): void {
+    this._faces = [];
+    for (let i = 0; i < this._config.faceCount; i++) {
+      this._faces.push({
+        id: `face-${i}`,
+        content: i,
+        orientation: this._config.defaultOrientation,
+        visible: true,
+      });
     }
+  }
 
-    const structure: FoldedStructure = {
-      id: `origami-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      original: [...data],
-      folded,
-      operations,
-      depth,
+  private _rotation(theta: number): void {
+    const cos = Math.cos(theta);
+    const sin = Math.sin(theta);
+    this._rotationMatrix = [[cos, -sin], [sin, cos]];
+  }
+
+  private _updateAdjacency(): void {
+    this._faceAdjacency.clear();
+    for (let i = 0; i < this._faces.length; i++) {
+      const neighbors = new Set<string>();
+      if (i > 0) neighbors.add(this._faces[i - 1].id);
+      if (i < this._faces.length - 1) neighbors.add(this._faces[i + 1].id);
+      this._faceAdjacency.set(this._faces[i].id, neighbors);
+    }
+  }
+
+  addFace(id: string, content: number): DataFace {
+    const face: DataFace = { id, content, orientation: this._config.defaultOrientation, visible: true };
+    this._faces.push(face);
+    if (this._faces.length > this._config.faceCount * 2) {
+      this._faces.shift();
+    }
+    this._updateAdjacency();
+    return face;
+  }
+
+  fold(axisAngle: number, foldAngle: number): FoldTransform {
+    this._rotation(foldAngle);
+    for (const face of this._faces) {
+      const x = face.content;
+      const y = face.orientation;
+      const nx = this._rotationMatrix[0][0] * x + this._rotationMatrix[0][1] * y;
+      const ny = this._rotationMatrix[1][0] * x + this._rotationMatrix[1][1] * y;
+      face.orientation = Math.atan2(ny, nx);
+      face.visible = Math.abs(foldAngle) < Math.PI / 2;
+      const key = `${face.id}-axis`;
+      this._dihedralAngles.set(key, Math.abs(foldAngle - axisAngle));
+    }
+    this._transform = {
+      axisAngle,
+      foldAngle,
+      layerOrder: this._faces.filter((f) => f.visible).map((f) => parseInt(f.id.split('-')[1]) || 0),
     };
-    this._structures.push(structure);
-    if (this._structures.length > 100) this._structures.shift();
-    return structure;
+    this._state.lastFold = { axisAngle, foldAngle };
+    return this._transform;
   }
 
-  private _applyFold(data: number[], axis: FoldAxis): number[][] {
-    const half = Math.ceil(data.length / 2);
-    const first = data.slice(0, half);
-    const second = data.slice(half);
-    if (axis === 'reverse') {
-      return [second, first];
+  unfold(): void {
+    for (const face of this._faces) {
+      face.orientation = this._config.defaultOrientation;
+      face.visible = true;
     }
-    if (axis === 'diagonal') {
-      const padded = first.length === second.length
-        ? first
-        : [...first, ...new Array(second.length - first.length).fill(0)];
-      return [padded.map((v, i) => v + (second[i] ?? 0))];
-    }
-    if (axis === 'vertical') {
-      return [second.map((v, i) => v + (first[i] ?? 0))];
-    }
-    return [first, second];
+    this._transform = null;
+    this._rotationMatrix = [[1, 0], [0, 1]];
+    this._state.unfoldedAt = Date.now();
   }
 
-  private _mergeLayers(existing: number[][], newLayer: number[][]): number[][] {
-    return [...existing, ...newLayer];
+  findFace(id: string): DataFace | null {
+    return this._faces.find((f) => f.id === id) ?? null;
   }
 
-  refold(structureId: string, axis: FoldAxis): FoldedStructure | null {
-    const original = this._structures.find(s => s.id === structureId);
-    if (!original) return null;
-    return this.fold(original.original, axis);
+  visibleContent(): number[] {
+    return this._faces.filter((f) => f.visible).map((f) => f.content);
   }
 
-  setMaxDepth(depth: number): void {
-    this._maxDepth = Math.max(1, depth);
+  isFlat(): boolean {
+    return this._faces.every((f) => Math.abs(f.orientation - this._config.defaultOrientation) < 0.01);
   }
 
-  getStructures(): FoldedStructure[] {
-    return [...this._structures];
+  computeDihedralEntropy(): number {
+    const values = Array.from(this._dihedralAngles.values());
+    if (values.length === 0) return 0;
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((a, b) => a + (b - mean) * (b - mean), 0) / values.length;
+    return 0.5 * Math.log(2 * Math.PI * Math.E * (variance + 0.001));
   }
 
-  getStructure(id: string): FoldedStructure | null {
-    return this._structures.find(s => s.id === id) ?? null;
+  reset(): void {
+    this._initFaces();
+    this._transform = null;
+    this._dihedralAngles.clear();
+    this._faceAdjacency.clear();
+    this._rotationMatrix = [[1, 0], [0, 1]];
+    this._state = {};
   }
 
-  get structureCount(): number {
-    return this._structures.length;
+  report(): Record<string, unknown> {
+    return {
+      faces: this._faces.length,
+      visible: this.visibleFaces,
+      transform: this._transform,
+      state: this._state,
+      dihedralEntropy: this.computeDihedralEntropy().toFixed(4),
+    };
   }
 }

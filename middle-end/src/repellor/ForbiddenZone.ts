@@ -1,132 +1,155 @@
-/**
- * ForbiddenZone - 禁区
- * 状态空间中绝对不可进入的区域，任何尝试进入的操作
- * 都会被立即拒绝并触发警报。
- */
-
 export interface ForbiddenZoneData {
   readonly zoneId: string;
-  boundaries: { minX: number; maxX: number; minY: number; maxY: number };
-  severity: number;
-  violations: number;
+  centerX: number;
+  centerY: number;
+  radius: number;
+  repulsion: number;
 }
 
-export interface ZoneCheck {
-  position: { x: number; y: number };
-  inside: boolean;
-  violated: boolean;
-  distanceToEdge: number;
+export interface VoronoiCell {
+  siteId: string;
+  x: number;
+  y: number;
+  area: number;
+  edges: number;
 }
 
 export class ForbiddenZone {
   private _data: ForbiddenZoneData;
-  private _checks: ZoneCheck[] = [];
-  private _violationLog: number[] = [];
-  private _lockdown: boolean = false;
-  private _warningCount: number = 0;
+  private _occupied: Map<string, { x: number; y: number }> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _voronoiSites: VoronoiCell[] = [];
+  private _distanceField: number[][] = [];
 
   constructor(data: ForbiddenZoneData) {
-    this._data = { ...data, boundaries: { ...data.boundaries } };
+    this._data = { ...data };
   }
 
   get zoneId(): string {
     return this._data.zoneId;
   }
 
-  get boundaries(): Readonly<{ minX: number; maxX: number; minY: number; maxY: number }> {
-    return this._data.boundaries;
+  get radius(): number {
+    return this._data.radius;
   }
 
-  get severity(): number {
-    return this._data.severity;
+  get repulsion(): number {
+    return this._data.repulsion;
   }
 
-  get isLockedDown(): boolean {
-    return this._lockdown;
+  occupy(id: string, x: number, y: number): void {
+    this._occupied.set(id, { x, y });
+    this._buildDistanceField();
+    this._computeVoronoi();
   }
 
-  public check(position: { x: number; y: number }): ZoneCheck {
-    const b = this._data.boundaries;
-    const inside =
-      position.x >= b.minX && position.x <= b.maxX &&
-      position.y >= b.minY && position.y <= b.maxY;
-    const violated = inside;
-    let distanceToEdge = 0;
-    if (inside) {
-      distanceToEdge = Math.min(
-        position.x - b.minX,
-        b.maxX - position.x,
-        position.y - b.minY,
-        b.maxY - position.y
-      );
-    } else {
-      const dx = Math.max(b.minX - position.x, 0, position.x - b.maxX);
-      const dy = Math.max(b.minY - position.y, 0, position.y - b.maxY);
-      distanceToEdge = Math.sqrt(dx * dx + dy * dy);
-    }
-    if (violated) {
-      this._data.violations++;
-      this._violationLog.push(Date.now());
-      if (this._data.severity > 0.8) {
-        this._lockdown = true;
+  private _buildDistanceField(): void {
+    const res = 20;
+    this._distanceField = Array.from({ length: res }, (_, i) =>
+      Array.from({ length: res }, (_, j) => {
+        const x = (j / res) * this._data.radius * 2 - this._data.radius;
+        const y = (i / res) * this._data.radius * 2 - this._data.radius;
+        return Math.sqrt(x * x + y * y);
+      })
+    );
+  }
+
+  private _computeVoronoi(): void {
+    const entries = Array.from(this._occupied.entries());
+    this._voronoiSites = entries.map(([siteId, pos]) => ({
+      siteId,
+      x: pos.x,
+      y: pos.y,
+      area: 0,
+      edges: 0,
+    }));
+    const res = 50;
+    for (let i = 0; i < res; i++) {
+      for (let j = 0; j < res; j++) {
+        const x = (j / res) * this._data.radius * 2 - this._data.radius;
+        const y = (i / res) * this._data.radius * 2 - this._data.radius;
+        let bestId = '';
+        let bestDist = Infinity;
+        for (const site of this._voronoiSites) {
+          const d = Math.pow(x - site.x, 2) + Math.pow(y - site.y, 2);
+          if (d < bestDist) {
+            bestDist = d;
+            bestId = site.siteId;
+          }
+        }
+        const site = this._voronoiSites.find((s) => s.siteId === bestId);
+        if (site) site.area += 1;
       }
-    } else if (distanceToEdge < 1) {
-      this._warningCount++;
     }
-    const check: ZoneCheck = { position: { ...position }, inside, violated, distanceToEdge };
-    this._checks.push(check);
-    if (this._checks.length > 50) {
-      this._checks.shift();
+  }
+
+  distanceToCenter(x: number, y: number): number {
+    const dx = x - this._data.centerX;
+    const dy = y - this._data.centerY;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  signedDistance(x: number, y: number): number {
+    return this.distanceToCenter(x, y) - this._data.radius;
+  }
+
+  repel(x: number, y: number): { dx: number; dy: number; force: number } {
+    const dist = this.distanceToCenter(x, y);
+    if (dist > this._data.radius) {
+      return { dx: 0, dy: 0, force: 0 };
     }
-    return check;
+    const dx = x - this._data.centerX;
+    const dy = y - this._data.centerY;
+    const norm = dist || 1;
+    const force = this._data.repulsion * (1 - dist / this._data.radius);
+    return { dx: (dx / norm) * force, dy: (dy / norm) * force, force };
   }
 
-  public expandZone(delta: number): void {
-    this._data.boundaries.minX -= delta;
-    this._data.boundaries.maxX += delta;
-    this._data.boundaries.minY -= delta;
-    this._data.boundaries.maxY += delta;
+  contains(x: number, y: number): boolean {
+    return this.distanceToCenter(x, y) <= this._data.radius;
   }
 
-  public shrinkZone(delta: number): void {
-    this._data.boundaries.minX += delta;
-    this._data.boundaries.maxX -= delta;
-    this._data.boundaries.minY += delta;
-    this._data.boundaries.maxY -= delta;
+  borderDistance(x: number, y: number): number {
+    return Math.abs(this.distanceToCenter(x, y) - this._data.radius);
   }
 
-  public setSeverity(severity: number): void {
-    this._data.severity = Math.max(0, Math.min(1, severity));
+  expand(amount: number): void {
+    this._data.radius += amount;
+    this._state.expandedAt = Date.now();
   }
 
-  public liftLockdown(): void {
-    this._lockdown = false;
+  shrink(amount: number): void {
+    this._data.radius = Math.max(0, this._data.radius - amount);
+    this._state.shrunkAt = Date.now();
   }
 
-  public relocateZone(boundaries: { minX: number; maxX: number; minY: number; maxY: number }): void {
-    this._data.boundaries = { ...boundaries };
+  intersectionArea(other: ForbiddenZoneData): number {
+    const d = Math.sqrt(
+      Math.pow(this._data.centerX - other.centerX, 2) + Math.pow(this._data.centerY - other.centerY, 2)
+    );
+    const r1 = this._data.radius;
+    const r2 = other.radius;
+    if (d >= r1 + r2) return 0;
+    if (d <= Math.abs(r1 - r2)) return Math.PI * Math.min(r1, r2) ** 2;
+    const r1Sq = r1 * r1;
+    const r2Sq = r2 * r2;
+    const alpha = Math.acos((d * d + r1Sq - r2Sq) / (2 * d * r1));
+    const beta = Math.acos((d * d + r2Sq - r1Sq) / (2 * d * r2));
+    return r1Sq * alpha + r2Sq * beta - 0.5 * Math.sqrt((-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2));
   }
 
-  public computeArea(): number {
-    const b = this._data.boundaries;
-    return Math.abs((b.maxX - b.minX) * (b.maxY - b.minY));
+  largestVoronoiCell(): VoronoiCell | null {
+    if (this._voronoiSites.length === 0) return null;
+    return this._voronoiSites.reduce((best, s) => (s.area > best.area ? s : best));
   }
 
-  public isApproaching(position: { x: number; y: number }, threshold: number): boolean {
-    const check = this.check(position);
-    return !check.inside && check.distanceToEdge < threshold;
-  }
-
-  public zoneReport(): Record<string, unknown> {
+  report(): Record<string, unknown> {
     return {
       zoneId: this.zoneId,
-      boundaries: this._data.boundaries,
-      area: this.computeArea().toFixed(2),
-      severity: this._data.severity.toFixed(3),
-      violations: this._data.violations,
-      warnings: this._warningCount,
-      lockedDown: this._lockdown,
-      checkCount: this._checks.length,
+      radius: this._data.radius,
+      occupied: this._occupied.size,
+      voronoiSites: this._voronoiSites.length,
+      state: this._state,
     };
   }
 }

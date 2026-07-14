@@ -1,9 +1,3 @@
-/**
- * Kleptoplastidy - 盗质体
- * 偷取宿主的功能据为己有，将宿主的细胞器、能力或代码模块
- * 整合到自身，使其能够执行原本不属于自己的操作。
- */
-
 export interface KleptoplastidyData {
   readonly kleptoplastId: string;
   hostId: string;
@@ -17,6 +11,7 @@ export interface StolenFunction {
   source: string;
   efficiency: number;
   degrading: boolean;
+  halflife: number;
 }
 
 export class Kleptoplastidy {
@@ -25,6 +20,8 @@ export class Kleptoplastidy {
   private _usageCount: number = 0;
   private _degradationRate: number = 0.01;
   private _integrationScore: number = 0;
+  private _exponentialDecay: number = 0.693;
+  private _viabilityModel: number[] = [];
 
   constructor(data: KleptoplastidyData) {
     this._data = { ...data, stolenOrganelles: [...data.stolenOrganelles] };
@@ -50,16 +47,25 @@ export class Kleptoplastidy {
     if (this._stolenFunctions.size >= 10) {
       return false;
     }
+    const halflife = baseEfficiency > 0 ? -Math.log(0.5) / (this._degradationRate * baseEfficiency) : 100;
     const fn: StolenFunction = {
       name,
       source,
       efficiency: baseEfficiency * 0.7,
       degrading: false,
+      halflife,
     };
     this._stolenFunctions.set(name, fn);
     this._data.stolenOrganelles.push(name);
     this._data.functionalCapacity = Math.min(1, this._data.functionalCapacity + 0.1);
+    this._updateViabilityModel();
     return true;
+  }
+
+  private _updateViabilityModel(): void {
+    this._viabilityModel = Array.from(this._stolenFunctions.values()).map((fn) =>
+      Math.exp(-this._exponentialDecay * this._usageCount / (fn.halflife || 1))
+    );
   }
 
   public useStolenFunction(name: string): number {
@@ -68,8 +74,10 @@ export class Kleptoplastidy {
       return 0;
     }
     this._usageCount++;
-    const output = fn.efficiency * (1 - this._degradationRate * this._usageCount);
+    const decayFactor = Math.exp(-this._exponentialDecay * this._usageCount / (fn.halflife || 1));
+    const output = fn.efficiency * decayFactor;
     this._degradeFunction(fn);
+    this._updateViabilityModel();
     return Math.max(0, output);
   }
 
@@ -99,6 +107,7 @@ export class Kleptoplastidy {
     fn.degrading = false;
     this._degradationRate *= 0.9;
     this._integrationScore = Math.min(1, this._integrationScore + 0.1);
+    this._updateViabilityModel();
     return true;
   }
 
@@ -108,11 +117,21 @@ export class Kleptoplastidy {
     if (idx >= 0) {
       this._data.stolenOrganelles.splice(idx, 1);
     }
+    this._updateViabilityModel();
   }
 
   public isFunctionViable(name: string): boolean {
     const fn = this._stolenFunctions.get(name);
     return !!fn && fn.efficiency > 0.1 && !fn.degrading;
+  }
+
+  public meanTimeToFailure(): number {
+    if (this._stolenFunctions.size === 0) return Infinity;
+    let sum = 0;
+    for (const fn of this._stolenFunctions.values()) {
+      sum += fn.halflife;
+    }
+    return sum / this._stolenFunctions.size;
   }
 
   public kleptoplastReport(): Record<string, unknown> {
@@ -126,6 +145,7 @@ export class Kleptoplastidy {
       integrationScore: this._integrationScore.toFixed(3),
       usageCount: this._usageCount,
       retentionDays: this._data.retentionDays,
+      mtbf: this.meanTimeToFailure().toFixed(2),
     };
   }
 }

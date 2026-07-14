@@ -1,122 +1,155 @@
-/**
- * 疤痕增生模块：防御反应过度，疤痕组织异常增厚，
- * 反而成为新的弱点，限制原本功能的灵活性。
- */
-
-export interface KeloidRegion {
-  id: string;
-  originalFunction: string;
-  overgrowthFactor: number;
-  flexibilityLoss: number;
-  rigidity: number;
-  detected: boolean;
+export interface CellPosition {
+  x: number;
+  y: number;
+  density: number;
+  stiffness: number;
 }
 
-export interface OvergrowthAlert {
-  regionId: string;
-  severity: number;
-  recommendation: string;
-  triggeredAt: number;
+export interface KeloidCluster {
+  id: string;
+  cells: CellPosition[];
+  center: { x: number; y: number };
+  radius: number;
+  fractalDimension: number;
 }
 
 export class KeloidOvergrowth {
-  private _regions: Map<string, KeloidRegion> = new Map();
-  private _alerts: OvergrowthAlert[] = [];
-  private _growthRate = 0.2;
-  private _criticalThreshold = 3.0;
-  private _flexibilityCeiling = 0.9;
+  private _clusters: Map<string, KeloidCluster> = new Map();
+  private _grid: number[][] = [];
+  private _state: Record<string, unknown> = {};
+  private _aggregationSteps: number = 0;
+  private _diffusionCoefficient: number = 0.1;
 
-  detect(region: KeloidRegion): void {
-    region.detected = true;
-    this._regions.set(region.id, region);
+  constructor(gridSize: number = 50) {
+    this._grid = Array.from({ length: gridSize }, () => Array(gridSize).fill(0));
   }
 
-  stimulate(regionId: string): KeloidRegion | null {
-    const region = this._regions.get(regionId);
-    if (!region) return null;
-    region.overgrowthFactor += this._growthRate;
-    region.flexibilityLoss = Math.min(this._flexibilityCeiling, region.flexibilityLoss + this._growthRate * 0.5);
-    region.rigidity = Math.min(1, region.rigidity + this._growthRate * 0.3);
-    if (region.overgrowthFactor >= this._criticalThreshold) {
-      this._raiseAlert(region);
-    }
-    return region;
+  get clusterCount(): number {
+    return this._clusters.size;
   }
 
-  private _raiseAlert(region: KeloidRegion): void {
-    const severity = Math.min(1, region.overgrowthFactor / (this._criticalThreshold * 2));
-    const recommendation = region.overgrowthFactor > this._criticalThreshold * 1.5
-      ? 'Surgical removal required'
-      : 'Anti-inflammatory intervention recommended';
-    const alert: OvergrowthAlert = {
-      regionId: region.id,
-      severity,
-      recommendation,
-      triggeredAt: Date.now(),
-    };
-    this._alerts.push(alert);
-    if (this._alerts.length > 200) this._alerts.shift();
+  get gridSize(): number {
+    return this._grid.length;
   }
 
-  isOvergrown(regionId: string): boolean {
-    const region = this._regions.get(regionId);
-    return !!region && region.overgrowthFactor >= this._criticalThreshold;
-  }
-
-  calculateFlexibilityLoss(): number {
-    let total = 0;
-    for (const region of this._regions.values()) {
-      total += region.flexibilityLoss;
-    }
-    return Math.min(1, total);
-  }
-
-  findMostOvergrown(): KeloidRegion | null {
-    let max = 0;
-    let result: KeloidRegion | null = null;
-    for (const region of this._regions.values()) {
-      if (region.overgrowthFactor > max) {
-        max = region.overgrowthFactor;
-        result = region;
+  seedCluster(id: string, x: number, y: number, radius: number): KeloidCluster {
+    const cells: CellPosition[] = [];
+    for (let i = 0; i < radius * 2; i++) {
+      for (let j = 0; j < radius * 2; j++) {
+        const cx = x + i - radius;
+        const cy = y + j - radius;
+        const dist = Math.sqrt((cx - x) ** 2 + (cy - y) ** 2);
+        if (dist <= radius) {
+          cells.push({ x: cx, y: cy, density: 1 - dist / radius, stiffness: Math.random() });
+        }
       }
     }
-    return result;
+    const cluster: KeloidCluster = { id, cells, center: { x, y }, radius, fractalDimension: 0 };
+    this._clusters.set(id, cluster);
+    this._updateGrid(cluster);
+    this._computeFractalDimension(cluster);
+    return cluster;
   }
 
-  excise(regionId: string, reduction: number): boolean {
-    const region = this._regions.get(regionId);
-    if (!region) return false;
-    region.overgrowthFactor = Math.max(0, region.overgrowthFactor - reduction);
-    region.flexibilityLoss = Math.max(0, region.flexibilityLoss - reduction * 0.5);
-    region.rigidity = Math.max(0, region.rigidity - reduction * 0.3);
-    return true;
+  private _updateGrid(cluster: KeloidCluster): void {
+    for (const cell of cluster.cells) {
+      const gx = Math.floor(cell.x + this._grid.length / 2);
+      const gy = Math.floor(cell.y + this._grid.length / 2);
+      if (gx >= 0 && gx < this._grid.length && gy >= 0 && gy < this._grid.length) {
+        this._grid[gx][gy] = cell.density;
+      }
+    }
   }
 
-  setGrowthRate(rate: number): void {
-    this._growthRate = Math.max(0, Math.min(1, rate));
+  private _computeFractalDimension(cluster: KeloidCluster): void {
+    const scales = [1, 2, 4];
+    const counts = scales.map((s) => {
+      const boxes = new Set<string>();
+      for (const cell of cluster.cells) {
+        boxes.add(`${Math.floor(cell.x / s)},${Math.floor(cell.y / s)}`);
+      }
+      return boxes.size;
+    });
+    let slope = 0;
+    for (let i = 1; i < scales.length; i++) {
+      slope += Math.log2(counts[i] / counts[i - 1]) / Math.log2(scales[i - 1] / scales[i]);
+    }
+    cluster.fractalDimension = slope / (scales.length - 1);
   }
 
-  setCriticalThreshold(value: number): void {
-    this._criticalThreshold = Math.max(1, value);
+  diffuse(steps: number): void {
+    const size = this._grid.length;
+    for (let s = 0; s < steps; s++) {
+      const newGrid = this._grid.map((row) => [...row]);
+      for (let i = 1; i < size - 1; i++) {
+        for (let j = 1; j < size - 1; j++) {
+          const laplacian =
+            this._grid[i + 1][j] +
+            this._grid[i - 1][j] +
+            this._grid[i][j + 1] +
+            this._grid[i][j - 1] -
+            4 * this._grid[i][j];
+          newGrid[i][j] = Math.max(0, Math.min(1, this._grid[i][j] + this._diffusionCoefficient * laplacian));
+        }
+      }
+      this._grid = newGrid;
+    }
+    this._aggregationSteps += steps;
   }
 
-  getActiveAlerts(): OvergrowthAlert[] {
-    return this._alerts.slice(-20);
+  aggregate(clusterId: string, particles: number): void {
+    const cluster = this._clusters.get(clusterId);
+    if (!cluster) return;
+    for (let i = 0; i < particles; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = cluster.radius + Math.random() * 5;
+      const x = cluster.center.x + dist * Math.cos(angle);
+      const y = cluster.center.y + dist * Math.sin(angle);
+      let stuck = false;
+      while (!stuck) {
+        const neighbors = cluster.cells.filter((c) => Math.sqrt((c.x - x) ** 2 + (c.y - y) ** 2) < 2);
+        if (neighbors.length > 0) {
+          cluster.cells.push({ x, y, density: 0.5, stiffness: Math.random() });
+          stuck = true;
+        } else {
+          break;
+        }
+      }
+    }
+    this._updateGrid(cluster);
+    this._computeFractalDimension(cluster);
   }
 
-  getRegion(regionId: string): KeloidRegion | null {
-    return this._regions.get(regionId) ?? null;
+  stiffnessMatrix(clusterId: string): number[][] {
+    const cluster = this._clusters.get(clusterId);
+    if (!cluster || cluster.cells.length === 0) return [[0]];
+    const n = Math.min(cluster.cells.length, 10);
+    const matrix: number[][] = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => {
+        if (i === j) return cluster.cells[i].stiffness;
+        const dx = cluster.cells[i].x - cluster.cells[j].x;
+        const dy = cluster.cells[i].y - cluster.cells[j].y;
+        return 1 / (Math.sqrt(dx * dx + dy * dy) + 1);
+      })
+    );
+    return matrix;
   }
 
-  listOvergrownRegions(): KeloidRegion[] {
-    return Array.from(this._regions.values()).filter(r => r.overgrowthFactor >= this._criticalThreshold);
+  totalDensity(): number {
+    let sum = 0;
+    for (const row of this._grid) {
+      for (const v of row) sum += v;
+    }
+    return sum;
   }
 
-  get regionCount(): number {
-    return this._regions.size;
-  }
-
-  get overgrownCount(): number {
-    return this.listOvergrownRegions().length;
+  report(): Record<string, unknown> {
+    return {
+      clusters: this._clusters.size,
+      gridSize: this._grid.length,
+      totalDensity: this.totalDensity(),
+      aggregationSteps: this._aggregationSteps,
+      state: this._state,
+    };
   }
 }

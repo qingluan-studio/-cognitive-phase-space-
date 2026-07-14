@@ -1,8 +1,3 @@
-/**
- * 本影半径模块：完全阴影区域的覆盖范围。
- * 用于量化系统中完全遮蔽作用的影响半径。
- */
-
 export interface UmbraGeometry {
   sourceRadius: number;
   occluderRadius: number;
@@ -26,6 +21,8 @@ export class UmbraRadius {
   private _geometries: UmbraGeometry[] = [];
   private _coverage: UmbraCoverage | null = null;
   private _state: Record<string, unknown> = {};
+  private _solidAngleCache: number[] = [];
+  private _penumbraFactor: number = 1.05;
 
   constructor(config: UmbraRadiusConfig) {
     this._config = config;
@@ -49,7 +46,19 @@ export class UmbraRadius {
     };
     this._geometries.push(geometry);
     if (this._geometries.length > 30) this._geometries.shift();
+    this._computeSolidAngle(geometry);
     return geometry;
+  }
+
+  private _computeSolidAngle(g: UmbraGeometry): void {
+    if (!Number.isFinite(g.umbraLength)) {
+      this._solidAngleCache.push(0);
+      return;
+    }
+    const apexAngle = 2 * Math.atan2(g.occluderRadius, g.distance);
+    const omega = 2 * Math.PI * (1 - Math.cos(apexAngle / 2));
+    this._solidAngleCache.push(omega);
+    if (this._solidAngleCache.length > 30) this._solidAngleCache.shift();
   }
 
   computeCoverage(distance: number): UmbraCoverage {
@@ -58,8 +67,13 @@ export class UmbraRadius {
       return this._coverage;
     }
     const g = this._geometries[this._geometries.length - 1];
+    if (!Number.isFinite(g.umbraLength)) {
+      this._coverage = { radius: Infinity, area: Infinity, coneAngle: Math.PI };
+      return this._coverage;
+    }
     const radius = g.occluderRadius * (1 - distance / g.umbraLength);
-    const area = Math.PI * radius * radius;
+    const penumbraRadius = radius * this._penumbraFactor;
+    const area = Math.PI * penumbraRadius * penumbraRadius;
     const coneAngle = 2 * Math.atan2(g.occluderRadius, g.distance);
     this._coverage = { radius: Math.max(0, radius), area, coneAngle };
     return this._coverage;
@@ -92,6 +106,7 @@ export class UmbraRadius {
   reset(): void {
     this._geometries = [];
     this._coverage = null;
+    this._solidAngleCache = [];
     this._state.resetAt = Date.now();
   }
 
@@ -101,5 +116,31 @@ export class UmbraRadius {
       coverage: this._coverage,
       state: this._state,
     };
+  }
+
+  computeAngularDiameter(distance: number): number {
+    const g = this._geometries[this._geometries.length - 1];
+    if (!g) return 0;
+    return 2 * Math.atan2(g.occluderRadius, distance);
+  }
+
+  getAverageSolidAngle(): number {
+    if (this._solidAngleCache.length === 0) return 0;
+    return this._solidAngleCache.reduce((a, b) => a + b, 0) / this._solidAngleCache.length;
+  }
+
+  setPenumbraFactor(f: number): void {
+    this._penumbraFactor = Math.max(1, f);
+  }
+
+  computeObscurationRatio(targetRadius: number, distance: number): number {
+    const g = this._geometries[this._geometries.length - 1];
+    if (!g || !Number.isFinite(g.umbraLength)) return 0;
+    const umbraRadius = Math.max(0, g.occluderRadius * (1 - distance / g.umbraLength));
+    if (umbraRadius <= 0) return 0;
+    const r = Math.min(targetRadius, umbraRadius);
+    const R = Math.max(targetRadius, umbraRadius);
+    const areaRatio = (r * r) / (R * R);
+    return Math.min(1, areaRatio);
   }
 }

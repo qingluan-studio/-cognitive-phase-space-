@@ -1,110 +1,158 @@
-/**
- * 酶逻辑：用酶促反应类比加速逻辑推理。
- * 把逻辑推理视为酶催化反应，通过引入逻辑"酶"加速推理链的反应速率。
- */
-
-export type EnzymeType = 'deductive' | 'inductive' | 'abductive' | 'analogical';
-
-export interface LogicSubstrate {
-  id: string;
-  premises: string[];
-  enzymeType: EnzymeType;
-  activationEnergy: number;
-  products: string[];
+export interface EnzymeReaction {
+  substrate: string;
+  product: string;
+  velocity: number;
+  timestamp: number;
 }
 
-export interface CatalyticResult {
-  substrateId: string;
-  enzyme: EnzymeType;
-  reactionRate: number;
-  products: string[];
-  completedAt: number;
+export interface EnzymeProfile {
+  vmax: number;
+  km: number;
+  kcat: number;
+  inhibitorConstant?: number;
 }
 
 export class EnzymaticLogic {
-  private _substrates: Map<string, LogicSubstrate> = new Map();
-  private _results: CatalyticResult[] = [];
-  private _enzymeAffinity: Record<EnzymeType, number> = {
-    deductive: 1.0,
-    inductive: 0.7,
-    abductive: 0.6,
-    analogical: 0.5,
-  };
-  private _temperature = 1.0;
+  private _reactions: EnzymeReaction[] = [];
+  private _profiles: Map<string, EnzymeProfile> = new Map();
+  private _inhibitors: Map<string, number> = new Map();
+  private _state: Record<string, unknown> = {};
+  private _lineweaverBurkData: { x: number; y: number }[] = [];
+  private _michaelisMentenCurve: { substrate: number; velocity: number }[] = [];
+  private _catalyticEfficiency: number = 0;
 
-  prepare(premises: string[], enzymeType: EnzymeType = 'deductive'): LogicSubstrate {
-    const substrate: LogicSubstrate = {
-      id: `sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      premises: [...premises],
-      enzymeType,
-      activationEnergy: premises.length * 0.2,
-      products: [],
-    };
-    this._substrates.set(substrate.id, substrate);
-    return substrate;
-  }
-
-  catalyze(substrateId: string): CatalyticResult | null {
-    const substrate = this._substrates.get(substrateId);
-    if (!substrate) return null;
-    const affinity = this._enzymeAffinity[substrate.enzymeType];
-    const reactionRate = affinity * this._temperature / Math.max(0.1, substrate.activationEnergy);
-
-    const products = this._deriveProducts(substrate);
-    substrate.products = products;
-
-    const result: CatalyticResult = {
-      substrateId,
-      enzyme: substrate.enzymeType,
-      reactionRate,
-      products,
-      completedAt: Date.now(),
-    };
-    this._results.push(result);
-    if (this._results.length > 100) this._results.shift();
-    return result;
-  }
-
-  private _deriveProducts(substrate: LogicSubstrate): string[] {
-    const products: string[] = [];
-    switch (substrate.enzymeType) {
-      case 'deductive':
-        if (substrate.premises.length >= 2) {
-          products.push(`Therefore: ${substrate.premises[0]} entails ${substrate.premises[1]}`);
-        }
-        break;
-      case 'inductive':
-        products.push(`Pattern suggests: ${substrate.premises.join(', ')} generalizes.`);
-        break;
-      case 'abductive':
-        products.push(`Best explanation: ${substrate.premises[0]} explains observations.`);
-        break;
-      case 'analogical':
-        if (substrate.premises.length >= 2) {
-          products.push(`${substrate.premises[0]} is analogous to ${substrate.premises[1]}`);
-        }
-        break;
+  registerEnzyme(name: string, profile: EnzymeProfile): void {
+    this._profiles.set(name, { ...profile });
+    if (profile.km > 0 && profile.kcat > 0) {
+      this._catalyticEfficiency = profile.kcat / profile.km;
     }
-    return products;
+    this._state[`registered_${name}`] = Date.now();
   }
 
-  setEnzymeAffinity(enzyme: EnzymeType, affinity: number): void {
-    this._enzymeAffinity[enzyme] = Math.max(0, affinity);
+  get enzymeCount(): number {
+    return this._profiles.size;
   }
 
-  setTemperature(t: number): void {
-    this._temperature = Math.max(0, t);
+  get catalyticEfficiency(): number {
+    return this._catalyticEfficiency;
   }
 
-  getCatalyzed(): CatalyticResult[] {
-    return [...this._results];
+  computeVelocity(enzymeName: string, substrateConcentration: number): number {
+    const profile = this._profiles.get(enzymeName);
+    if (!profile) return 0;
+    let vmax = profile.vmax;
+    let km = profile.km;
+    const inhibitor = this._inhibitors.get(enzymeName);
+    if (inhibitor !== undefined && profile.inhibitorConstant !== undefined && profile.inhibitorConstant > 0) {
+      const alpha = 1 + inhibitor / profile.inhibitorConstant;
+      km = km * alpha;
+    }
+    const velocity = (vmax * substrateConcentration) / (km + substrateConcentration);
+    const reaction: EnzymeReaction = {
+      substrate: enzymeName,
+      product: `${enzymeName}-product`,
+      velocity,
+      timestamp: Date.now(),
+    };
+    this._reactions.push(reaction);
+    if (this._reactions.length > 200) this._reactions.shift();
+    this._michaelisMentenCurve.push({ substrate: substrateConcentration, velocity });
+    if (this._michaelisMentenCurve.length > 100) this._michaelisMentenCurve.shift();
+    if (velocity > 0 && substrateConcentration > 0) {
+      this._lineweaverBurkData.push({ x: 1 / substrateConcentration, y: 1 / velocity });
+      if (this._lineweaverBurkData.length > 100) this._lineweaverBurkData.shift();
+    }
+    return velocity;
   }
 
-  getByEnzyme(enzyme: EnzymeType): CatalyticResult[] {
-    return this._results.filter(r => r.enzyme === enzyme);
+  addInhibitor(enzymeName: string, concentration: number): void {
+    this._inhibitors.set(enzymeName, concentration);
   }
 
-  get substrateCount(): number {
-    return this._substrates.size;
+  removeInhibitor(enzymeName: string): void {
+    this._inhibitors.delete(enzymeName);
+  }
+
+  computeLineweaverBurkSlope(): number {
+    if (this._lineweaverBurkData.length < 2) return 0;
+    const n = this._lineweaverBurkData.length;
+    const sumX = this._lineweaverBurkData.reduce((s, p) => s + p.x, 0);
+    const sumY = this._lineweaverBurkData.reduce((s, p) => s + p.y, 0);
+    const sumXY = this._lineweaverBurkData.reduce((s, p) => s + p.x * p.y, 0);
+    const sumX2 = this._lineweaverBurkData.reduce((s, p) => s + p.x * p.x, 0);
+    return (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  }
+
+  estimateKmFromData(): number {
+    const slope = this.computeLineweaverBurkSlope();
+    const intercept = this._estimateIntercept();
+    if (slope === 0) return 0;
+    return slope / intercept;
+  }
+
+  private _estimateIntercept(): number {
+    if (this._lineweaverBurkData.length === 0) return 0;
+    const avgX = this._lineweaverBurkData.reduce((s, p) => s + p.x, 0) / this._lineweaverBurkData.length;
+    const avgY = this._lineweaverBurkData.reduce((s, p) => s + p.y, 0) / this._lineweaverBurkData.length;
+    const slope = this.computeLineweaverBurkSlope();
+    return avgY - slope * avgX;
+  }
+
+  averageVelocity(): number {
+    if (this._reactions.length === 0) return 0;
+    return this._reactions.reduce((acc, r) => acc + r.velocity, 0) / this._reactions.length;
+  }
+
+  maxVelocityObserved(): number {
+    if (this._reactions.length === 0) return 0;
+    return Math.max(...this._reactions.map(r => r.velocity));
+  }
+
+  getReactions(limit: number = 50): EnzymeReaction[] {
+    return this._reactions.slice(-limit);
+  }
+
+  getReactionHistory(): EnzymeReaction[] {
+    return [...this._reactions];
+  }
+
+  getProfile(name: string): EnzymeProfile | null {
+    return this._profiles.get(name) ?? null;
+  }
+
+  computeTurnoverNumber(enzymeName: string): number {
+    const profile = this._profiles.get(enzymeName);
+    return profile?.kcat ?? 0;
+  }
+
+  computeSpecificityConstant(enzymeName: string): number {
+    const profile = this._profiles.get(enzymeName);
+    if (!profile || profile.km === 0) return 0;
+    return (profile.kcat ?? 0) / profile.km;
+  }
+
+  saturationFraction(enzymeName: string, substrateConcentration: number): number {
+    const profile = this._profiles.get(enzymeName);
+    if (!profile) return 0;
+    return substrateConcentration / (profile.km + substrateConcentration);
+  }
+
+  clearReactions(): void {
+    this._reactions = [];
+    this._lineweaverBurkData = [];
+    this._michaelisMentenCurve = [];
+  }
+
+  enzymaticReport(): Record<string, unknown> {
+    return {
+      enzymeCount: this._profiles.size,
+      reactionCount: this._reactions.length,
+      averageVelocity: this.averageVelocity().toFixed(4),
+      maxVelocityObserved: this.maxVelocityObserved().toFixed(4),
+      catalyticEfficiency: this._catalyticEfficiency.toFixed(4),
+      lineweaverBurkSlope: this.computeLineweaverBurkSlope().toFixed(4),
+      estimatedKm: this.estimateKmFromData().toFixed(4),
+      state: this._state,
+    };
   }
 }

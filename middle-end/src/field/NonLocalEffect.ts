@@ -1,129 +1,141 @@
-/**
- * NonLocalEffect - 非局域效应
- * 无视空间距离的效果传递，效果强度不随距离衰减，
- * 挑战经典物理的局域性原理。
- */
-
-export interface NonLocalEffectData {
-  readonly effectId: string;
-  effectType: string;
-  intensity: number;
-  affectedNodes: string[];
+export interface EntangledPair {
+  id: string;
+  particleA: string;
+  particleB: string;
+  correlation: number;
+  measured: boolean;
 }
 
-export interface EffectApplication {
-  nodeId: string;
-  receivedIntensity: number;
-  timestamp: number;
-  acknowledged: boolean;
+export type BellViolation = {
+  sValue: number;
+  violated: boolean;
+  confidence: number;
+};
+
+export interface NonLocalConfig {
+  correlationStrength: number;
+  noiseLevel: number;
+  sampleCount: number;
 }
 
 export class NonLocalEffect {
-  private _data: NonLocalEffectData;
-  private _applications: EffectApplication[] = [];
-  private _acknowledgedNodes: Set<string> = new Set();
-  private _interferencePattern: number = 0;
-  private _synchronized: boolean = false;
+  private _config: NonLocalConfig;
+  private _pairs: EntangledPair[] = [];
+  private _bellResults: BellViolation[] = [];
+  private _meta: Record<string, unknown> = {};
+  private _correlationMatrix: number[][] = [];
+  private _tsirelsonBound: number = 2 * Math.sqrt(2);
 
-  constructor(data: NonLocalEffectData) {
-    this._data = { ...data, affectedNodes: [...data.affectedNodes] };
+  constructor(config: NonLocalConfig) {
+    this._config = config;
   }
 
-  get effectId(): string {
-    return this._data.effectId;
+  get pairCount(): number {
+    return this._pairs.length;
   }
 
-  get intensity(): number {
-    return this._data.intensity;
+  get averageCorrelation(): number {
+    if (this._pairs.length === 0) return 0;
+    return this._pairs.reduce((acc, p) => acc + p.correlation, 0) / this._pairs.length;
   }
 
-  get affectedCount(): number {
-    return this._data.affectedNodes.length;
+  get tsirelsonBound(): number {
+    return this._tsirelsonBound;
   }
 
-  public applyEffect(nodeId: string, timestamp: number): EffectApplication | null {
-    if (!this._data.affectedNodes.includes(nodeId)) {
-      return null;
-    }
-    const received = this._data.intensity;
-    const acknowledged = Math.random() < 0.9;
-    const application: EffectApplication = {
-      nodeId,
-      receivedIntensity: received,
-      timestamp,
-      acknowledged,
-    };
-    this._applications.push(application);
-    if (acknowledged) {
-      this._acknowledgedNodes.add(nodeId);
-    }
-    if (this._applications.length > 50) {
-      this._applications.shift();
-    }
-    this._updateInterference();
-    return application;
-  }
-
-  private _updateInterference(): void {
-    const ackRate = this._acknowledgedNodes.size / this._data.affectedNodes.length;
-    this._interferencePattern = ackRate;
-    this._synchronized = ackRate > 0.8;
-  }
-
-  public addNode(nodeId: string): void {
-    if (!this._data.affectedNodes.includes(nodeId)) {
-      this._data.affectedNodes.push(nodeId);
-    }
-  }
-
-  public removeNode(nodeId: string): void {
-    const idx = this._data.affectedNodes.indexOf(nodeId);
-    if (idx >= 0) {
-      this._data.affectedNodes.splice(idx, 1);
-    }
-    this._acknowledgedNodes.delete(nodeId);
-  }
-
-  public setIntensity(intensity: number): void {
-    this._data.intensity = Math.max(0, intensity);
-  }
-
-  public broadcastEffect(timestamp: number): number {
-    let count = 0;
-    this._data.affectedNodes.forEach((node) => {
-      const result = this.applyEffect(node, timestamp);
-      if (result?.acknowledged) {
-        count++;
+  private _updateCorrelationMatrix(): void {
+    const n = this._pairs.length;
+    this._correlationMatrix = [];
+    for (let i = 0; i < n; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < n; j++) {
+        if (i === j) {
+          row.push(1);
+        } else {
+          const avg = (this._pairs[i].correlation + this._pairs[j].correlation) / 2;
+          row.push(avg);
+        }
       }
-    });
-    return count;
-  }
-
-  public amplify(factor: number): void {
-    this._data.intensity *= factor;
-  }
-
-  public measureCoherence(): number {
-    if (this._applications.length === 0) {
-      return 0;
+      this._correlationMatrix.push(row);
     }
-    const intensities = this._applications.map((a) => a.receivedIntensity);
-    const mean = intensities.reduce((s, i) => s + i, 0) / intensities.length;
-    const variance = intensities.reduce((s, i) => s + (i - mean) ** 2, 0) / intensities.length;
-    return 1 - Math.min(1, variance);
   }
 
-  public effectReport(): Record<string, unknown> {
+  createPair(particleA: string, particleB: string): EntangledPair {
+    const pair: EntangledPair = {
+      id: `pair-${this._pairs.length}`,
+      particleA,
+      particleB,
+      correlation: this._config.correlationStrength,
+      measured: false,
+    };
+    this._pairs.push(pair);
+    if (this._pairs.length > 40) this._pairs.shift();
+    this._updateCorrelationMatrix();
+    return pair;
+  }
+
+  measureBell(): BellViolation {
+    const a0 = [];
+    const a1 = [];
+    const b0 = [];
+    const b1 = [];
+    for (let i = 0; i < this._config.sampleCount; i++) {
+      const noise = (Math.random() - 0.5) * this._config.noiseLevel;
+      a0.push(Math.random() < 0.5 + noise ? 1 : -1);
+      a1.push(Math.random() < 0.5 + noise * 0.8 ? 1 : -1);
+      b0.push(Math.random() < 0.5 + noise * 0.9 ? 1 : -1);
+      b1.push(Math.random() < 0.5 + noise * 0.7 ? 1 : -1);
+    }
+    const eAB = (arrA: number[], arrB: number[]) => {
+      let sum = 0;
+      for (let i = 0; i < arrA.length; i++) {
+        sum += arrA[i] * arrB[i];
+      }
+      return sum / arrA.length;
+    };
+    const sValue = Math.abs(eAB(a0, b0) + eAB(a0, b1) + eAB(a1, b0) - eAB(a1, b1));
+    const violated = sValue > 2;
+    const confidence = violated ? sValue / this._tsirelsonBound : 0;
+    const result: BellViolation = { sValue, violated, confidence };
+    this._bellResults.push(result);
+    if (this._bellResults.length > 20) this._bellResults.shift();
+    this._meta.lastBellTest = sValue;
+    return result;
+  }
+
+  propagateMeasurement(particle: string, outcome: number): string | null {
+    const pair = this._pairs.find((p) => p.particleA === particle || p.particleB === particle);
+    if (!pair || pair.measured) return null;
+    pair.measured = true;
+    pair.correlation = outcome;
+    const partner = pair.particleA === particle ? pair.particleB : pair.particleA;
+    return partner;
+  }
+
+  averageSValue(): number {
+    if (this._bellResults.length === 0) return 0;
+    return this._bellResults.reduce((acc, b) => acc + b.sValue, 0) / this._bellResults.length;
+  }
+
+  isNonLocal(): boolean {
+    return this.averageSValue() > 2;
+  }
+
+  reset(): void {
+    this._pairs = [];
+    this._bellResults = [];
+    this._correlationMatrix = [];
+    this._meta = {};
+  }
+
+  report(): Record<string, unknown> {
     return {
-      effectId: this.effectId,
-      effectType: this._data.effectType,
-      intensity: this._data.intensity.toFixed(3),
-      affectedCount: this.affectedCount,
-      acknowledgedCount: this._acknowledgedNodes.size,
-      interferencePattern: this._interferencePattern.toFixed(3),
-      synchronized: this._synchronized,
-      applicationCount: this._applications.length,
-      coherence: this.measureCoherence().toFixed(3),
+      pairs: this._pairs.length,
+      averageCorrelation: this.averageCorrelation.toFixed(4),
+      averageSValue: this.averageSValue().toFixed(4),
+      bellTests: this._bellResults.length,
+      meta: this._meta,
+      tsirelsonBound: this._tsirelsonBound.toFixed(4),
     };
   }
 }

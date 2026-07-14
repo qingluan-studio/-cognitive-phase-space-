@@ -1,8 +1,3 @@
-/**
- * 死模块金库模块：保存已死但可能未来还有用的模块遗体，
- * 在金库中维持休眠态，需要时可取回参考或部分复活。
- */
-
 export type VaultStatus = 'intact' | 'decaying' | 'fragmented' | 'dust';
 
 export interface DeadModule {
@@ -27,11 +22,31 @@ export class DeadModuleVault {
   private _accessLogs: VaultAccessLog[] = [];
   private _decayInterval = 1000 * 60 * 60;
   private _lastDecay = Date.now();
+  private _markovChain: Map<VaultStatus, Map<VaultStatus, number>> = new Map();
+  private _statusEntropy: number = 0;
+  private _fragmentationIndex: Map<string, number> = new Map();
+
+  constructor() {
+    this._initMarkovChain();
+  }
+
+  private _initMarkovChain(): void {
+    const states: VaultStatus[] = ['intact', 'decaying', 'fragmented', 'dust'];
+    for (let i = 0; i < states.length; i++) {
+      const map = new Map<VaultStatus, number>();
+      for (let j = 0; j < states.length; j++) {
+        map.set(states[j], i === j ? 0.7 : (j === i + 1 ? 0.3 : 0));
+      }
+      this._markovChain.set(states[i], map);
+    }
+  }
 
   deposit(module: DeadModule): void {
     module.preservedAt = Date.now();
     module.lastAccessedAt = null;
     this._modules.set(module.id, module);
+    this._fragmentationIndex.set(module.id, 0);
+    this._updateStatusEntropy();
   }
 
   retrieve(moduleId: string, accessor: string, purpose: string): DeadModule | null {
@@ -50,10 +65,15 @@ export class DeadModuleVault {
   }
 
   private _nextStatus(status: VaultStatus): VaultStatus {
-    const order: VaultStatus[] = ['intact', 'decaying', 'fragmented', 'dust'];
-    const index = order.indexOf(status);
-    if (index < 0 || index >= order.length - 1) return status;
-    return order[index + 1];
+    const transitions = this._markovChain.get(status);
+    if (!transitions) return status;
+    const roll = Math.random();
+    let cumulative = 0;
+    for (const [next, prob] of transitions.entries()) {
+      cumulative += prob;
+      if (roll <= cumulative) return next;
+    }
+    return status;
   }
 
   runDecay(): number {
@@ -64,10 +84,31 @@ export class DeadModuleVault {
     for (const module of this._modules.values()) {
       if (module.status !== 'dust') {
         module.status = this._nextStatus(module.status);
+        const frag = this._fragmentationIndex.get(module.id) ?? 0;
+        this._fragmentationIndex.set(module.id, frag + 0.1);
         decayed++;
       }
     }
+    this._updateStatusEntropy();
     return decayed;
+  }
+
+  private _updateStatusEntropy(): void {
+    const counts: Record<string, number> = {};
+    for (const m of this._modules.values()) {
+      counts[m.status] = (counts[m.status] ?? 0) + 1;
+    }
+    const total = this._modules.size;
+    if (total === 0) {
+      this._statusEntropy = 0;
+      return;
+    }
+    let entropy = 0;
+    for (const count of Object.values(counts)) {
+      const p = count / total;
+      entropy -= p * Math.log2(p);
+    }
+    this._statusEntropy = entropy;
   }
 
   restore(moduleId: string): boolean {
@@ -75,13 +116,17 @@ export class DeadModuleVault {
     if (!module) return false;
     if (module.status === 'dust') return false;
     module.status = 'intact';
+    this._fragmentationIndex.set(moduleId, 0);
+    this._updateStatusEntropy();
     return true;
   }
 
   extractFragment(moduleId: string, fragmentLength: number): string | null {
     const module = this._modules.get(moduleId);
     if (!module || module.status === 'dust') return null;
-    return module.code.slice(0, Math.min(fragmentLength, module.code.length));
+    const frag = this._fragmentationIndex.get(moduleId) ?? 0;
+    const effectiveLength = Math.max(1, Math.floor(fragmentLength * (1 - frag)));
+    return module.code.slice(0, Math.min(effectiveLength, module.code.length));
   }
 
   listByStatus(status: VaultStatus): DeadModule[] {
@@ -93,9 +138,11 @@ export class DeadModuleVault {
     for (const [id, m] of this._modules) {
       if (m.status === 'dust') {
         this._modules.delete(id);
+        this._fragmentationIndex.delete(id);
         purged++;
       }
     }
+    this._updateStatusEntropy();
     return purged;
   }
 
@@ -120,5 +167,15 @@ export class DeadModuleVault {
 
   get intactCount(): number {
     return this.listByStatus('intact').length;
+  }
+
+  get statusEntropy(): number {
+    return this._statusEntropy;
+  }
+
+  get averageFragmentation(): number {
+    if (this._fragmentationIndex.size === 0) return 0;
+    const sum = Array.from(this._fragmentationIndex.values()).reduce((a, b) => a + b, 0);
+    return sum / this._fragmentationIndex.size;
   }
 }

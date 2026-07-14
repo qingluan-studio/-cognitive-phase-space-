@@ -1,8 +1,3 @@
-/**
- * 地穴看守者模块：守护死亡模块的金库，防止未经授权的复活，
- * 监控所有访问尝试，对可疑行为发出警报并主动封堵。
- */
-
 export type AlertLevel = 'info' | 'warning' | 'critical' | 'lockdown';
 
 export interface WatchEntry {
@@ -28,15 +23,26 @@ export class CryptKeeper {
   private _blocked: Set<string> = new Set();
   private _lockdownActive = false;
   private _maxAttemptsBeforeAlert = 3;
+  private _rbacMatrix: Map<string, Set<string>> = new Map();
+  private _threatProbability: Map<string, number> = new Map();
+  private _securityLattice: Map<string, number> = new Map();
 
   grantAccess(entity: string): void {
     this._allowed.add(entity);
     this._blocked.delete(entity);
+    this._securityLattice.set(entity, 1);
   }
 
   blockEntity(entity: string): void {
     this._blocked.add(entity);
     this._allowed.delete(entity);
+    this._securityLattice.set(entity, -1);
+  }
+
+  assignRole(entity: string, role: string): void {
+    const roles = this._rbacMatrix.get(entity) ?? new Set();
+    roles.add(role);
+    this._rbacMatrix.set(entity, roles);
   }
 
   sealModule(moduleId: string): void {
@@ -75,6 +81,7 @@ export class CryptKeeper {
     }
     if (!this._allowed.has(requester)) {
       entry.accessAttempts++;
+      this._updateThreatProbability(requester, entry.accessAttempts);
       if (entry.accessAttempts >= this._maxAttemptsBeforeAlert) {
         this._raiseAlert(moduleId, 'critical', `Too many unauthorized attempts by ${requester}`);
         this._lockdownActive = true;
@@ -83,6 +90,13 @@ export class CryptKeeper {
     }
     entry.lastWatcher = requester;
     return true;
+  }
+
+  private _updateThreatProbability(entity: string, attempts: number): void {
+    const prior = this._threatProbability.get(entity) ?? 0.1;
+    const likelihood = 1 - Math.exp(-attempts * 0.3);
+    const posterior = (likelihood * prior) / (likelihood * prior + (1 - likelihood) * (1 - prior));
+    this._threatProbability.set(entity, posterior);
   }
 
   private _raiseAlert(moduleId: string, level: AlertLevel, message: string): void {
@@ -127,6 +141,15 @@ export class CryptKeeper {
     return this._watch.get(moduleId) ?? null;
   }
 
+  computeBellLaPadulaRead(entity: string, moduleSecurityLevel: number): boolean {
+    const entityLevel = this._securityLattice.get(entity) ?? 0;
+    return entityLevel >= moduleSecurityLevel;
+  }
+
+  getThreatProbability(entity: string): number {
+    return this._threatProbability.get(entity) ?? 0;
+  }
+
   setMaxAttemptsBeforeAlert(value: number): void {
     this._maxAttemptsBeforeAlert = Math.max(1, value);
   }
@@ -137,5 +160,9 @@ export class CryptKeeper {
 
   get isLockdownActive(): boolean {
     return this._lockdownActive;
+  }
+
+  get threatCount(): number {
+    return this._threatProbability.size;
   }
 }

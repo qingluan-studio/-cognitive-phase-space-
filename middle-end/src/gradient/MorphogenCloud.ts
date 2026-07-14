@@ -1,136 +1,183 @@
-/**
- * MorphogenCloud - 形态素云
- * 浓度梯度决定形态分化，模拟生物发育中形态素的空间分布
- * 如何指导不同区域分化为不同结构与功能。
- */
-
-export interface MorphogenCloudData {
-  readonly cloudId: string;
-  sourcePosition: number;
-  diffusionRate: number;
-  decayRate: number;
-  thresholdHigh: number;
-  thresholdLow: number;
+export interface MorphogenParticle {
+  id: string;
+  x: number;
+  y: number;
+  concentration: number;
+  diffusionCoeff: number;
 }
 
-export interface MorphogenSample {
-  position: number;
-  concentration: number;
-  fate: 'high' | 'medium' | 'low' | 'none';
+export type CloudSnapshot = {
+  particleCount: number;
+  totalMass: number;
+  centerOfMass: [number, number];
+  gyrationRadius: number;
+};
+
+export interface MorphogenConfig {
+  width: number;
+  height: number;
+  particleCount: number;
+  viscosity: number;
 }
 
 export class MorphogenCloud {
-  private _data: MorphogenCloudData;
-  private _grid: Map<number, number> = new Map();
-  private _gridSize: number = 100;
-  private _sourceStrength: number = 100;
-  private _fateMap: Map<number, string> = new Map();
+  private _config: MorphogenConfig;
+  private _particles: MorphogenParticle[] = [];
+  private _snapshots: CloudSnapshot[] = [];
+  private _state: Record<string, unknown> = {};
+  private _concentrationGrid: number[][] = [];
+  private _gridSize: number = 16;
+  private _reactionRate: number = 0.1;
 
-  constructor(data: MorphogenCloudData) {
-    this._data = { ...data };
-    this._initializeGrid();
+  constructor(config: MorphogenConfig) {
+    this._config = config;
+    this._initGrid();
   }
 
-  get cloudId(): string {
-    return this._data.cloudId;
+  get particleCount(): number {
+    return this._particles.length;
   }
 
-  get sourcePosition(): number {
-    return this._data.sourcePosition;
+  get totalMass(): number {
+    return this._particles.reduce((acc, p) => acc + p.concentration, 0);
   }
 
-  private _initializeGrid(): void {
+  get gridEntropy(): number {
+    return this._computeGridEntropy();
+  }
+
+  private _initGrid(): void {
+    this._concentrationGrid = [];
     for (let i = 0; i < this._gridSize; i++) {
-      this._grid.set(i, 0);
-    }
-  }
-
-  public emit(amount: number): void {
-    this._sourceStrength += amount;
-    const current = this._grid.get(this._data.sourcePosition) ?? 0;
-    this._grid.set(this._data.sourcePosition, current + amount);
-  }
-
-  public diffuse(): void {
-    const newGrid = new Map<number, number>();
-    for (let i = 0; i < this._gridSize; i++) {
-      const current = this._grid.get(i) ?? 0;
-      const left = this._grid.get(i - 1) ?? 0;
-      const right = this._grid.get(i + 1) ?? 0;
-      const diffused = current + this._data.diffusionRate * (left + right - 2 * current);
-      const decayed = diffused * (1 - this._data.decayRate);
-      newGrid.set(i, Math.max(0, decayed));
-    }
-    this._grid = newGrid;
-  }
-
-  public sample(position: number): MorphogenSample {
-    const concentration = this._grid.get(position) ?? 0;
-    let fate: 'high' | 'medium' | 'low' | 'none';
-    if (concentration >= this._data.thresholdHigh) {
-      fate = 'high';
-    } else if (concentration >= this._data.thresholdLow) {
-      fate = 'medium';
-    } else if (concentration > 0) {
-      fate = 'low';
-    } else {
-      fate = 'none';
-    }
-    return { position, concentration, fate };
-  }
-
-  public assignFates(): Map<number, string> {
-    this._fateMap.clear();
-    for (let i = 0; i < this._gridSize; i++) {
-      const sample = this.sample(i);
-      this._fateMap.set(i, sample.fate);
-    }
-    return new Map(this._fateMap);
-  }
-
-  public shiftSource(newPosition: number): void {
-    this._data.sourcePosition = Math.max(0, Math.min(this._gridSize - 1, newPosition));
-  }
-
-  public adjustDiffusion(factor: number): void {
-    this._data.diffusionRate = Math.max(0, Math.min(0.5, this._data.diffusionRate * factor));
-  }
-
-  public getBoundary(): { high: number; low: number } {
-    let highBound = -1;
-    let lowBound = -1;
-    for (let i = 0; i < this._gridSize; i++) {
-      const conc = this._grid.get(i) ?? 0;
-      if (highBound === -1 && conc >= this._data.thresholdHigh) {
-        highBound = i;
+      const row: number[] = [];
+      for (let j = 0; j < this._gridSize; j++) {
+        row.push(0);
       }
-      if (lowBound === -1 && conc >= this._data.thresholdLow) {
-        lowBound = i;
-        break;
+      this._concentrationGrid.push(row);
+    }
+  }
+
+  private _mapToGrid(x: number, y: number): [number, number] {
+    const gx = Math.floor((x / this._config.width) * this._gridSize);
+    const gy = Math.floor((y / this._config.height) * this._gridSize);
+    return [
+      Math.max(0, Math.min(this._gridSize - 1, gx)),
+      Math.max(0, Math.min(this._gridSize - 1, gy)),
+    ];
+  }
+
+  private _updateGrid(): void {
+    this._initGrid();
+    for (const p of this._particles) {
+      const [gx, gy] = this._mapToGrid(p.x, p.y);
+      this._concentrationGrid[gx][gy] += p.concentration;
+    }
+  }
+
+  private _computeGridEntropy(): number {
+    let entropy = 0;
+    const total = this.totalMass;
+    if (total === 0) return 0;
+    for (const row of this._concentrationGrid) {
+      for (const v of row) {
+        const p = v / total;
+        if (p > 0) {
+          entropy -= p * Math.log2(p);
+        }
       }
     }
-    return { high: highBound, low: lowBound };
+    return entropy;
   }
 
-  public clearCloud(): void {
-    this._initializeGrid();
-    this._fateMap.clear();
+  private _grayScottReaction(u: number, v: number): [number, number] {
+    const f = 0.0545;
+    const k = 0.062;
+    const reaction = u * v * v;
+    const du = -reaction + f * (1 - u);
+    const dv = reaction - (f + k) * v;
+    return [du, dv];
   }
 
-  public cloudReport(): Record<string, unknown> {
-    const concentrations = Array.from(this._grid.values());
-    const total = concentrations.reduce((s, c) => s + c, 0);
-    const max = Math.max(...concentrations);
+  emit(id: string, x: number, y: number, concentration: number): MorphogenParticle {
+    const particle: MorphogenParticle = {
+      id,
+      x,
+      y,
+      concentration,
+      diffusionCoeff: 0.1 + Math.random() * 0.4,
+    };
+    this._particles.push(particle);
+    if (this._particles.length > this._config.particleCount) {
+      this._particles.shift();
+    }
+    this._updateGrid();
+    return particle;
+  }
+
+  diffuse(dt: number): void {
+    for (const p of this._particles) {
+      const dx = (Math.random() - 0.5) * p.diffusionCoeff * dt * 10;
+      const dy = (Math.random() - 0.5) * p.diffusionCoeff * dt * 10;
+      p.x = Math.max(0, Math.min(this._config.width, p.x + dx));
+      p.y = Math.max(0, Math.min(this._config.height, p.y + dy));
+      const [du, dv] = this._grayScottReaction(p.concentration, 0.5);
+      p.concentration += (du * this._reactionRate - this._config.viscosity * p.concentration) * dt;
+      p.concentration = Math.max(0, p.concentration);
+    }
+    this._updateGrid();
+  }
+
+  snapshot(): CloudSnapshot {
+    const totalMass = this.totalMass;
+    let cx = 0;
+    let cy = 0;
+    for (const p of this._particles) {
+      cx += p.x * p.concentration;
+      cy += p.y * p.concentration;
+    }
+    const centerOfMass: [number, number] = totalMass > 0 ? [cx / totalMass, cy / totalMass] : [0, 0];
+    let rg = 0;
+    for (const p of this._particles) {
+      const dx = p.x - centerOfMass[0];
+      const dy = p.y - centerOfMass[1];
+      rg += p.concentration * (dx * dx + dy * dy);
+    }
+    rg = totalMass > 0 ? Math.sqrt(rg / totalMass) : 0;
+    const snap: CloudSnapshot = {
+      particleCount: this._particles.length,
+      totalMass,
+      centerOfMass,
+      gyrationRadius: rg,
+    };
+    this._snapshots.push(snap);
+    if (this._snapshots.length > 30) this._snapshots.shift();
+    return snap;
+  }
+
+  findPeak(): MorphogenParticle | null {
+    if (this._particles.length === 0) return null;
+    return this._particles.reduce((best, p) => (p.concentration > best.concentration ? p : best));
+  }
+
+  averageDiffusionCoeff(): number {
+    if (this._particles.length === 0) return 0;
+    return this._particles.reduce((acc, p) => acc + p.diffusionCoeff, 0) / this._particles.length;
+  }
+
+  reset(): void {
+    this._particles = [];
+    this._snapshots = [];
+    this._initGrid();
+    this._state = {};
+  }
+
+  report(): Record<string, unknown> {
     return {
-      cloudId: this.cloudId,
-      sourcePosition: this._data.sourcePosition,
-      gridSize: this._gridSize,
-      diffusionRate: this._data.diffusionRate.toFixed(3),
-      decayRate: this._data.decayRate.toFixed(3),
-      totalMorphogen: total.toFixed(2),
-      maxConcentration: max.toFixed(2),
-      sourceStrength: this._sourceStrength.toFixed(2),
-      assignedFates: this._fateMap.size,
+      particles: this._particles.length,
+      totalMass: this.totalMass.toFixed(3),
+      snapshots: this._snapshots.length,
+      state: this._state,
+      gridEntropy: this.gridEntropy.toFixed(4),
     };
   }
 }

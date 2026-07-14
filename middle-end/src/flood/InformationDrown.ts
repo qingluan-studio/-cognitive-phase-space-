@@ -1,8 +1,3 @@
-/**
- * 信息溺亡模块：在过量数据中窒息。
- * 模拟系统在数据过载下的认知衰减，超过临界点后失去分辨能力。
- */
-
 export interface InformationDrownData {
   intake: number;
   lungCapacity: number;
@@ -15,12 +10,16 @@ export class InformationDrown {
   private _lungCapacity: number;
   private _breathLeft: number;
   private _drowning: boolean;
+  private _intakeHistory: number[];
+  private _cognitiveLoad: number;
 
   constructor(lungCapacity: number = 500) {
     this._intake = 0;
     this._lungCapacity = lungCapacity;
     this._breathLeft = lungCapacity;
     this._drowning = false;
+    this._intakeHistory = [];
+    this._cognitiveLoad = 0;
   }
 
   get intake(): number {
@@ -35,9 +34,16 @@ export class InformationDrown {
     return this._breathLeft;
   }
 
+  get cognitiveLoad(): number {
+    return this._cognitiveLoad;
+  }
+
   public swallow(volume: number): void {
     this._intake += volume;
     this._breathLeft -= volume;
+    this._intakeHistory.push(volume);
+    if (this._intakeHistory.length > 50) this._intakeHistory.shift();
+    this._cognitiveLoad = this._computeCognitiveLoad();
     if (this._breathLeft <= 0) {
       this._drowning = true;
       this._breathLeft = 0;
@@ -47,11 +53,13 @@ export class InformationDrown {
   public exhale(): void {
     this._breathLeft = Math.min(this._lungCapacity, this._breathLeft + this._lungCapacity * 0.2);
     if (this._breathLeft > this._lungCapacity * 0.3) this._drowning = false;
+    this._cognitiveLoad = this._computeCognitiveLoad();
   }
 
   public surface(): void {
     this._breathLeft = this._lungCapacity;
     this._drowning = false;
+    this._cognitiveLoad = 0;
   }
 
   public cough(): number {
@@ -72,5 +80,29 @@ export class InformationDrown {
   public filter(predicate: (chunk: unknown) => boolean, data: unknown[]): unknown[] {
     if (this._drowning) return [];
     return data.filter(predicate);
+  }
+
+  public computeIntakeEntropy(): number {
+    if (this._intakeHistory.length === 0) return 0;
+    const mean = this._intakeHistory.reduce((a, b) => a + b, 0) / this._intakeHistory.length;
+    const variance = this._intakeHistory.reduce((s, v) => s + (v - mean) ** 2, 0) / this._intakeHistory.length;
+    return 0.5 * Math.log2(2 * Math.PI * Math.E * Math.max(variance, 1e-10));
+  }
+
+  public predictDrowningTime(): number {
+    if (this._breathLeft <= 0) return 0;
+    const avgIntake = this._intakeHistory.length > 0
+      ? this._intakeHistory.reduce((a, b) => a + b, 0) / this._intakeHistory.length
+      : 0;
+    return avgIntake > 0 ? this._breathLeft / avgIntake : Infinity;
+  }
+
+  public computeLungUtilization(): number {
+    return 1 - this._breathLeft / this._lungCapacity;
+  }
+
+  private _computeCognitiveLoad(): number {
+    const ratio = this._intake / this._lungCapacity;
+    return ratio * ratio / (1 + ratio * ratio);
   }
 }

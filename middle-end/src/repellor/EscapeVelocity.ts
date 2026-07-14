@@ -1,119 +1,131 @@
-/**
- * EscapeVelocity - 逃逸速度
- * 脱离吸引子引力束缚所需的最小速度，低于此速度将被
- * 拉回吸引子，高于此速度则能逃逸到无穷远。
- */
-
-export interface EscapeVelocityData {
-  readonly escapeId: string;
-  attractorMass: number;
-  gravitationalConstant: number;
-  currentDistance: number;
+export interface EscapeOrbit {
+  semiMajorAxis: number;
+  eccentricity: number;
+  inclination: number;
+  velocity: number;
 }
 
-export interface EscapeAttempt {
-  velocity: number;
-  required: number;
-  escaped: boolean;
-  trajectoryType: 'escape' | 'bound' | 'circular';
+export interface EscapeBody {
+  id: string;
+  mass: number;
+  position: { x: number; y: number };
+  velocity: { x: number; y: number };
 }
 
 export class EscapeVelocity {
-  private _data: EscapeVelocityData;
-  private _attempts: EscapeAttempt[] = [];
-  private _successfulEscapes: number = 0;
-  private _failedEscapes: number = 0;
-  private _currentVelocity: number = 0;
+  private _bodies: Map<string, EscapeBody> = new Map();
+  private _orbits: Map<string, EscapeOrbit> = new Map();
+  private _gravitationalConstant: number = 6.67430e-11;
+  private _state: Record<string, unknown> = {};
+  private _hillSphereCache: Map<string, number> = new Map();
 
-  constructor(data: EscapeVelocityData) {
-    this._data = { ...data };
+  constructor() {}
+
+  get bodyCount(): number {
+    return this._bodies.size;
   }
 
-  get escapeId(): string {
-    return this._data.escapeId;
+  registerBody(id: string, mass: number, x: number, y: number, vx: number, vy: number): void {
+    this._bodies.set(id, { id, mass, position: { x, y }, velocity: { x: vx, y: vy } });
+    this._computeOrbit(id);
+    this._computeHillSphere(id);
   }
 
-  get currentDistance(): number {
-    return this._data.currentDistance;
+  private _computeOrbit(id: string): void {
+    const body = this._bodies.get(id);
+    if (!body) return;
+    const r = Math.sqrt(body.position.x ** 2 + body.position.y ** 2);
+    const v = Math.sqrt(body.velocity.x ** 2 + body.velocity.y ** 2);
+    const mu = this._gravitationalConstant * body.mass * 1e15;
+    const specificEnergy = v * v / 2 - mu / r;
+    const semiMajorAxis = -mu / (2 * specificEnergy);
+    const h = r * v;
+    const eccentricity = Math.sqrt(1 + (2 * specificEnergy * h * h) / (mu * mu));
+    this._orbits.set(id, { semiMajorAxis, eccentricity, inclination: 0, velocity: v });
   }
 
-  public computeRequiredVelocity(): number {
-    return Math.sqrt(
-      (2 * this._data.gravitationalConstant * this._data.attractorMass) /
-        Math.max(0.001, this._data.currentDistance)
+  private _computeHillSphere(id: string): void {
+    const body = this._bodies.get(id);
+    if (!body) return;
+    const primary = Array.from(this._bodies.values()).find((b) => b.mass > body.mass * 10);
+    if (!primary) return;
+    const a = Math.sqrt(
+      Math.pow(body.position.x - primary.position.x, 2) + Math.pow(body.position.y - primary.position.y, 2)
     );
+    const e = this._orbits.get(id)?.eccentricity ?? 0;
+    const hill = a * (1 - e) * Math.pow(body.mass / (3 * primary.mass), 1 / 3);
+    this._hillSphereCache.set(id, hill);
   }
 
-  public attemptEscape(velocity: number): EscapeAttempt {
-    this._currentVelocity = velocity;
-    const required = this.computeRequiredVelocity();
-    let escaped: boolean;
-    let trajectoryType: 'escape' | 'bound' | 'circular';
-    if (velocity > required * 1.05) {
-      escaped = true;
-      trajectoryType = 'escape';
-      this._successfulEscapes++;
-    } else if (velocity < required * 0.95) {
-      escaped = false;
-      trajectoryType = 'bound';
-      this._failedEscapes++;
-    } else {
-      escaped = false;
-      trajectoryType = 'circular';
-    }
-    const attempt: EscapeAttempt = { velocity, required, escaped, trajectoryType };
-    this._attempts.push(attempt);
-    if (this._attempts.length > 40) {
-      this._attempts.shift();
-    }
-    return attempt;
+  escapeVelocity(bodyId: string): number {
+    const body = this._bodies.get(bodyId);
+    if (!body) return Infinity;
+    const r = Math.sqrt(body.position.x ** 2 + body.position.y ** 2);
+    const mu = this._gravitationalConstant * body.mass * 1e15;
+    return Math.sqrt((2 * mu) / r);
   }
 
-  public setVelocity(velocity: number): void {
-    this._currentVelocity = Math.max(0, velocity);
+  visViva(bodyId: string): number {
+    const body = this._bodies.get(bodyId);
+    const orbit = this._orbits.get(bodyId);
+    if (!body || !orbit) return 0;
+    const r = Math.sqrt(body.position.x ** 2 + body.position.y ** 2);
+    const mu = this._gravitationalConstant * body.mass * 1e15;
+    return Math.sqrt(mu * (2 / r - 1 / orbit.semiMajorAxis));
   }
 
-  public changeDistance(newDistance: number): void {
-    this._data.currentDistance = Math.max(0.001, newDistance);
+  isEscaping(bodyId: string): boolean {
+    const body = this._bodies.get(bodyId);
+    if (!body) return false;
+    const v = Math.sqrt(body.velocity.x ** 2 + body.velocity.y ** 2);
+    return v >= this.escapeVelocity(bodyId);
   }
 
-  public adjustMass(delta: number): void {
-    this._data.attractorMass = Math.max(0.001, this._data.attractorMass + delta);
-  }
-
-  public boost(delta: number): number {
-    this._currentVelocity += delta;
-    return this._currentVelocity;
-  }
-
-  public computeOrbitalVelocity(): number {
-    return Math.sqrt(
-      (this._data.gravitationalConstant * this._data.attractorMass) /
-        Math.max(0.001, this._data.currentDistance)
+  jacobiIntegral(bodyId: string, primaryId: string): number {
+    const body = this._bodies.get(bodyId);
+    const primary = this._bodies.get(primaryId);
+    if (!body || !primary) return 0;
+    const r = Math.sqrt(body.position.x ** 2 + body.position.y ** 2);
+    const r2 = Math.sqrt(
+      Math.pow(body.position.x - primary.position.x, 2) + Math.pow(body.position.y - primary.position.y, 2)
     );
+    const v2 = body.velocity.x ** 2 + body.velocity.y ** 2;
+    const omega = Math.sqrt(this._gravitationalConstant * primary.mass * 1e15 / Math.pow(r2, 3));
+    return v2 / 2 - this._gravitationalConstant * primary.mass * 1e15 / r2 - 0.5 * omega * omega * r * r;
   }
 
-  public marginToEscape(): number {
-    return this._currentVelocity - this.computeRequiredVelocity();
-  }
-
-  public willEscape(velocity: number): boolean {
-    return velocity >= this.computeRequiredVelocity();
-  }
-
-  public escapeReport(): Record<string, unknown> {
+  nBodyPerturbation(bodyId: string, dt: number): { dx: number; dy: number; dvx: number; dvy: number } {
+    const body = this._bodies.get(bodyId);
+    if (!body) return { dx: 0, dy: 0, dvx: 0, dvy: 0 };
+    let ax = 0;
+    let ay = 0;
+    for (const other of this._bodies.values()) {
+      if (other.id === bodyId) continue;
+      const dx = other.position.x - body.position.x;
+      const dy = other.position.y - body.position.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const a = (this._gravitationalConstant * other.mass * 1e15) / (dist * dist * dist);
+      ax += a * dx;
+      ay += a * dy;
+    }
     return {
-      escapeId: this.escapeId,
-      attractorMass: this._data.attractorMass.toFixed(3),
-      gravitationalConstant: this._data.gravitationalConstant.toFixed(4),
-      currentDistance: this._data.currentDistance.toFixed(3),
-      currentVelocity: this._currentVelocity.toFixed(3),
-      requiredEscapeVelocity: this.computeRequiredVelocity().toFixed(3),
-      orbitalVelocity: this.computeOrbitalVelocity().toFixed(3),
-      marginToEscape: this.marginToEscape().toFixed(3),
-      successfulEscapes: this._successfulEscapes,
-      failedEscapes: this._failedEscapes,
-      attemptCount: this._attempts.length,
+      dx: body.velocity.x * dt,
+      dy: body.velocity.y * dt,
+      dvx: ax * dt,
+      dvy: ay * dt,
+    };
+  }
+
+  hillSphere(bodyId: string): number {
+    return this._hillSphereCache.get(bodyId) ?? 0;
+  }
+
+  report(): Record<string, unknown> {
+    const orbits = Array.from(this._orbits.entries()).map(([id, o]) => ({ id, ...o }));
+    return {
+      bodies: this._bodies.size,
+      orbits,
+      state: this._state,
     };
   }
 }
