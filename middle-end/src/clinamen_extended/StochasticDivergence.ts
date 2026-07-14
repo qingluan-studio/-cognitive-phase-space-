@@ -1,8 +1,3 @@
-/**
- * 随机发散：利用随机性故意偏离收敛点。
- * 在算法趋向收敛时主动注入发散扰动，避免陷入局部最优与思维僵化。
- */
-
 export type DivergenceStrategy = 'gaussian' | 'uniform' | 'levy' | 'burst';
 
 export interface DivergenceEvent {
@@ -11,6 +6,7 @@ export interface DivergenceEvent {
   divergedPoint: number;
   magnitude: number;
   strategy: DivergenceStrategy;
+  varianceRatio: number;
 }
 
 export interface DivergenceConfig {
@@ -18,6 +14,7 @@ export interface DivergenceConfig {
   triggerThreshold: number;
   magnitude: number;
   cooldownSteps: number;
+  adaptive: boolean;
 }
 
 export class StochasticDivergence {
@@ -25,6 +22,8 @@ export class StochasticDivergence {
   private _events: DivergenceEvent[] = [];
   private _lastDivergenceStep = -Infinity;
   private _convergenceHistory: number[] = [];
+  private _magnitudeHistory: number[] = [];
+  private _windowSize = 10;
 
   constructor(config?: Partial<DivergenceConfig>) {
     this._config = {
@@ -32,6 +31,7 @@ export class StochasticDivergence {
       triggerThreshold: config?.triggerThreshold ?? 0.01,
       magnitude: config?.magnitude ?? 1.0,
       cooldownSteps: config?.cooldownSteps ?? 10,
+      adaptive: config?.adaptive ?? true,
     };
   }
 
@@ -39,18 +39,24 @@ export class StochasticDivergence {
     this._convergenceHistory.push(point);
     if (this._convergenceHistory.length > 50) this._convergenceHistory.shift();
 
-    if (!this._isConverging()) return null;
+    if (this._convergenceHistory.length < this._windowSize) return null;
     if (iteration - this._lastDivergenceStep < this._config.cooldownSteps) return null;
+    const varianceRatio = this._varianceRatioTest();
+    if (varianceRatio > this._config.triggerThreshold) return null;
 
-    return this._diverge(point, iteration);
+    return this._diverge(point, iteration, varianceRatio);
   }
 
   forceDiverge(point: number, iteration: number): DivergenceEvent {
-    return this._diverge(point, iteration);
+    const vr = this._varianceRatioTest();
+    return this._diverge(point, iteration, vr);
   }
 
-  private _diverge(point: number, iteration: number): DivergenceEvent {
-    const magnitude = this._config.magnitude * this._sampleMagnitude();
+  private _diverge(point: number, iteration: number, varianceRatio: number): DivergenceEvent {
+    const adaptiveMag = this._config.adaptive
+      ? this._config.magnitude * (1 + Math.abs(varianceRatio - this._config.triggerThreshold) * 10)
+      : this._config.magnitude;
+    const magnitude = adaptiveMag * this._sampleMagnitude();
     const divergedPoint = point + magnitude;
     const event: DivergenceEvent = {
       iteration,
@@ -58,9 +64,12 @@ export class StochasticDivergence {
       divergedPoint,
       magnitude,
       strategy: this._config.strategy,
+      varianceRatio,
     };
     this._events.push(event);
     if (this._events.length > 100) this._events.shift();
+    this._magnitudeHistory.push(Math.abs(magnitude));
+    if (this._magnitudeHistory.length > 32) this._magnitudeHistory.shift();
     this._lastDivergenceStep = iteration;
     return event;
   }
@@ -73,34 +82,42 @@ export class StochasticDivergence {
     this._config.magnitude = Math.max(0, m);
   }
 
-  getEvents(): DivergenceEvent[] {
-    return [...this._events];
+  getEvents(): DivergenceEvent[] { return [...this._events]; }
+  get divergenceCount(): number { return this._events.length; }
+  get averageMagnitude(): number {
+    if (this._magnitudeHistory.length === 0) return 0;
+    return this._magnitudeHistory.reduce((s, v) => s + v, 0) / this._magnitudeHistory.length;
   }
 
-  get divergenceCount(): number {
-    return this._events.length;
-  }
-
-  private _isConverging(): boolean {
-    if (this._convergenceHistory.length < 5) return false;
-    const recent = this._convergenceHistory.slice(-5);
-    let delta = 0;
-    for (let i = 1; i < recent.length; i++) {
-      delta += Math.abs(recent[i] - recent[i - 1]);
+  private _varianceRatioTest(): number {
+    if (this._convergenceHistory.length < this._windowSize * 2) {
+      const recent = this._convergenceHistory.slice(-this._windowSize);
+      return this._stdDev(recent);
     }
-    return delta / (recent.length - 1) < this._config.triggerThreshold;
+    const recent = this._convergenceHistory.slice(-this._windowSize);
+    const prior = this._convergenceHistory.slice(-this._windowSize * 2, -this._windowSize);
+    const v1 = this._variance(recent);
+    const v2 = this._variance(prior);
+    if (v2 === 0) return v1;
+    return v1 / v2;
+  }
+
+  private _variance(values: number[]): number {
+    if (values.length < 2) return 0;
+    const mean = values.reduce((s, v) => s + v, 0) / values.length;
+    return values.reduce((s, v) => s + (v - mean) ** 2, 0) / (values.length - 1);
+  }
+
+  private _stdDev(values: number[]): number {
+    return Math.sqrt(this._variance(values));
   }
 
   private _sampleMagnitude(): number {
     switch (this._config.strategy) {
-      case 'gaussian':
-        return this._gaussian() ;
-      case 'uniform':
-        return Math.random() * 2 - 1;
-      case 'levy':
-        return this._gaussian() / Math.max(0.01, Math.random());
-      case 'burst':
-        return Math.random() < 0.1 ? 5 : 0;
+      case 'gaussian': return this._gaussian();
+      case 'uniform': return Math.random() * 2 - 1;
+      case 'levy': return this._gaussian() / Math.max(0.01, Math.random());
+      case 'burst': return Math.random() < 0.1 ? 5 : 0;
     }
   }
 

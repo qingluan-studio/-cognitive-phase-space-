@@ -1,8 +1,3 @@
-/**
- * 共振级联模块：一次共振事件触发后续模块的连锁共振。
- * 模拟能量沿频率链逐级放大的雪崩过程。
- */
-
 export interface CascadeStage {
   level: number;
   frequency: number;
@@ -27,6 +22,8 @@ export class ResonanceCascade {
   private _config: CascadeConfig;
   private _stages: CascadeStage[] = [];
   private _active: boolean = false;
+  private _iterations: number = 0;
+  private _dissipation: number = 0;
   private _triggerLog: Record<string, unknown> = {};
 
   constructor(config: CascadeConfig) {
@@ -44,6 +41,14 @@ export class ResonanceCascade {
 
   get totalGain(): number {
     return this._stages.reduce((acc, s) => acc * (s.triggered ? s.amplitude : 1), 1);
+  }
+
+  get propagationVelocity(): number {
+    if (this._stages.length < 2) return 0;
+    const triggered = this._stages.filter(s => s.triggered);
+    if (triggered.length < 2) return 0;
+    const df = triggered[triggered.length - 1].frequency - triggered[0].frequency;
+    return df / Math.max(1, this._iterations);
   }
 
   private _seedStages(): void {
@@ -67,6 +72,7 @@ export class ResonanceCascade {
     this._stages[0].amplitude = amplitude;
     this._cascadeDown();
     this._triggerLog.ignitedAt = Date.now();
+    this._triggerLog.seedAmplitude = amplitude;
     return true;
   }
 
@@ -74,19 +80,59 @@ export class ResonanceCascade {
     for (let i = 1; i < this._stages.length; i++) {
       const prev = this._stages[i - 1];
       const curr = this._stages[i];
-      if (prev.triggered && prev.amplitude * curr.amplitude >= this._config.threshold) {
+      const couplingFactor = 1 / (1 + 0.5 * Math.abs(curr.frequency - prev.frequency) / prev.frequency);
+      const transferred = prev.triggered ? prev.amplitude * curr.amplitude * couplingFactor : 0;
+      if (transferred >= this._config.threshold) {
         curr.triggered = true;
-        curr.amplitude = prev.amplitude * curr.amplitude;
+        curr.amplitude = transferred;
+        this._dissipation += prev.amplitude * (1 - couplingFactor);
       } else {
         break;
       }
     }
   }
 
+  lyapunovExponent(): number {
+    const amps = this._stages.filter(s => s.triggered).map(s => Math.log(Math.max(1e-9, s.amplitude)));
+    if (amps.length < 2) return 0;
+    const n = amps.length;
+    const mean = amps.reduce((a, b) => a + b, 0) / n;
+    let variance = 0;
+    for (const a of amps) variance += (a - mean) * (a - mean);
+    variance /= n;
+    return mean - 0.5 * variance;
+  }
+
+  qualityFactor(level: number): number {
+    if (level < 0 || level >= this._stages.length) return 0;
+    const stage = this._stages[level];
+    if (!stage.triggered) return 0;
+    return stage.frequency / Math.max(1e-9, this._config.threshold);
+  }
+
+  energyDistribution(): number[] {
+    const total = this._stages.reduce((s, x) => s + (x.triggered ? x.amplitude * x.amplitude : 0), 0);
+    if (total <= 0) return this._stages.map(() => 0);
+    return this._stages.map(s => (s.triggered ? (s.amplitude * s.amplitude) / total : 0));
+  }
+
+  spectralCentroid(): number {
+    let weighted = 0;
+    let total = 0;
+    for (const s of this._stages) {
+      if (s.triggered) {
+        weighted += s.frequency * s.amplitude;
+        total += s.amplitude;
+      }
+    }
+    return total > 0 ? weighted / total : 0;
+  }
+
   propagate(): CascadeReport {
     if (!this._active) {
       return { stages: [...this._stages], totalGain: this.totalGain, terminated: true };
     }
+    this._iterations++;
     this._cascadeDown();
     const terminated = this._stages.every((s) => !s.triggered);
     if (terminated) this._active = false;
@@ -108,6 +154,9 @@ export class ResonanceCascade {
       active: this._active,
       stageCount: this._stages.length,
       totalGain: this.totalGain,
+      lyapunovExponent: this.lyapunovExponent(),
+      spectralCentroid: this.spectralCentroid(),
+      dissipation: this._dissipation,
       triggerLog: this._triggerLog,
     };
   }

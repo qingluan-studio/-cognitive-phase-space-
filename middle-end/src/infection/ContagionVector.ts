@@ -1,8 +1,3 @@
-/**
- * 传染向量：思想传播的路径。
- * 维护思想病毒在不同宿主间传播的有向网络，每条边记录传播概率与延迟。
- */
-
 export interface VectorEdge {
   id: string;
   sourceHost: string;
@@ -23,6 +18,7 @@ export class ContagionVector {
   private _edges: Map<string, VectorEdge> = new Map();
   private _transmissions: TransmissionRecord[] = [];
   private _adjacency: Map<string, Set<string>> = new Map();
+  private _edgeWeights: Map<string, number> = new Map();
 
   addEdge(edge: VectorEdge): void {
     this._edges.set(edge.id, edge);
@@ -30,6 +26,7 @@ export class ContagionVector {
       this._adjacency.set(edge.sourceHost, new Set());
     }
     this._adjacency.get(edge.sourceHost)!.add(edge.targetHost);
+    this._edgeWeights.set(edge.id, edge.transmissionProbability);
   }
 
   transmit(edgeId: string, payloadId: string): TransmissionRecord | null {
@@ -44,29 +41,87 @@ export class ContagionVector {
     };
     this._transmissions.push(record);
     if (this._transmissions.length > 200) this._transmissions.shift();
+    if (success) {
+      this._reinforcePath(edge.sourceHost, edge.targetHost, 0.02);
+    }
     return record;
   }
 
-  findPath(from: string, to: string): string[] | null {
-    const visited = new Set<string>();
-    const queue: { node: string; path: string[] }[] = [{ node: from, path: [from] }];
-    while (queue.length > 0) {
-      const { node, path } = queue.shift()!;
-      if (node === to) return path;
-      if (visited.has(node)) continue;
-      visited.add(node);
-      const neighbors = this._adjacency.get(node) ?? new Set();
-      for (const n of neighbors) {
-        if (!visited.has(n)) queue.push({ node: n, path: [...path, n] });
+  private _reinforcePath(source: string, target: string, amount: number): void {
+    for (const edge of this._edges.values()) {
+      if (edge.sourceHost === source && edge.targetHost === target) {
+        edge.transmissionProbability = Math.min(1, edge.transmissionProbability + amount);
+        this._edgeWeights.set(edge.id, edge.transmissionProbability);
       }
     }
-    return null;
+  }
+
+  findPath(from: string, to: string): string[] | null {
+    const distances = new Map<string, number>();
+    const previous = new Map<string, string | null>();
+    const visited = new Set<string>();
+    for (const node of this._allNodes()) {
+      distances.set(node, Infinity);
+      previous.set(node, null);
+    }
+    distances.set(from, 0);
+    while (visited.size < distances.size) {
+      let current: string | null = null;
+      let minDist = Infinity;
+      for (const [node, dist] of distances) {
+        if (!visited.has(node) && dist < minDist) {
+          minDist = dist;
+          current = node;
+        }
+      }
+      if (current === null || current === to) break;
+      visited.add(current);
+      const neighbors = this._adjacency.get(current) ?? new Set();
+      for (const n of neighbors) {
+        const edgeWeight = this._edgeWeight(current, n);
+        const cost = 1 - edgeWeight;
+        const alt = (distances.get(current) ?? Infinity) + cost;
+        if (alt < (distances.get(n) ?? Infinity)) {
+          distances.set(n, alt);
+          previous.set(n, current);
+        }
+      }
+    }
+    if (!previous.has(to) || previous.get(to) === null && from !== to) {
+      return distances.get(to) === Infinity ? null : [from, to];
+    }
+    const path: string[] = [];
+    let cur: string | null = to;
+    while (cur !== null) {
+      path.unshift(cur);
+      cur = previous.get(cur) ?? null;
+    }
+    return path[0] === from ? path : null;
+  }
+
+  private _edgeWeight(source: string, target: string): number {
+    for (const edge of this._edges.values()) {
+      if (edge.sourceHost === source && edge.targetHost === target && edge.active) {
+        return edge.transmissionProbability;
+      }
+    }
+    return 0;
+  }
+
+  private _allNodes(): Set<string> {
+    const nodes = new Set<string>();
+    for (const edge of this._edges.values()) {
+      nodes.add(edge.sourceHost);
+      nodes.add(edge.targetHost);
+    }
+    return nodes;
   }
 
   strengthenEdge(edgeId: string, factor: number): VectorEdge | null {
     const edge = this._edges.get(edgeId);
     if (!edge) return null;
     edge.transmissionProbability = Math.min(1, edge.transmissionProbability * factor);
+    this._edgeWeights.set(edgeId, edge.transmissionProbability);
     return edge;
   }
 
@@ -79,6 +134,29 @@ export class ContagionVector {
       }
     }
     return count;
+  }
+
+  computeBasicReproductionNumber(): number {
+    if (this._edges.size === 0) return 0;
+    const outDegree = new Map<string, number>();
+    for (const edge of this._edges.values()) {
+      if (edge.active) {
+        outDegree.set(edge.sourceHost, (outDegree.get(edge.sourceHost) ?? 0) + edge.transmissionProbability);
+      }
+    }
+    const total = Array.from(outDegree.values()).reduce((s, v) => s + v, 0);
+    return total / outDegree.size;
+  }
+
+  identifyBridges(): string[] {
+    const bridges: string[] = [];
+    for (const edge of this._edges.values()) {
+      if (!edge.active) continue;
+      const targetHasOther = Array.from(this._edges.values())
+        .some(e => e.id !== edge.id && e.active && e.targetHost === edge.targetHost);
+      if (!targetHasOther) bridges.push(edge.id);
+    }
+    return bridges;
   }
 
   getEdge(id: string): VectorEdge | null {

@@ -1,9 +1,3 @@
-/**
- * SwallowtailShadow - 燕尾阴影
- * 更高阶的突变几何，燕尾突变的特征曲面在控制参数空间
- * 中投射出复杂的阴影区域，包含多重折叠与尖点。
- */
-
 export interface SwallowtailShadowData {
   readonly swallowtailId: string;
   controlA: number;
@@ -16,6 +10,7 @@ export interface ShadowRegion {
   regionType: 'stable' | 'unstable' | 'shadow' | 'cusp';
   stateValue: number;
   boundaries: number[];
+  potentialDepth: number;
 }
 
 export class SwallowtailShadow {
@@ -46,10 +41,6 @@ export class SwallowtailShadow {
     const a = this._data.controlA;
     const b = this._data.controlB;
     const c = this._data.controlC;
-    const potential = this._data.stateValue ** 5 / 5
-      + a * this._data.stateValue ** 3 / 3
-      + b * this._data.stateValue ** 2 / 2
-      + c * this._data.stateValue;
     const discriminant = 4 * a ** 3 * c - a ** 2 * b ** 2 - 18 * a * b * c + 4 * b ** 3 + 27 * c ** 2;
     if (discriminant < 0) {
       this._inShadow = true;
@@ -60,20 +51,33 @@ export class SwallowtailShadow {
     this._foldCount = discriminant < 0 ? 3 : (discriminant === 0 ? 2 : 1);
   }
 
+  public computePotential(x: number): number {
+    return x ** 5 / 5 + this._data.controlA * x ** 3 / 3 + this._data.controlB * x ** 2 / 2 + this._data.controlC * x;
+  }
+
+  public computeDerivative(x: number): number {
+    return x ** 4 + this._data.controlA * x ** 2 + this._data.controlB * x + this._data.controlC;
+  }
+
   public computeEquilibria(): number[] {
-    const a = this._data.controlA;
-    const b = this._data.controlB;
-    const c = this._data.controlC;
     const equilibria: number[] = [];
-    for (let x = -10; x <= 10; x += 0.01) {
-      const deriv = x ** 4 + a * x ** 2 + b * x + c;
-      if (Math.abs(deriv) < 0.05) {
-        if (!equilibria.some((e) => Math.abs(e - x) < 0.05)) {
-          equilibria.push(x);
-        }
+    const seeds = [-3, -2, -1, -0.5, 0, 0.5, 1, 2, 3];
+    for (const seed of seeds) {
+      let x = seed;
+      for (let i = 0; i < 30; i++) {
+        const d = this.computeDerivative(x);
+        const d2 = 4 * x ** 3 + 2 * this._data.controlA * x + this._data.controlB;
+        if (Math.abs(d2) < 1e-12) break;
+        const step = d / d2;
+        x -= step;
+        if (Math.abs(step) < 1e-9) break;
+      }
+      if (Math.abs(this.computeDerivative(x)) < 1e-5 &&
+          !equilibria.some((e) => Math.abs(e - x) < 0.05)) {
+        equilibria.push(x);
       }
     }
-    return equilibria;
+    return equilibria.sort((a, b) => a - b);
   }
 
   public setControls(a: number, b: number, c: number): ShadowRegion {
@@ -92,15 +96,17 @@ export class SwallowtailShadow {
     } else {
       regionType = 'unstable';
     }
+    const potentialDepth = equilibria.length > 0
+      ? Math.min(...equilibria.map((e) => this.computePotential(e)))
+      : 0;
     const region: ShadowRegion = {
       regionType,
       stateValue: this._data.stateValue,
       boundaries: equilibria,
+      potentialDepth,
     };
     this._regions.push(region);
-    if (this._regions.length > 30) {
-      this._regions.shift();
-    }
+    if (this._regions.length > 30) this._regions.shift();
     return region;
   }
 
@@ -110,10 +116,7 @@ export class SwallowtailShadow {
   }
 
   public projectToPlane(): { x: number; y: number } {
-    return {
-      x: this._data.controlB,
-      y: this._data.controlC,
-    };
+    return { x: this._data.controlB, y: this._data.controlC };
   }
 
   public computeShadowArea(): number {
@@ -126,6 +129,13 @@ export class SwallowtailShadow {
 
   public measureComplexity(): number {
     return this._foldCount * (this._inShadow ? 2 : 1);
+  }
+
+  public jacobiMatrix(x: number): number[][] {
+    return [
+      [4 * x ** 3, 1, 0],
+      [2 * this._data.controlA * x, this._data.controlB, 1],
+    ];
   }
 
   public swallowtailReport(): Record<string, unknown> {

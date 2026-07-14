@@ -1,8 +1,3 @@
-/**
- * 普赖萨赫模型模块：用大量简单迟滞算子的集合来精确描述复杂磁滞行为。
- * 通过算子分布密度积分得到宏观响应。
- */
-
 export interface PreisachOperator {
   alpha: number;
   beta: number;
@@ -28,6 +23,7 @@ export class PreisachModel {
   private _output: number = 0;
   private _inputHistory: number[] = [];
   private _stats: Record<string, unknown> = {};
+  private _everettValues: Map<string, number> = new Map();
 
   constructor(config: PreisachConfig) {
     this._config = config;
@@ -65,10 +61,11 @@ export class PreisachModel {
   }
 
   private _density(alpha: number, beta: number): number {
-    return Math.exp(-(alpha * alpha + beta * beta) / 2) * this._config.densityScale;
+    const sigma = this._config.maxAlpha / 2;
+    return Math.exp(-((alpha - beta) ** 2) / (2 * sigma * sigma)) * this._config.densityScale;
   }
 
-  applyInput(input: number): number {
+  public applyInput(input: number): number {
     this._inputHistory.push(input);
     if (this._inputHistory.length > 100) this._inputHistory.shift();
     let sum = 0;
@@ -77,12 +74,16 @@ export class PreisachModel {
       else if (input <= op.beta) op.state = -1;
       sum += op.state * op.weight;
     }
+    const prevOutput = this._output;
     this._output = sum;
+    const key = `${input.toFixed(2)}`;
+    this._everettValues.set(key, this._output - prevOutput);
     this._stats.lastInput = input;
+    this._stats.derivative = this._output - prevOutput;
     return this._output;
   }
 
-  computeDensity(): PreisachDensity {
+  public computeDensity(): PreisachDensity {
     const n = this._config.resolution;
     const grid: number[][] = [];
     for (let i = 0; i < n; i++) {
@@ -95,28 +96,66 @@ export class PreisachModel {
     return { grid, resolution: n };
   }
 
-  wipeout(): void {
+  public everettFunction(alpha: number, beta: number): number {
+    let integral = 0;
+    for (const op of this._operators) {
+      if (op.alpha <= alpha && op.beta >= beta) {
+        integral += op.weight;
+      }
+    }
+    return integral * 2;
+  }
+
+  public computeHysteresisLoss(): number {
+    if (this._inputHistory.length < 2) return 0;
+    let loss = 0;
+    for (let i = 1; i < this._inputHistory.length; i++) {
+      const dH = this._inputHistory[i] - this._inputHistory[i - 1];
+      loss += Math.abs(this._output * dH);
+    }
+    return loss;
+  }
+
+  public wipeout(): void {
     for (const op of this._operators) op.state = -1;
     this._output = 0;
+    this._everettValues.clear();
     this._stats.wipeoutAt = Date.now();
   }
 
-  reset(): void {
+  public reset(): void {
     this._operators = [];
     this._output = 0;
     this._inputHistory = [];
+    this._everettValues.clear();
     this._initializeOperators();
   }
 
-  majorLoopAmplitude(): number {
+  public majorLoopAmplitude(): number {
     return this._operators.reduce((acc, op) => acc + op.weight, 0);
   }
 
-  report(): Record<string, unknown> {
+  public saturationOutput(): number {
+    return this._operators.reduce((acc, op) => acc + op.weight, 0);
+  }
+
+  public reversibleComponent(input: number): number {
+    let revSum = 0;
+    for (const op of this._operators) {
+      if (op.alpha - op.beta < 0.1) {
+        revSum += op.weight * Math.tanh(input);
+      }
+    }
+    return revSum;
+  }
+
+  public report(): Record<string, unknown> {
     return {
       output: this._output,
       operatorCount: this._operators.length,
       history: this._inputHistory.length,
+      hysteresisLoss: this.computeHysteresisLoss(),
+      majorLoopAmplitude: this.majorLoopAmplitude(),
       stats: this._stats,
     };
   }

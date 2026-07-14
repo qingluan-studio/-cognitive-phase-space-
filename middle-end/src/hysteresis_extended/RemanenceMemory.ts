@@ -1,8 +1,3 @@
-/**
- * 剩磁记忆模块：模拟磁滞现象中移除外加影响后仍然保留痕迹的记忆机制。
- * 记录输入历史对当前状态造成的不可逆偏移，可用于状态持久化与轨迹分析。
- */
-
 export interface RemanenceRecord {
   field: number;
   magnetization: number;
@@ -14,6 +9,7 @@ export type RemanenceCurve = {
   ascending: number[];
   descending: number[];
   remanence: number;
+  coercivity: number;
 };
 
 export interface RemanenceConfig {
@@ -21,6 +17,7 @@ export interface RemanenceConfig {
   decayRate: number;
   threshold: number;
   historySize: number;
+  domainDensity: number;
 }
 
 export class RemanenceMemory {
@@ -29,6 +26,7 @@ export class RemanenceMemory {
   private _currentValue: number = 0;
   private _remanence: number = 0;
   private _metadata: Record<string, unknown> = {};
+  private _lastDirection: number = 0;
 
   constructor(config: RemanenceConfig) {
     this._config = config;
@@ -46,18 +44,34 @@ export class RemanenceMemory {
     return this._records.length;
   }
 
+  private _langevin(x: number): number {
+    if (Math.abs(x) < 1e-6) return x / 3;
+    return 1 / Math.tanh(x) - 1 / x;
+  }
+
+  private _anhysteretic(field: number): number {
+    const arg = field / Math.max(this._config.saturation, 1e-6);
+    return this._config.saturation * this._langevin(arg * 3);
+  }
+
   applyField(field: number, tag: string = 'default'): void {
     const timestamp = Date.now();
     const delta = field - this._currentValue;
+    const direction = Math.sign(delta);
+    if (direction !== 0 && this._lastDirection !== 0 && direction !== this._lastDirection) {
+      this._metadata.reversalAt = timestamp;
+    }
+    if (direction !== 0) this._lastDirection = direction;
     this._currentValue = field;
+    const target = this._anhysteretic(field);
+    const rate = this._config.domainDensity * (1 - this._remanence / Math.max(this._config.saturation, 1e-6));
+    this._remanence = this._remanence * (1 - rate) + target * rate;
     this._remanence = Math.max(
       this._remanence * (1 - this._config.decayRate),
-      Math.min(field, this._config.saturation)
+      Math.min(Math.abs(field), this._config.saturation) * Math.sign(field || 1)
     );
     this._records.push({ field, magnetization: this._remanence, timestamp, tag });
-    if (this._records.length > this._config.historySize) {
-      this._records.shift();
-    }
+    if (this._records.length > this._config.historySize) this._records.shift();
     this._metadata.lastDelta = delta;
   }
 
@@ -73,13 +87,30 @@ export class RemanenceMemory {
     const descending: number[] = [];
     for (let i = 0; i <= steps; i++) {
       const f = (i / steps) * this._config.saturation;
-      ascending.push(f * 0.85);
+      ascending.push(this._anhysteretic(f));
     }
     for (let i = steps; i >= 0; i--) {
       const f = (i / steps) * this._config.saturation;
-      descending.push(f * 0.85 + this._remanence * 0.15);
+      descending.push(this._anhysteretic(f) + this._remanence * 0.15);
     }
-    return { ascending, descending, remanence: this._remanence };
+    let coercivity = 0;
+    for (let i = 0; i < descending.length; i++) {
+      if (Math.abs(descending[i]) < 0.01) {
+        coercivity = (i / steps) * this._config.saturation;
+        break;
+      }
+    }
+    return { ascending, descending, remanence: this._remanence, coercivity };
+  }
+
+  computeEnergy(): number {
+    let energy = 0;
+    for (let i = 1; i < this._records.length; i++) {
+      const dH = this._records[i].field - this._records[i - 1].field;
+      const avgM = (this._records[i].magnetization + this._records[i - 1].magnetization) / 2;
+      energy += avgM * dH;
+    }
+    return Math.abs(energy);
   }
 
   filterByTag(tag: string): RemanenceRecord[] {
@@ -95,6 +126,7 @@ export class RemanenceMemory {
     this._currentValue = 0;
     this._remanence = 0;
     this._metadata = {};
+    this._lastDirection = 0;
   }
 
   exportState(): Record<string, unknown> {
@@ -103,6 +135,7 @@ export class RemanenceMemory {
       remanence: this._remanence,
       recordCount: this._records.length,
       config: this._config,
+      loopEnergy: this.computeEnergy(),
       metadata: this._metadata,
     };
   }

@@ -1,8 +1,3 @@
-/**
- * 先天免疫：与生俱来的基础防御。
- * 系统内置的基础防御层，对所有外来的通用可疑模式进行非特异性识别与拦截。
- */
-
 export interface InnateBarrier {
   id: string;
   pattern: string;
@@ -22,16 +17,34 @@ export class InnateImmunity {
   private _triggers: DefenseTrigger[] = [];
   private _sensitivity = 0.5;
   private _maxTriggers = 300;
+  private _ngramIndex: Map<string, Set<string>> = new Map();
+  private _ngramSize = 2;
 
   installBarrier(barrier: InnateBarrier): void {
     this._barriers.set(barrier.id, barrier);
+    this._indexPattern(barrier.id, barrier.pattern);
+  }
+
+  private _indexPattern(barrierId: string, pattern: string): void {
+    for (let i = 0; i <= pattern.length - this._ngramSize; i++) {
+      const ngram = pattern.slice(i, i + this._ngramSize);
+      if (!this._ngramIndex.has(ngram)) {
+        this._ngramIndex.set(ngram, new Set());
+      }
+      this._ngramIndex.get(ngram)!.add(barrierId);
+    }
   }
 
   scan(signature: string): DefenseTrigger[] {
     const results: DefenseTrigger[] = [];
-    for (const barrier of this._barriers.values()) {
-      const matches = this._matchCount(signature, barrier.pattern);
-      const score = matches / Math.max(barrier.pattern.length, 1);
+    const candidateBarriers = this._candidateBarriers(signature);
+    const barriersToCheck = candidateBarriers.size > 0
+      ? candidateBarriers
+      : new Set(this._barriers.keys());
+    for (const barrierId of barriersToCheck) {
+      const barrier = this._barriers.get(barrierId);
+      if (!barrier) continue;
+      const score = this._jaccardSimilarity(signature, barrier.pattern);
       const blocked = score >= barrier.threshold * this._sensitivity;
       if (blocked) barrier.blockCount++;
       const trigger: DefenseTrigger = {
@@ -43,14 +56,33 @@ export class InnateImmunity {
       results.push(trigger);
       this._triggers.push(trigger);
     }
-    if (this._triggers.length > this._maxTriggers) this._triggers.splice(0, this._triggers.length - this._maxTriggers);
+    if (this._triggers.length > this._maxTriggers) {
+      this._triggers.splice(0, this._triggers.length - this._maxTriggers);
+    }
     return results;
   }
 
-  private _matchCount(sig: string, pattern: string): number {
-    let count = 0;
-    for (const ch of pattern) if (sig.includes(ch)) count++;
-    return count;
+  private _candidateBarriers(signature: string): Set<string> {
+    const candidates = new Set<string>();
+    for (let i = 0; i <= signature.length - this._ngramSize; i++) {
+      const ngram = signature.slice(i, i + this._ngramSize);
+      const barriers = this._ngramIndex.get(ngram);
+      if (barriers) {
+        for (const b of barriers) candidates.add(b);
+      }
+    }
+    return candidates;
+  }
+
+  private _jaccardSimilarity(a: string, b: string): number {
+    const setA = new Set(a);
+    const setB = new Set(b);
+    let intersection = 0;
+    for (const ch of setA) {
+      if (setB.has(ch)) intersection++;
+    }
+    const union = setA.size + setB.size - intersection;
+    return union === 0 ? 0 : intersection / union;
   }
 
   reinforce(barrierId: string, amount: number): InnateBarrier | null {
@@ -58,6 +90,23 @@ export class InnateImmunity {
     if (!barrier) return null;
     barrier.threshold = Math.max(0, Math.min(1, barrier.threshold - amount));
     return barrier;
+  }
+
+  computeCoverage(): number {
+    if (this._barriers.size === 0) return 0;
+    const allChars = new Set<string>();
+    for (const barrier of this._barriers.values()) {
+      for (const ch of barrier.pattern) allChars.add(ch);
+    }
+    return allChars.size / 128;
+  }
+
+  computeFalsePositiveRate(): number {
+    if (this._triggers.length === 0) return 0;
+    const blocked = this._triggers.filter(t => t.blocked);
+    if (blocked.length === 0) return 0;
+    const barriers = new Set(blocked.map(t => t.barrierId));
+    return barriers.size / this._barriers.size;
   }
 
   setSensitivity(value: number): void {

@@ -1,13 +1,10 @@
-/**
- * 诱变剂暴露：故意引入突变源。
- * 通过外部诱变剂以可控剂量触发突变，剂量越大突变频率与强度越高。
- */
-
 export interface MutagenAgent {
   id: string;
   name: string;
   potency: number;
   doseRange: [number, number];
+  hillCoefficient: number;
+  ec50: number;
 }
 
 export interface ExposureEvent {
@@ -16,14 +13,16 @@ export interface ExposureEvent {
   target: string;
   dose: number;
   mutationsTriggered: number;
+  responseFraction: number;
   exposedAt: number;
 }
 
 export class MutagenExposure {
   private _mutagens: Map<string, MutagenAgent> = new Map();
   private _exposures: ExposureEvent[] = [];
-  private _cumulativeDose = 0;
-  private _maxExposures = 300;
+  private _cumulativeDose: number = 0;
+  private _doseHistory: number[] = [];
+  private _maxExposures: number = 300;
 
   registerMutagen(mutagen: MutagenAgent): void {
     this._mutagens.set(mutagen.id, mutagen);
@@ -32,16 +31,19 @@ export class MutagenExposure {
   expose(mutagenId: string, target: string): ExposureEvent | null {
     const mutagen = this._mutagens.get(mutagenId);
     if (!mutagen) return null;
-    const [min, max] = mutagen.doseRange;
-    const dose = min + Math.random() * (max - min);
-    const mutationsTriggered = Math.floor(dose * mutagen.potency * target.length * 0.1);
+    const dose = this._sampleDose(mutagen.doseRange);
+    const responseFraction = this._hillEquation(dose, mutagen.ec50, mutagen.hillCoefficient);
+    const mutationsTriggered = Math.floor(dose * mutagen.potency * target.length * 0.1 * responseFraction);
     this._cumulativeDose += dose;
+    this._doseHistory.push(dose);
+    if (this._doseHistory.length > 100) this._doseHistory.shift();
     const event: ExposureEvent = {
       id: `exp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       mutagenId,
       target,
       dose,
       mutationsTriggered,
+      responseFraction,
       exposedAt: Date.now(),
     };
     this._exposures.push(event);
@@ -53,7 +55,8 @@ export class MutagenExposure {
     const mutagen = this._mutagens.get(mutagenId);
     if (!mutagen) return 0;
     const avgDose = (mutagen.doseRange[0] + mutagen.doseRange[1]) / 2;
-    return Math.min(1, avgDose * mutagen.potency * target.length * 0.05);
+    const response = this._hillEquation(avgDose, mutagen.ec50, mutagen.hillCoefficient);
+    return Math.min(1, avgDose * mutagen.potency * target.length * 0.05 * response);
   }
 
   applyExposure(event: ExposureEvent, target: string): string {
@@ -64,6 +67,31 @@ export class MutagenExposure {
       result = result.slice(0, pos) + replacement + result.slice(pos + 1);
     }
     return result;
+  }
+
+  computeDoseResponseCurve(mutagenId: string): number[] {
+    const mutagen = this._mutagens.get(mutagenId);
+    if (!mutagen) return [];
+    const curve: number[] = [];
+    const maxDose = mutagen.doseRange[1] * 2;
+    for (let i = 0; i <= 20; i++) {
+      const dose = (i / 20) * maxDose;
+      curve.push(this._hillEquation(dose, mutagen.ec50, mutagen.hillCoefficient));
+    }
+    return curve;
+  }
+
+  computeAccumulationIndex(): number {
+    if (this._doseHistory.length === 0) return 0;
+    const mean = this._doseHistory.reduce((s, d) => s + d, 0) / this._doseHistory.length;
+    const variance = this._doseHistory.reduce((s, d) => s + (d - mean) ** 2, 0) / this._doseHistory.length;
+    return Math.sqrt(variance) / (mean + 1e-9);
+  }
+
+  detectLethalDose50(mutagenId: string): number {
+    const mutagen = this._mutagens.get(mutagenId);
+    if (!mutagen) return 0;
+    return mutagen.ec50 * Math.pow(99, 1 / mutagen.hillCoefficient);
   }
 
   setPotency(mutagenId: string, potency: number): MutagenAgent | null {
@@ -87,5 +115,16 @@ export class MutagenExposure {
 
   get mutagenCount(): number {
     return this._mutagens.size;
+  }
+
+  private _sampleDose(range: [number, number]): number {
+    const [min, max] = range;
+    const u = Math.random();
+    return min + (1 - Math.sqrt(1 - u)) * (max - min);
+  }
+
+  private _hillEquation(dose: number, ec50: number, hill: number): number {
+    if (ec50 <= 0) return dose > 0 ? 1 : 0;
+    return Math.pow(dose, hill) / (Math.pow(ec50, hill) + Math.pow(dose, hill));
   }
 }

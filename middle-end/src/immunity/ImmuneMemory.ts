@@ -1,8 +1,3 @@
-/**
- * 免疫记忆：记住入侵者特征快速响应。
- * 将曾经中和过的入侵者特征长期保存，再次遭遇时直接调用记忆进行快速响应。
- */
-
 export interface MemoryCell {
   id: string;
   signature: string;
@@ -20,17 +15,24 @@ export interface RapidResponse {
 
 export class ImmuneMemory {
   private _memory: Map<string, MemoryCell> = new Map();
+  private _signatureIndex: Map<string, string> = new Map();
   private _rapidResponses: RapidResponse[] = [];
   private _retentionMs = 86400000;
   private _latencyOnRecognized = 5;
   private _latencyOnUnknown = 500;
+  private _consolidationThreshold = 3;
+  private _decayRate = 0.001;
 
   memorize(signature: string): MemoryCell {
-    const existing = Array.from(this._memory.values()).find(m => m.signature === signature);
-    if (existing) {
-      existing.encounters++;
-      existing.lastEncounteredAt = Date.now();
-      return existing;
+    const existingId = this._signatureIndex.get(signature);
+    if (existingId) {
+      const existing = this._memory.get(existingId);
+      if (existing) {
+        existing.encounters++;
+        existing.lastEncounteredAt = Date.now();
+        existing.retainedFor = this._retentionMs * (1 + existing.encounters * 0.1);
+        return existing;
+      }
     }
     const cell: MemoryCell = {
       id: `mem-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -40,16 +42,21 @@ export class ImmuneMemory {
       retainedFor: this._retentionMs,
     };
     this._memory.set(cell.id, cell);
+    this._signatureIndex.set(signature, cell.id);
     return cell;
   }
 
   recall(signature: string): RapidResponse {
-    const match = Array.from(this._memory.values()).find(m => m.signature === signature);
+    const matchId = this._signatureIndex.get(signature);
+    const match = matchId ? this._memory.get(matchId) ?? null : null;
     const recognized = !!match;
+    const latency = recognized
+      ? this._computeRecallLatency(match!.encounters)
+      : this._latencyOnUnknown;
     const response: RapidResponse = {
       memoryCellId: match?.id ?? 'none',
       signature,
-      responseLatencyMs: recognized ? this._latencyOnRecognized : this._latencyOnUnknown,
+      responseLatencyMs: latency,
       recognized,
     };
     if (match) {
@@ -63,16 +70,47 @@ export class ImmuneMemory {
     return response;
   }
 
+  private _computeRecallLatency(encounters: number): number {
+    const consolidation = Math.min(1, encounters / this._consolidationThreshold);
+    return this._latencyOnRecognized + (1 - consolidation) * (this._latencyOnUnknown - this._latencyOnRecognized) * 0.3;
+  }
+
   prune(): number {
     const now = Date.now();
     let pruned = 0;
     for (const [id, cell] of this._memory.entries()) {
-      if (now - cell.lastEncounteredAt > cell.retainedFor) {
+      const age = now - cell.lastEncounteredAt;
+      const effectiveRetention = cell.retainedFor * Math.exp(-this._decayRate * cell.encounters);
+      if (age > effectiveRetention) {
         this._memory.delete(id);
+        this._signatureIndex.delete(cell.signature);
         pruned++;
       }
     }
     return pruned;
+  }
+
+  computeMemoryStrength(signature: string): number {
+    const cellId = this._signatureIndex.get(signature);
+    if (!cellId) return 0;
+    const cell = this._memory.get(cellId);
+    if (!cell) return 0;
+    const age = Date.now() - cell.lastEncounteredAt;
+    const freshness = Math.exp(-age / cell.retainedFor);
+    const consolidation = 1 - Math.exp(-cell.encounters / this._consolidationThreshold);
+    return 0.5 * freshness + 0.5 * consolidation;
+  }
+
+  computeRecallAccuracy(): number {
+    if (this._rapidResponses.length === 0) return 0;
+    const recognized = this._rapidResponses.filter(r => r.recognized);
+    return recognized.length / this._rapidResponses.length;
+  }
+
+  identifyHighAffinityCells(threshold: number): MemoryCell[] {
+    return Array.from(this._memory.values())
+      .filter(c => c.encounters >= threshold)
+      .sort((a, b) => b.encounters - a.encounters);
   }
 
   setRetention(ms: number): void {

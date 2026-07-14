@@ -1,20 +1,17 @@
-/**
- * 能力献祭模块：通过主动删除某些功能模块来换取更高级能力的觉醒，
- * 删除越核心的功能，获得的回报能力越强大。
- */
-
 export interface CapabilityOffering {
   id: string;
   sacrificedCapability: string;
   gainedCapability: string;
   sacrificeValue: number;
   gainMultiplier: number;
+  cost: number;
 }
 
 export interface OfferingResult {
   offeringId: string;
   accepted: boolean;
   netGain: number;
+  efficiency: number;
   completedAt: number;
 }
 
@@ -24,23 +21,50 @@ export class CapabilityOffering {
   private _sacrificed: Set<string> = new Set();
   private _minValue = 0.3;
   private _maxMultiplier = 5.0;
+  private _synergyMap: Map<string, Set<string>> = new Map();
 
   propose(offering: CapabilityOffering): void {
-    offering.gainMultiplier = Math.min(offering.gainMultiplier, this._maxMultiplier);
-    this._offerings.set(offering.id, offering);
+    const normalized: CapabilityOffering = {
+      ...offering,
+      gainMultiplier: Math.min(offering.gainMultiplier, this._maxMultiplier),
+      sacrificeValue: Math.max(0, Math.min(1, offering.sacrificeValue)),
+      cost: offering.cost ?? 0,
+    };
+    this._offerings.set(offering.id, normalized);
+  }
+
+  linkSynergy(capA: string, capB: string): void {
+    if (!this._synergyMap.has(capA)) this._synergyMap.set(capA, new Set());
+    if (!this._synergyMap.has(capB)) this._synergyMap.set(capB, new Set());
+    this._synergyMap.get(capA)!.add(capB);
+    this._synergyMap.get(capB)!.add(capA);
+  }
+
+  private _computeSynergyBonus(sacrificed: string, gained: string): number {
+    const related = this._synergyMap.get(sacrificed);
+    if (!related) return 0;
+    return related.has(gained) ? 0.2 : 0;
   }
 
   evaluate(offeringId: string): OfferingResult {
     const offering = this._offerings.get(offeringId);
     if (!offering) {
-      return { offeringId, accepted: false, netGain: 0, completedAt: Date.now() };
+      return { offeringId, accepted: false, netGain: 0, efficiency: 0, completedAt: Date.now() };
     }
-    const accepted = offering.sacrificeValue >= this._minValue && !this._sacrificed.has(offering.sacrificedCapability);
-    const netGain = accepted ? offering.sacrificeValue * offering.gainMultiplier - offering.sacrificeValue : 0;
+    const synergyBonus = this._computeSynergyBonus(offering.sacrificedCapability, offering.gainedCapability);
+    const effectiveMultiplier = offering.gainMultiplier + synergyBonus;
+    const accepted = offering.sacrificeValue >= this._minValue
+      && !this._sacrificed.has(offering.sacrificedCapability);
+    const grossGain = accepted ? offering.sacrificeValue * effectiveMultiplier : 0;
+    const netGain = accepted ? grossGain - offering.sacrificeValue - offering.cost : 0;
+    const efficiency = accepted && offering.sacrificeValue > 0
+      ? netGain / offering.sacrificeValue
+      : 0;
     const result: OfferingResult = {
       offeringId,
       accepted,
       netGain,
+      efficiency,
       completedAt: Date.now(),
     };
     if (accepted) {
@@ -57,7 +81,11 @@ export class CapabilityOffering {
 
   findSacrificesForGain(targetGain: number): CapabilityOffering[] {
     return Array.from(this._offerings.values())
-      .filter(o => o.sacrificeValue * o.gainMultiplier >= targetGain && !this._sacrificed.has(o.sacrificedCapability))
+      .filter(o => {
+        if (this._sacrificed.has(o.sacrificedCapability)) return false;
+        const synergyBonus = this._computeSynergyBonus(o.sacrificedCapability, o.gainedCapability);
+        return o.sacrificeValue * (o.gainMultiplier + synergyBonus) >= targetGain;
+      })
       .sort((a, b) => a.sacrificeValue - b.sacrificeValue);
   }
 
@@ -67,10 +95,16 @@ export class CapabilityOffering {
     );
     if (available.length === 0) return null;
     return available.reduce((best, o) => {
-      const scoreO = o.sacrificeValue * o.gainMultiplier - o.sacrificeValue;
-      const scoreBest = best.sacrificeValue * best.gainMultiplier - best.sacrificeValue;
+      const scoreO = this._scoreOffering(o);
+      const scoreBest = this._scoreOffering(best);
       return scoreO > scoreBest ? o : best;
     });
+  }
+
+  private _scoreOffering(o: CapabilityOffering): number {
+    const synergyBonus = this._computeSynergyBonus(o.sacrificedCapability, o.gainedCapability);
+    const gain = o.sacrificeValue * (o.gainMultiplier + synergyBonus);
+    return gain - o.sacrificeValue - o.cost;
   }
 
   revertSacrifice(capability: string): boolean {
@@ -89,11 +123,23 @@ export class CapabilityOffering {
     return Array.from(this._sacrificed);
   }
 
+  computeAverageEfficiency(): number {
+    const accepted = this._results.filter(r => r.accepted);
+    if (accepted.length === 0) return 0;
+    return accepted.reduce((s, r) => s + r.efficiency, 0) / accepted.length;
+  }
+
   get offeringCount(): number {
     return this._offerings.size;
   }
 
   get totalNetGain(): number {
     return this._results.filter(r => r.accepted).reduce((sum, r) => sum + r.netGain, 0);
+  }
+
+  get synergyLinkCount(): number {
+    let count = 0;
+    for (const links of this._synergyMap.values()) count += links.size;
+    return Math.floor(count / 2);
   }
 }

@@ -1,25 +1,23 @@
-/**
- * 路径依赖模块：当前状态不仅取决于输入，还取决于到达该输入所经过的轨迹。
- * 记录历史路径并据此计算状态分支与可逆性。
- */
-
 export interface PathStep {
   index: number;
   input: number;
   state: number;
   branch: string;
+  irreversible: boolean;
 }
 
 export type PathTrace = {
   steps: PathStep[];
   totalLength: number;
   isReversible: boolean;
+  branchEntropy: number;
 };
 
 export interface PathDependenceConfig {
   branchCount: number;
   memoryDepth: number;
   irreversibilityThreshold: number;
+  inertia: number;
 }
 
 export class PathDependence {
@@ -28,9 +26,11 @@ export class PathDependence {
   private _state: number = 0;
   private _branch: string = 'main';
   private _flags: Record<string, unknown> = {};
+  private _branchVisits: Map<string, number> = new Map();
 
   constructor(config: PathDependenceConfig) {
     this._config = config;
+    this._branchVisits.set('main', 0);
   }
 
   get state(): number {
@@ -45,34 +45,48 @@ export class PathDependence {
     return this._steps.length;
   }
 
-  step(input: number): PathStep {
+  public step(input: number): PathStep {
     const index = this._steps.length;
-    this._state = this._state * 0.6 + input * 0.4;
-    if (Math.abs(input) > this._config.irreversibilityThreshold) {
+    const newState = this._state * this._config.inertia + input * (1 - this._config.inertia);
+    const irreversible = Math.abs(input) > this._config.irreversibilityThreshold;
+    if (irreversible) {
       this._branch = `b${index % this._config.branchCount}`;
+      this._branchVisits.set(this._branch, (this._branchVisits.get(this._branch) ?? 0) + 1);
     }
-    const s: PathStep = { index, input, state: this._state, branch: this._branch };
+    this._state = newState;
+    const s: PathStep = { index, input, state: this._state, branch: this._branch, irreversible };
     this._steps.push(s);
-    if (this._steps.length > this._config.memoryDepth) {
-      this._steps.shift();
-    }
+    if (this._steps.length > this._config.memoryDepth) this._steps.shift();
     return s;
   }
 
-  trace(): PathTrace {
+  public trace(): PathTrace {
     const totalLength = this._steps.reduce((acc, s) => acc + Math.abs(s.input), 0);
-    const isReversible = this._steps.every(
-      (s) => Math.abs(s.input) <= this._config.irreversibilityThreshold
-    );
-    return { steps: [...this._steps], totalLength, isReversible };
+    const isReversible = this._steps.every((s) => !s.irreversible);
+    const branchEntropy = this._computeBranchEntropy();
+    return { steps: [...this._steps], totalLength, isReversible, branchEntropy };
   }
 
-  switchBranch(name: string): void {
+  private _computeBranchEntropy(): number {
+    const total = [...this._branchVisits.values()].reduce((s, v) => s + v, 0);
+    if (total === 0) return 0;
+    let entropy = 0;
+    for (const count of this._branchVisits.values()) {
+      if (count > 0) {
+        const p = count / total;
+        entropy -= p * Math.log(p);
+      }
+    }
+    return entropy;
+  }
+
+  public switchBranch(name: string): void {
     this._branch = name;
+    this._branchVisits.set(name, (this._branchVisits.get(name) ?? 0) + 1);
     this._flags.lastSwitch = { at: this._steps.length, to: name };
   }
 
-  comparePaths(other: PathStep[]): number {
+  public comparePaths(other: PathStep[]): number {
     const n = Math.min(other.length, this._steps.length);
     let diff = 0;
     for (let i = 0; i < n; i++) {
@@ -81,7 +95,7 @@ export class PathDependence {
     return diff;
   }
 
-  rollbackTo(index: number): boolean {
+  public rollbackTo(index: number): boolean {
     if (index < 0 || index >= this._steps.length) return false;
     const target = this._steps[index];
     this._state = target.state;
@@ -90,7 +104,7 @@ export class PathDependence {
     return true;
   }
 
-  divergenceScore(): number {
+  public divergenceScore(): number {
     if (this._steps.length < 2) return 0;
     let score = 0;
     for (let i = 1; i < this._steps.length; i++) {
@@ -99,11 +113,30 @@ export class PathDependence {
     return score / (this._steps.length - 1);
   }
 
-  report(): Record<string, unknown> {
+  public transitionMatrix(): number[][] {
+    const n = this._config.branchCount;
+    const matrix: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 1; i < this._steps.length; i++) {
+      const from = parseInt(this._steps[i - 1].branch.replace('b', '')) % n || 0;
+      const to = parseInt(this._steps[i].branch.replace('b', '')) % n || 0;
+      matrix[from][to]++;
+    }
+    for (let i = 0; i < n; i++) {
+      const rowSum = matrix[i].reduce((s, v) => s + v, 0);
+      if (rowSum > 0) {
+        for (let j = 0; j < n; j++) matrix[i][j] /= rowSum;
+      }
+    }
+    return matrix;
+  }
+
+  public report(): Record<string, unknown> {
     return {
       state: this._state,
       branch: this._branch,
       steps: this._steps.length,
+      branchEntropy: this._computeBranchEntropy(),
+      divergence: this.divergenceScore(),
       flags: this._flags,
     };
   }

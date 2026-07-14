@@ -1,9 +1,3 @@
-/**
- * FoldCollapse - 折叠坍缩
- * 整个状态面折叠消失，系统失去稳定平衡点，状态沿折叠
- * 的曲面急速下滑直至找到新的支撑。
- */
-
 export interface FoldCollapseData {
   readonly foldId: string;
   controlParameter: number;
@@ -17,6 +11,7 @@ export interface FoldEvent {
   stateBefore: number;
   stateAfter: number;
   collapseDepth: number;
+  energyDissipated: number;
 }
 
 export class FoldCollapse {
@@ -25,6 +20,7 @@ export class FoldCollapse {
   private _collapsed: boolean = false;
   private _collapseDepth: number = 0;
   private _stabilitySurface: number = 0;
+  private _totalEnergy: number = 0;
 
   constructor(data: FoldCollapseData) {
     this._data = { ...data };
@@ -47,6 +43,10 @@ export class FoldCollapse {
     return this._collapsed;
   }
 
+  get totalEnergy(): number {
+    return this._totalEnergy;
+  }
+
   private _updateStability(): void {
     const diff = this._data.controlParameter - this._data.foldPoint;
     if (diff < 0) {
@@ -58,6 +58,22 @@ export class FoldCollapse {
     }
   }
 
+  public computePotential(state: number): number {
+    const diff = this._data.controlParameter - this._data.foldPoint;
+    return state ** 3 / 3 + diff * state;
+  }
+
+  public computeGradient(): number {
+    const diff = this._data.controlParameter - this._data.foldPoint;
+    if (diff >= 0) return -1;
+    return -1 / (2 * Math.sqrt(-diff));
+  }
+
+  public computeCurvature(state: number): number {
+    const diff = this._data.controlParameter - this._data.foldPoint;
+    return 2 * state + diff;
+  }
+
   public adjustControl(value: number): FoldEvent | null {
     const before = { control: this._data.controlParameter, state: this._data.stateValue };
     this._data.controlParameter = value;
@@ -65,19 +81,20 @@ export class FoldCollapse {
     this._updateStability();
     if (this._collapsed && !wasCollapsed) {
       const stateBefore = this._data.stateValue;
+      const energy = this.computePotential(stateBefore);
       this._data.stateValue = 0;
       this._collapseDepth = stateBefore;
+      this._totalEnergy += Math.abs(energy);
       const event: FoldEvent = {
         controlBefore: before.control,
         controlAfter: value,
         stateBefore,
         stateAfter: this._data.stateValue,
         collapseDepth: this._collapseDepth,
+        energyDissipated: Math.abs(energy),
       };
       this._events.push(event);
-      if (this._events.length > 20) {
-        this._events.shift();
-      }
+      if (this._events.length > 20) this._events.shift();
       return event;
     }
     if (!this._collapsed && wasCollapsed) {
@@ -92,30 +109,25 @@ export class FoldCollapse {
   }
 
   public restoreState(): boolean {
-    if (!this._collapsed) {
-      return false;
-    }
+    if (!this._collapsed) return false;
     this._data.controlParameter = this._data.foldPoint - 0.1;
     this._updateStability();
     this._data.stateValue = this._stabilitySurface;
     return true;
   }
 
-  public computeGradient(): number {
-    const diff = this._data.controlParameter - this._data.foldPoint;
-    if (diff >= 0) {
-      return -1;
-    }
-    return -1 / (2 * Math.sqrt(-diff));
-  }
-
   public measureFoldProximity(): number {
-    const diff = this._data.foldPoint - this._data.controlParameter;
-    return Math.max(0, diff);
+    return Math.max(0, this._data.foldPoint - this._data.controlParameter);
   }
 
   public isApproachingFold(): boolean {
     return this.measureFoldProximity() < 0.1 && !this._collapsed;
+  }
+
+  public criticalityIndex(): number {
+    const proximity = this.measureFoldProximity();
+    if (proximity <= 0) return 1;
+    return Math.exp(-proximity * 10);
   }
 
   public stabilize(): void {
@@ -136,7 +148,8 @@ export class FoldCollapse {
       collapseDepth: this._collapseDepth.toFixed(3),
       gradient: this.computeGradient().toFixed(3),
       foldProximity: this.measureFoldProximity().toFixed(3),
-      approachingFold: this.isApproachingFold(),
+      criticalityIndex: this.criticalityIndex().toFixed(3),
+      totalEnergy: this._totalEnergy.toFixed(4),
       eventCount: this._events.length,
     };
   }

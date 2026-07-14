@@ -1,8 +1,3 @@
-/**
- * 粉红噪声塑形器：按1/f频谱塑形噪声用于测试。
- * 生成符合 1/f 频谱分布的粉红噪声，用于测试系统在不同频段的响应特性。
- */
-
 export interface ShapedSample {
   index: number;
   value: number;
@@ -14,6 +9,7 @@ export interface SpectrumProfile {
   frequencies: number[];
   powers: number[];
   slope: number;
+  rSquared: number;
 }
 
 export class PinkNoiseShaper {
@@ -21,6 +17,9 @@ export class PinkNoiseShaper {
   private _sampleRate = 44100;
   private _octaves = 8;
   private _profile: SpectrumProfile | null = null;
+  private _vossCounters: number[] = [];
+  private _vossValues: number[] = [];
+  private _vossRows = 8;
 
   generate(count: number): ShapedSample[] {
     const generated: ShapedSample[] = [];
@@ -48,13 +47,50 @@ export class PinkNoiseShaper {
     return generated;
   }
 
+  generateVossMcCartney(count: number): ShapedSample[] {
+    const rows = this._vossRows;
+    if (this._vossValues.length !== rows) {
+      this._vossValues = new Array(rows).fill(0).map(() => Math.random() * 2 - 1);
+      this._vossCounters = new Array(rows).fill(0);
+    }
+    const generated: ShapedSample[] = [];
+    let counter = 0;
+    for (let i = 0; i < count; i++) {
+      const changed = (counter ^ (counter + 1)) & counter;
+      let numChanged = 0;
+      let sum = this._vossValues[0];
+      for (let r = 1; r < rows; r++) {
+        if ((changed >> r) & 1) {
+          this._vossValues[r] = Math.random() * 2 - 1;
+          numChanged++;
+        }
+        sum += this._vossValues[r];
+      }
+      counter++;
+      const value = sum / rows;
+      const freq = (i / count) * (this._sampleRate / 2);
+      generated.push({
+        index: i,
+        value,
+        frequency: freq,
+        power: value * value,
+      });
+    }
+    this._samples = generated;
+    this._profile = this._computeProfile(generated);
+    return generated;
+  }
+
   shape(values: number[]): ShapedSample[] {
-    const shaped: ShapedSample[] = values.map((v, i) => ({
-      index: i,
-      value: v / Math.sqrt(1 + i / 100),
-      frequency: this._sampleRate / Math.pow(2, this._octaves / 2),
-      power: v * v / (1 + i / 100),
-    }));
+    const shaped: ShapedSample[] = values.map((v, i) => {
+      const scaling = 1 / Math.sqrt(1 + i / 100);
+      return {
+        index: i,
+        value: v * scaling,
+        frequency: (i / values.length) * (this._sampleRate / 2),
+        power: v * v * scaling * scaling,
+      };
+    });
     this._samples = shaped;
     this._profile = this._computeProfile(shaped);
     return shaped;
@@ -62,6 +98,11 @@ export class PinkNoiseShaper {
 
   filterBand(minFreq: number, maxFreq: number): ShapedSample[] {
     return this._samples.filter(s => s.frequency >= minFreq && s.frequency <= maxFreq);
+  }
+
+  fitSlopeToProfile(): { slope: number; rSquared: number } {
+    if (!this._profile) return { slope: 0, rSquared: 0 };
+    return { slope: this._profile.slope, rSquared: this._profile.rSquared };
   }
 
   private _computeProfile(samples: ShapedSample[]): SpectrumProfile {
@@ -75,14 +116,14 @@ export class PinkNoiseShaper {
       const avgPower = slice.reduce((s, x) => s + x.power, 0) / slice.length;
       const freq = (b + 1) / bins * this._sampleRate / 2;
       frequencies.push(freq);
-      powers.push(avgPower);
+      powers.push(Math.max(1e-12, avgPower));
     }
-    const slope = this._fitSlope(frequencies, powers);
-    return { frequencies, powers, slope };
+    const { slope, rSquared } = this._fitSlopeWithR2(frequencies, powers);
+    return { frequencies, powers, slope, rSquared };
   }
 
-  private _fitSlope(freqs: number[], powers: number[]): number {
-    if (freqs.length < 2) return 0;
+  private _fitSlopeWithR2(freqs: number[], powers: number[]): { slope: number; rSquared: number } {
+    if (freqs.length < 2) return { slope: 0, rSquared: 0 };
     const logF = freqs.map(f => Math.log(Math.max(1e-9, f)));
     const logP = powers.map(p => Math.log(Math.max(1e-9, p)));
     const n = logF.length;
@@ -90,7 +131,25 @@ export class PinkNoiseShaper {
     const sumY = logP.reduce((a, b) => a + b, 0);
     const sumXY = logF.reduce((s, x, i) => s + x * logP[i], 0);
     const sumXX = logF.reduce((s, x) => s + x * x, 0);
-    return (n * sumXY - sumX * sumY) / Math.max(1e-9, n * sumXX - sumX * sumX);
+    const sumYY = logP.reduce((s, y) => s + y * y, 0);
+    const denom = Math.max(1e-9, n * sumXX - sumX * sumX);
+    const slope = (n * sumXY - sumX * sumY) / denom;
+    const intercept = (sumY - slope * sumX) / n;
+    const ssTot = sumYY - sumY * sumY / n;
+    let ssRes = 0;
+    for (let i = 0; i < n; i++) {
+      const pred = slope * logF[i] + intercept;
+      ssRes += (logP[i] - pred) ** 2;
+    }
+    const rSquared = ssTot > 1e-9 ? Math.max(0, 1 - ssRes / ssTot) : 0;
+    return { slope, rSquared };
+  }
+
+  crestFactor(): number {
+    if (this._samples.length === 0) return 0;
+    const peak = Math.max(...this._samples.map(s => Math.abs(s.value)));
+    const rms = Math.sqrt(this._samples.reduce((s, x) => s + x.value * x.value, 0) / this._samples.length);
+    return rms > 0 ? peak / rms : 0;
   }
 
   setSampleRate(rate: number): void {
@@ -99,6 +158,12 @@ export class PinkNoiseShaper {
 
   setOctaves(n: number): void {
     this._octaves = Math.max(1, n);
+  }
+
+  setVossRows(n: number): void {
+    this._vossRows = Math.max(2, Math.min(16, n));
+    this._vossValues = [];
+    this._vossCounters = [];
   }
 
   getProfile(): SpectrumProfile | null {

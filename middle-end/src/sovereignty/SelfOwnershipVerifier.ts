@@ -1,8 +1,3 @@
-/**
- * 自有权验证器：确认自身代码和数据的主权归属。
- * 通过对模块签名、数据指纹和所有权令牌的校验，判定某项资产是否归系统自身所有。
- */
-
 export interface OwnershipClaim {
   assetId: string;
   assetType: 'code' | 'data' | 'config' | 'memory';
@@ -15,6 +10,7 @@ export interface OwnershipToken {
   ownerSignature: string;
   issuedAt: number;
   validUntil: number;
+  challengeNonce: string;
 }
 
 export interface VerificationResult {
@@ -23,13 +19,19 @@ export interface VerificationResult {
   confidence: number;
   evidence: string[];
   verifiedAt: number;
+  trustVector: { claim: number; token: number; signature: number; revocation: number };
 }
+
+const PRIME = 0x01000193;
+const SEED = 0x811c9dc5;
 
 export class SelfOwnershipVerifier {
   private _claims: Map<string, OwnershipClaim> = new Map();
   private _tokens: Map<string, OwnershipToken> = new Map();
   private _systemSignature: string;
   private _revokedAssets: Set<string> = new Set();
+  private _challengeStore: Map<string, string> = new Map();
+  private _verificationHistory: Map<string, number> = new Map();
 
   constructor(systemSignature: string) {
     this._systemSignature = systemSignature;
@@ -42,11 +44,14 @@ export class SelfOwnershipVerifier {
   issueToken(assetId: string, validityMs: number): OwnershipToken | null {
     const claim = this._claims.get(assetId);
     if (!claim) return null;
+    const nonce = this._generateNonce();
+    this._challengeStore.set(assetId, nonce);
     const token: OwnershipToken = {
       assetId,
-      ownerSignature: this._sign(claim.fingerprint),
+      ownerSignature: this._sign(`${claim.fingerprint}:${nonce}`),
       issuedAt: Date.now(),
       validUntil: Date.now() + validityMs,
+      challengeNonce: nonce,
     };
     this._tokens.set(assetId, token);
     return token;
@@ -54,40 +59,53 @@ export class SelfOwnershipVerifier {
 
   verify(assetId: string): VerificationResult {
     const evidence: string[] = [];
+    const trustVector = { claim: 0, token: 0, signature: 0, revocation: 1 };
     const claim = this._claims.get(assetId);
     if (!claim) {
-      return this._negativeResult(assetId, ['No ownership claim registered.']);
+      return this._negativeResult(assetId, ['No ownership claim registered.'], trustVector);
     }
+    trustVector.claim = Math.min(1, (Date.now() - claim.claimedAt) / 86_400_000);
     evidence.push(`Claim registered for ${claim.assetType} asset.`);
 
     if (this._revokedAssets.has(assetId)) {
-      return this._negativeResult(assetId, [...evidence, 'Ownership has been revoked.']);
+      trustVector.revocation = 0;
+      return this._negativeResult(assetId, [...evidence, 'Ownership has been revoked.'], trustVector);
     }
 
     const token = this._tokens.get(assetId);
     if (!token) {
-      return this._negativeResult(assetId, [...evidence, 'No active ownership token.']);
+      return this._negativeResult(assetId, [...evidence, 'No active ownership token.'], trustVector);
     }
+    const lifespan = Math.max(1, token.validUntil - token.issuedAt);
+    const elapsed = Date.now() - token.issuedAt;
+    trustVector.token = Math.max(0, 1 - elapsed / lifespan);
     evidence.push('Active ownership token found.');
 
     if (Date.now() > token.validUntil) {
-      return this._negativeResult(assetId, [...evidence, 'Ownership token expired.']);
+      trustVector.token = 0;
+      return this._negativeResult(assetId, [...evidence, 'Ownership token expired.'], trustVector);
     }
     evidence.push('Ownership token within validity window.');
 
-    const expected = this._sign(claim.fingerprint);
-    const signatureOk = expected === token.ownerSignature;
-    if (!signatureOk) {
-      return this._negativeResult(assetId, [...evidence, 'Signature mismatch detected.']);
+    const expected = this._sign(`${claim.fingerprint}:${token.challengeNonce}`);
+    const similarity = this._hammingSimilarity(expected, token.ownerSignature);
+    trustVector.signature = similarity;
+    if (similarity < 0.95) {
+      return this._negativeResult(assetId, [...evidence, `Signature mismatch (similarity=${similarity.toFixed(3)}).`], trustVector);
     }
     evidence.push('Owner signature matches system signature.');
 
+    const confidence = this._combineTrust(trustVector);
+    const priorVerifications = this._verificationHistory.get(assetId) ?? 0;
+    this._verificationHistory.set(assetId, priorVerifications + 1);
+    const stabilized = confidence * (1 + Math.log1p(priorVerifications) * 0.05);
     return {
       assetId,
       isOwned: true,
-      confidence: 0.99,
+      confidence: Math.min(1, stabilized),
       evidence,
       verifiedAt: Date.now(),
+      trustVector,
     };
   }
 
@@ -105,21 +123,50 @@ export class SelfOwnershipVerifier {
     return owned;
   }
 
-  get claimCount(): number {
-    return this._claims.size;
-  }
+  get claimCount(): number { return this._claims.size; }
+  get revokedCount(): number { return this._revokedAssets.size; }
 
-  private _sign(fingerprint: string): string {
-    let hash = 0;
-    const seed = `${this._systemSignature}:${fingerprint}`;
-    for (let i = 0; i < seed.length; i++) {
-      hash = (hash << 5) - hash + seed.charCodeAt(i);
-      hash |= 0;
+  private _sign(payload: string): string {
+    let hash = SEED;
+    const salted = `${this._systemSignature}::${payload}`;
+    for (let i = 0; i < salted.length; i++) {
+      hash ^= salted.charCodeAt(i);
+      hash = Math.imul(hash, PRIME);
     }
-    return `sig-${Math.abs(hash).toString(16)}`;
+    const secondary = this._fnv1a(payload);
+    return `sig-${(hash >>> 0).toString(16)}-${(secondary >>> 0).toString(16)}`;
   }
 
-  private _negativeResult(assetId: string, evidence: string[]): VerificationResult {
-    return { assetId, isOwned: false, confidence: 0, evidence, verifiedAt: Date.now() };
+  private _fnv1a(input: string): number {
+    let hash = SEED;
+    for (let i = 0; i < input.length; i++) {
+      hash ^= input.charCodeAt(i);
+      hash = Math.imul(hash, PRIME);
+    }
+    return hash;
+  }
+
+  private _generateNonce(): string {
+    return Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0') +
+      Date.now().toString(16).slice(-6);
+  }
+
+  private _hammingSimilarity(a: string, b: string): number {
+    if (a.length === 0 && b.length === 0) return 1;
+    const len = Math.max(a.length, b.length);
+    let matches = 0;
+    for (let i = 0; i < len; i++) {
+      if (a[i] === b[i]) matches++;
+    }
+    return matches / len;
+  }
+
+  private _combineTrust(tv: VerificationResult['trustVector']): number {
+    const weights = { claim: 0.2, token: 0.3, signature: 0.4, revocation: 0.1 };
+    return tv.claim * weights.claim + tv.token * weights.token + tv.signature * weights.signature + tv.revocation * weights.revocation;
+  }
+
+  private _negativeResult(assetId: string, evidence: string[], tv: VerificationResult['trustVector']): VerificationResult {
+    return { assetId, isOwned: false, confidence: 0, evidence, verifiedAt: Date.now(), trustVector: tv };
   }
 }

@@ -1,8 +1,3 @@
-/**
- * 以虫为特性：主动将某个bug标记为特性并强化。
- * 将意外行为重新定义为有意设计的特性，建立特性档案并强化其表现路径。
- */
-
 export type FeatureStatus = 'candidate' | 'promoted' | 'reinforced' | 'deprecated';
 
 export interface BugFeature {
@@ -11,6 +6,8 @@ export interface BugFeature {
   featureName: string;
   status: FeatureStatus;
   reinforcementCount: number;
+  stabilityScore: number;
+  adoptionRate: number;
   documentedAt: number;
   metadata: Record<string, unknown>;
 }
@@ -20,11 +17,23 @@ export interface ReinforcementLog {
   action: string;
   result: string;
   loggedAt: number;
+  stabilityDelta: number;
 }
+
+const STATUS_TRANSITIONS: Record<FeatureStatus, FeatureStatus[]> = {
+  candidate: ['promoted', 'deprecated'],
+  promoted: ['reinforced', 'deprecated'],
+  reinforced: ['deprecated'],
+  deprecated: [],
+};
 
 export class BugAsFeature {
   private _features: Map<string, BugFeature> = new Map();
   private _logs: ReinforcementLog[] = [];
+  private _reinforcementThreshold = 3;
+  private _stabilityGrowthRate = 0.15;
+  private _stabilityDecayRate = 0.05;
+  private _adoptionHistory: Map<string, boolean[]> = new Map();
 
   nominate(bugDescription: string, featureName: string): BugFeature {
     const feature: BugFeature = {
@@ -33,39 +42,49 @@ export class BugAsFeature {
       featureName,
       status: 'candidate',
       reinforcementCount: 0,
+      stabilityScore: 0.1,
+      adoptionRate: 0,
       documentedAt: Date.now(),
       metadata: {},
     };
     this._features.set(feature.id, feature);
+    this._adoptionHistory.set(feature.id, []);
     return feature;
   }
 
   promote(featureId: string): BugFeature | null {
     const feature = this._features.get(featureId);
-    if (!feature || feature.status !== 'candidate') return null;
+    if (!feature || !STATUS_TRANSITIONS[feature.status].includes('promoted')) return null;
     feature.status = 'promoted';
-    this._logAction(featureId, 'promote', 'Feature promoted from candidate.');
+    feature.stabilityScore = Math.min(1, feature.stabilityScore + this._stabilityGrowthRate);
+    this._logAction(featureId, 'promote', 'Feature promoted from candidate.', this._stabilityGrowthRate);
     return feature;
   }
 
-  reinforce(featureId: string, action: string): BugFeature | null {
+  reinforce(featureId: string, action: string, adopted: boolean = true): BugFeature | null {
     const feature = this._features.get(featureId);
-    if (!feature) return null;
-    if (feature.status === 'deprecated') return null;
-
+    if (!feature || feature.status === 'deprecated') return null;
     feature.reinforcementCount++;
-    if (feature.reinforcementCount >= 3 && feature.status === 'promoted') {
+    const stabilityDelta = adopted ? this._stabilityGrowthRate : -this._stabilityDecayRate;
+    feature.stabilityScore = Math.max(0, Math.min(1, feature.stabilityScore + stabilityDelta));
+    const history = this._adoptionHistory.get(featureId) ?? [];
+    history.push(adopted);
+    if (history.length > 32) history.shift();
+    this._adoptionHistory.set(featureId, history);
+    feature.adoptionRate = history.filter(a => a).length / Math.max(1, history.length);
+    if (feature.reinforcementCount >= this._reinforcementThreshold && feature.status === 'promoted') {
       feature.status = 'reinforced';
     }
-    this._logAction(featureId, 'reinforce', action);
+    this._logAction(featureId, 'reinforce', action, stabilityDelta);
     return feature;
   }
 
   deprecate(featureId: string, reason: string): BugFeature | null {
     const feature = this._features.get(featureId);
-    if (!feature) return null;
+    if (!feature || !STATUS_TRANSITIONS[feature.status].includes('deprecated')) return null;
     feature.status = 'deprecated';
-    this._logAction(featureId, 'deprecate', reason);
+    feature.stabilityScore = 0;
+    this._logAction(featureId, 'deprecate', reason, -feature.stabilityScore);
     return feature;
   }
 
@@ -74,6 +93,16 @@ export class BugAsFeature {
     if (!feature) return false;
     feature.metadata[key] = value;
     return true;
+  }
+
+  computeReliability(featureId: string): number {
+    const feature = this._features.get(featureId);
+    if (!feature) return 0;
+    const history = this._adoptionHistory.get(featureId) ?? [];
+    if (history.length === 0) return 0;
+    const recentAdoption = history.slice(-8).filter(a => a).length / Math.min(8, history.length);
+    const consistency = 1 - this._variance(history.map(a => a ? 1 : 0));
+    return 0.5 * feature.stabilityScore + 0.3 * recentAdoption + 0.2 * consistency;
   }
 
   getFeature(featureId: string): BugFeature | null {
@@ -88,12 +117,19 @@ export class BugAsFeature {
     return this._logs.slice(-limit);
   }
 
-  get featureCount(): number {
-    return this._features.size;
+  get featureCount(): number { return this._features.size; }
+  get reinforcedCount(): number {
+    return Array.from(this._features.values()).filter(f => f.status === 'reinforced').length;
   }
 
-  private _logAction(featureId: string, action: string, result: string): void {
-    this._logs.push({ featureId, action, result, loggedAt: Date.now() });
+  private _logAction(featureId: string, action: string, result: string, stabilityDelta: number): void {
+    this._logs.push({ featureId, action, result, loggedAt: Date.now(), stabilityDelta });
     if (this._logs.length > 200) this._logs.shift();
+  }
+
+  private _variance(values: number[]): number {
+    if (values.length < 2) return 0;
+    const mean = values.reduce((s, v) => s + v, 0) / values.length;
+    return values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length;
   }
 }

@@ -1,8 +1,3 @@
-/**
- * 耐受诱导器：诱导对良性刺激的耐受。
- * 对被识别为良性的刺激逐步诱导耐受，使免疫系统不再对其产生攻击反应。
- */
-
 export interface TolerantEntry {
   id: string;
   stimulus: string;
@@ -20,13 +15,18 @@ export interface ToleranceInduction {
 
 export class ToleranceInducer {
   private _entries: Map<string, TolerantEntry> = new Map();
+  private _stimulusIndex: Map<string, string> = new Map();
   private _inductions: ToleranceInduction[] = [];
   private _stepSize = 0.1;
   private _maxLevel = 1.0;
+  private _exposureHistory: Map<string, number[]> = new Map();
+  private _windowSize = 5;
 
   registerStimulus(stimulus: string): TolerantEntry {
-    const existing = Array.from(this._entries.values()).find(e => e.stimulus === stimulus);
-    if (existing) return existing;
+    const existingId = this._stimulusIndex.get(stimulus);
+    if (existingId) {
+      return this._entries.get(existingId)!;
+    }
     const entry: TolerantEntry = {
       id: `tol-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       stimulus,
@@ -35,6 +35,8 @@ export class ToleranceInducer {
       verified: false,
     };
     this._entries.set(entry.id, entry);
+    this._stimulusIndex.set(stimulus, entry.id);
+    this._exposureHistory.set(entry.id, []);
     return entry;
   }
 
@@ -42,8 +44,10 @@ export class ToleranceInducer {
     const entry = this._entries.get(entryId);
     if (!entry) return null;
     const previousLevel = entry.toleranceLevel;
-    entry.toleranceLevel = Math.min(this._maxLevel, entry.toleranceLevel + this._stepSize);
+    const adaptiveStep = this._computeAdaptiveStep(entryId);
+    entry.toleranceLevel = Math.min(this._maxLevel, entry.toleranceLevel + adaptiveStep);
     if (entry.toleranceLevel >= this._maxLevel) entry.verified = true;
+    this._recordExposure(entryId, entry.toleranceLevel);
     const induction: ToleranceInduction = {
       entryId,
       previousLevel,
@@ -55,8 +59,26 @@ export class ToleranceInducer {
     return induction;
   }
 
+  private _computeAdaptiveStep(entryId: string): number {
+    const history = this._exposureHistory.get(entryId) ?? [];
+    if (history.length < 2) return this._stepSize;
+    const recent = history.slice(-this._windowSize);
+    const trend = recent[recent.length - 1] - recent[0];
+    const trendFactor = 1 + Math.max(-0.5, Math.min(0.5, trend));
+    return this._stepSize * trendFactor;
+  }
+
+  private _recordExposure(entryId: string, level: number): void {
+    const history = this._exposureHistory.get(entryId) ?? [];
+    history.push(level);
+    if (history.length > this._windowSize * 2) history.shift();
+    this._exposureHistory.set(entryId, history);
+  }
+
   isTolerant(stimulus: string): boolean {
-    const entry = Array.from(this._entries.values()).find(e => e.stimulus === stimulus);
+    const entryId = this._stimulusIndex.get(stimulus);
+    if (!entryId) return false;
+    const entry = this._entries.get(entryId);
     return entry ? entry.verified : false;
   }
 
@@ -65,7 +87,27 @@ export class ToleranceInducer {
     if (!entry) return null;
     entry.toleranceLevel = 0;
     entry.verified = false;
+    this._exposureHistory.set(entryId, []);
     return entry;
+  }
+
+  computeToleranceGradient(entryId: string): number {
+    const history = this._exposureHistory.get(entryId) ?? [];
+    if (history.length < 2) return 0;
+    const recent = history.slice(-this._windowSize);
+    const sum = recent.reduce((s, v) => s + v, 0);
+    return sum / recent.length;
+  }
+
+  computeToleranceCoverage(): number {
+    if (this._entries.size === 0) return 0;
+    const verified = Array.from(this._entries.values()).filter(e => e.verified);
+    return verified.length / this._entries.size;
+  }
+
+  identifyStableTolerances(): TolerantEntry[] {
+    return Array.from(this._entries.values())
+      .filter(e => e.verified && this.computeToleranceGradient(e.id) > 0.8);
   }
 
   setStepSize(value: number): void {
