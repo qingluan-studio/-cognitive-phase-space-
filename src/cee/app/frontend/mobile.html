@@ -8,34 +8,49 @@
 </head>
 <body>
 
-<!-- ─── 启动动画 ─── -->
+<!-- 启动动画 -->
 <div class="startup-overlay" id="startupOverlay">
   <canvas class="startup-canvas" id="startupCanvas"></canvas>
+  <div class="startup-grid"></div>
   <div class="startup-center">
     <div class="startup-logo-wrap">
-      <svg class="startup-logo-svg" viewBox="0 0 256 256" width="120" height="120">
+      <svg class="startup-logo-svg" viewBox="0 0 256 256" width="140" height="140">
         <defs>
-          <radialGradient id="suBg" cx="50%" cy="40%" r="70%"><stop offset="0%" stop-color="#1a2538"/><stop offset="100%" stop-color="#080c14"/></radialGradient>
-          <radialGradient id="suGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#a855f7" stop-opacity="0.9"/><stop offset="40%" stop-color="#38bdf8" stop-opacity="0.6"/><stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
-          <radialGradient id="suCore" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#fff"/><stop offset="30%" stop-color="#e2e8f0"/><stop offset="60%" stop-color="#38bdf8"/><stop offset="100%" stop-color="#a855f7"/></radialGradient>
-          <filter id="suGlowFilter"><feGaussianBlur stdDeviation="3"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-          <filter id="suSoftGlow"><feGaussianBlur stdDeviation="8"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <radialGradient id="suBg" cx="50%" cy="45%" r="65%"><stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#020408"/></radialGradient>
+          <radialGradient id="suGlow" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#c084fc" stop-opacity="0.9"/><stop offset="30%" stop-color="#818cf8" stop-opacity="0.5"/><stop offset="100%" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
+          <radialGradient id="suCore" cx="45%" cy="40%" r="50%"><stop offset="0%" stop-color="#fff"/><stop offset="30%" stop-color="#e2e8f0"/><stop offset="60%" stop-color="#818cf8"/><stop offset="100%" stop-color="#a855f7"/></radialGradient>
+          <filter id="suGlowFilter"><feGaussianBlur stdDeviation="4"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <filter id="suSoftGlow"><feGaussianBlur stdDeviation="10"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          <filter id="suNeon"><feGaussianBlur stdDeviation="2"/><feComponentTransfer in="blur" result="glow1"><feFuncA type="linear" slope="1.5"/></feComponentTransfer><feMerge><feMergeNode in="glow1"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
         </defs>
-        <circle cx="128" cy="128" r="124" fill="url(#suBg)" stroke="#2a3a5c" stroke-width="1.5" opacity="0.6"/>
-        <circle cx="128" cy="115" r="75" fill="url(#suGlow)" filter="url(#suSoftGlow)" opacity="0.4"/>
+        <circle cx="128" cy="128" r="124" fill="url(#suBg)" stroke="#1e293b" stroke-width="1.5" opacity="0.7"/>
+        <polygon points="128,58 188,88 188,148 128,178 68,148 68,88" fill="none" stroke="#334155" stroke-width="0.6" opacity="0.4"/>
+        <circle cx="128" cy="115" r="78" fill="url(#suGlow)" filter="url(#suSoftGlow)" opacity="0.5"/>
         <g class="startup-rays">
-          <line class="sr sr1" x1="128" y1="110" x2="192" y2="46" stroke="#38bdf8" stroke-width="1.2"/><line class="sr sr2" x1="128" y1="110" x2="200" y2="166" stroke="#a855f7" stroke-width="1.2"/>
-          <line class="sr sr3" x1="128" y1="110" x2="128" y2="198" stroke="#38bdf8" stroke-width="1.2"/><line class="sr sr4" x1="128" y1="110" x2="56" y2="174" stroke="#a855f7" stroke-width="1.2"/>
-          <line class="sr sr5" x1="128" y1="110" x2="54" y2="46" stroke="#38bdf8" stroke-width="1.2"/><line class="sr sr6" x1="128" y1="110" x2="128" y2="38" stroke="#a855f7" stroke-width="1.2"/>
+          <line class="sr sr1" x1="128" y1="110" x2="192" y2="46" stroke="#38bdf8" stroke-width="1.5" filter="url(#suNeon)"/>
+          <line class="sr sr2" x1="128" y1="110" x2="200" y2="166" stroke="#a855f7" stroke-width="1.5" filter="url(#suNeon)"/>
+          <line class="sr sr3" x1="128" y1="110" x2="128" y2="198" stroke="#38bdf8" stroke-width="1.5" filter="url(#suNeon)"/>
+          <line class="sr sr4" x1="128" y1="110" x2="56" y2="174" stroke="#a855f7" stroke-width="1.5" filter="url(#suNeon)"/>
+          <line class="sr sr5" x1="128" y1="110" x2="54" y2="46" stroke="#38bdf8" stroke-width="1.5" filter="url(#suNeon)"/>
+          <line class="sr sr6" x1="128" y1="110" x2="128" y2="38" stroke="#a855f7" stroke-width="1.5" filter="url(#suNeon)"/>
         </g>
         <g class="startup-nodes">
-          <circle class="sn sn1" cx="184" cy="56" r="3.5" fill="#38bdf8"/><circle class="sn sn2" cx="194" cy="158" r="3" fill="#a855f7"/>
-          <circle class="sn sn3" cx="128" cy="190" r="3.5" fill="#38bdf8"/><circle class="sn sn4" cx="64" cy="168" r="3" fill="#a855f7"/>
-          <circle class="sn sn5" cx="62" cy="56" r="3.5" fill="#38bdf8"/><circle class="sn sn6" cx="128" cy="46" r="3" fill="#a855f7"/>
+          <circle class="sn sn1" cx="184" cy="56" r="4" fill="#38bdf8" filter="url(#suGlowFilter)"/>
+          <circle class="sn sn2" cx="194" cy="158" r="3.5" fill="#a855f7" filter="url(#suGlowFilter)"/>
+          <circle class="sn sn3" cx="128" cy="190" r="4" fill="#38bdf8" filter="url(#suGlowFilter)"/>
+          <circle class="sn sn4" cx="64" cy="168" r="3.5" fill="#a855f7" filter="url(#suGlowFilter)"/>
+          <circle class="sn sn5" cx="62" cy="56" r="4" fill="#38bdf8" filter="url(#suGlowFilter)"/>
+          <circle class="sn sn6" cx="128" cy="46" r="3.5" fill="#a855f7" filter="url(#suGlowFilter)"/>
         </g>
-        <circle cx="128" cy="115" r="22" fill="url(#suCore)" filter="url(#suGlowFilter)" class="startup-core"/>
-        <circle cx="124" cy="110" r="6" fill="#fff" opacity="0.25" class="startup-highlight"/>
+        <ellipse cx="128" cy="115" rx="72" ry="22" fill="none" stroke="#38bdf8" stroke-width="0.7" opacity="0.18" stroke-dasharray="10 18" transform="rotate(-15 128 115)" class="su-ring"/>
+        <ellipse cx="128" cy="115" rx="72" ry="22" fill="none" stroke="#a855f7" stroke-width="0.7" opacity="0.18" stroke-dasharray="10 18" transform="rotate(75 128 115)" class="su-ring"/>
+        <ellipse cx="128" cy="115" rx="72" ry="22" fill="none" stroke="#818cf8" stroke-width="0.7" opacity="0.12" stroke-dasharray="6 22" transform="rotate(165 128 115)" class="su-ring"/>
+        <circle cx="128" cy="115" r="26" fill="url(#suCore)" filter="url(#suGlowFilter)" class="startup-core"/>
+        <circle cx="123" cy="108" r="8" fill="#fff" opacity="0.3" class="startup-highlight"/>
+        <circle cx="131" cy="114" r="3" fill="#fff" opacity="0.5" class="startup-highlight"/>
       </svg>
+      <div class="startup-ring-outer"></div>
+      <div class="startup-ring-inner"></div>
     </div>
     <div class="startup-title">
       <span class="startup-title-zh">空间</span>
@@ -47,13 +62,14 @@
       <span class="startup-tag">T1 同构</span><span class="startup-tag">T2 共振</span><span class="startup-tag">T3 测地</span>
       <span class="startup-tag">T4 蜕变</span><span class="startup-tag">T5 反事实</span><span class="startup-tag">T6 不变量</span>
     </div>
+    <div class="startup-scan-line"></div>
   </div>
 </div>
 
-<!-- ─── 背景粒子 ─── -->
+<!-- 背景粒子 -->
 <canvas class="bg-particles" id="bgParticles"></canvas>
 
-<!-- ─── Header ─── -->
+<!-- Header -->
 <div class="header">
   <div class="header-left">
     <div class="header-menu" onclick="CeeApp.toggleDrawer()" title="历史会话 (Ctrl+B)">
@@ -72,7 +88,7 @@
   </div>
 </div>
 
-<!-- ─── 设置弹窗 ─── -->
+<!-- 设置弹窗 -->
 <div class="settings-overlay" id="settingsOverlay" onclick="if(event.target===this)CeeApp.UIManager.closeSettings()">
   <div class="settings-modal">
     <div class="settings-modal-header">
@@ -111,7 +127,7 @@
   </div>
 </div>
 
-<!-- ─── 历史会话侧边栏 ─── -->
+<!-- 历史会话侧边栏 -->
 <div class="drawer-overlay" id="drawerOverlay"></div>
 <div class="drawer" id="drawer">
   <div class="drawer-header">
@@ -129,18 +145,104 @@
   </div>
 </div>
 
-<!-- ─── 主聊天区 ─── -->
+<!-- 主聊天区 -->
 <main>
   <canvas id="starCanvas"></canvas>
   <div class="welcome" id="welcome">
     <div class="welcome-icon"><img src="/static/avatar.svg" alt="CEE" width="64" height="64"></div>
     <div class="welcome-hi">Hi，我是空间</div>
     <div class="welcome-sub">基于认知涌现引擎的 AI 助手</div>
+
+    <div class="welcome-model-cards">
+      <div class="model-card" onclick="CeeApp.quickChat('请帮我分析一下这个想法：')">
+        <div class="model-card-glow"></div>
+        <div class="model-card-icon research">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        </div>
+        <div class="model-card-label">深度研究</div>
+        <div class="model-card-desc">T1+T6 联合分析</div>
+      </div>
+      <div class="model-card" onclick="CeeApp.quickChat('请帮我写一段代码：')">
+        <div class="model-card-glow"></div>
+        <div class="model-card-icon code">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        </div>
+        <div class="model-card-label">代码编程</div>
+        <div class="model-card-desc">T3 测地线导航</div>
+      </div>
+      <div class="model-card" onclick="CeeApp.quickChat('请帮我发散思维：')">
+        <div class="model-card-glow"></div>
+        <div class="model-card-icon create">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
+        <div class="model-card-label">创意生成</div>
+        <div class="model-card-desc">T5 反事实生长</div>
+      </div>
+      <div class="model-card" onclick="CeeApp.quickChat('请帮我理解这个概念：')">
+        <div class="model-card-glow"></div>
+        <div class="model-card-icon think">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        </div>
+        <div class="model-card-label">知识结晶</div>
+        <div class="model-card-desc">T4 涌现关联</div>
+      </div>
+      <div class="model-card" onclick="CeeApp.quickChat('请帮我从多角度分析：')">
+        <div class="model-card-glow"></div>
+        <div class="model-card-icon prism">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/></svg>
+        </div>
+        <div class="model-card-label">多视角棱镜</div>
+        <div class="model-card-desc">T2 超图坍缩</div>
+      </div>
+    </div>
+
+    <div class="welcome-chips">
+      <span class="chip" onclick="CeeApp.quickChat('介绍一下认知涌现引擎')">什么是认知涌现</span>
+      <span class="chip" onclick="CeeApp.quickChat('T1到T6引擎分别做什么')">T1-T6 引擎介绍</span>
+      <span class="chip" onclick="CeeApp.quickChat('帮我规划一个项目方案')">项目规划</span>
+      <span class="chip" onclick="CeeApp.quickChat('解释一下机器学习的核心概念')">学习概念解释</span>
+    </div>
   </div>
   <div class="messages" id="messages"></div>
 </main>
 
-<!-- ─── 输入栏 ─── -->
+<!-- 底部多开栏 -->
+<div class="tab-bar" id="tabBar">
+  <div class="tab-item active" onclick="CeeApp.switchTab('chat')" data-tab="chat">
+    <div class="tab-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+      </svg>
+    </div>
+    <span class="tab-label">对话</span>
+  </div>
+  <div class="tab-item" onclick="CeeApp.switchTab('engine')" data-tab="engine">
+    <div class="tab-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2"/><line x1="12" y1="22" x2="12" y2="15.5"/><polyline points="22 8.5 12 15.5 2 8.5"/>
+      </svg>
+    </div>
+    <span class="tab-label">引擎</span>
+  </div>
+  <div class="tab-item" onclick="CeeApp.switchTab('knowledge')" data-tab="knowledge">
+    <div class="tab-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+      </svg>
+    </div>
+    <span class="tab-label">知识</span>
+  </div>
+  <div class="tab-item" onclick="CeeApp.switchTab('profile')" data-tab="profile">
+    <div class="tab-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+      </svg>
+    </div>
+    <span class="tab-label">我的</span>
+  </div>
+</div>
+
+<!-- 输入栏 -->
 <div class="input-bar" id="inputBar">
   <div class="input-wrap">
     <textarea class="chat-input" id="chatInput" rows="1" placeholder="发消息..." onkeydown="CeeApp.handleInputKey(event)" oninput="autoResize(this)"></textarea>
@@ -150,23 +252,22 @@
   </button>
 </div>
 
-<!-- ─── 底部占位 (iOS safe area) ─── -->
+<!-- 底部占位 (iOS safe area + tab bar) -->
 <div class="bottom-safe"></div>
 
-<!-- ─── Toast ─── -->
+<!-- Toast -->
 <div class="toast-container" id="toastContainer"></div>
 
-<!-- ─── 快捷键提示条 ─── -->
+<!-- 快捷键提示条 -->
 <div class="shortcuts-bar" id="shortcutsBar"></div>
 
-<!-- ─── 涌现达成仪式 ─── -->
+<!-- 涌现达成仪式 -->
 <div class="ritual-overlay" id="ritual">
   <div class="ritual-crystal"></div>
   <div class="ritual-text">涌现达成 S 级</div>
 </div>
 
 <script>
-/* polyfills */
 function toggleDrawer(){CeeApp.toggleDrawer()}
 function handleInputKey(e){CeeApp.handleInputKey(e)}
 function sendMessage(){CeeApp.sendMessage()}

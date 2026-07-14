@@ -156,6 +156,7 @@
   /* ── State ─────────────────────────────────────────────────────── */
   const STATE = {
     currentPage: 'chat',
+    currentTab: 'chat',
     deepThink: false,
     messages: [],
     typing: false,
@@ -1015,8 +1016,17 @@
       STATE.currentPage = page;
     },
 
+    switchTab(tab) {
+      STATE.currentTab = tab;
+      document.querySelectorAll('.tab-item').forEach(t => t.classList.remove('active'));
+      const tabEl = document.querySelector(`.tab-item[data-tab="${tab}"]`);
+      if (tabEl) tabEl.classList.add('active');
+      StarfieldBackground.syncVisibility();
+    },
+
     quickChat(text) {
       if (STATE.currentPage !== 'chat') this.switchPage('chat');
+      this.switchTab('chat');
       const input = $('#chatInput');
       if (input) {
         input.value = text;
@@ -1567,6 +1577,7 @@
     toggleDeepThink: () => UIManager.toggleDeepThink(),
     toggleTheme: () => SettingsManager.toggleTheme(),
     switchPage: (page) => UIManager.switchPage(page),
+    switchTab: (tab) => UIManager.switchTab(tab),
     handleInputKey: (e) => UIManager.handleInputKey(e),
     quickChat: (text) => UIManager.quickChat(text),
     sendMessage: () => ChatEngine.sendMessage(),
