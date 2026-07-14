@@ -180,7 +180,64 @@ from cee.middle_end import (
     ToolRegistry, ToolExecutor, ToolChain,
 )
 
-__version__ = "4.3.0"
+# v4.4: WebSocket / Storage / Auth / Causal / MQ / MLOps
+from cee.websocket import (
+    WebSocketHub, ChannelManager, MessageRouter,
+    TokenValidator, HeartbeatMonitor, MessageSerializer,
+    WSMessage, WSMessageType, WSConnection, WSConnectionState,
+    WSRole, TokenPayload, get_ws_hub,
+)
+
+from cee.storage import (
+    StorageEngine, SQLiteBackend, MemoryBackend,
+    BaseBackend, ConnectionConfig, QueryResult,
+    BackendType, IsolationLevel,
+    DatabaseError, ConnectionError, QueryError, TransactionError,
+)
+
+from cee.auth import (
+    AuthGuard, JWTEngine, APIKeyManager, HMACSigner, SessionManager,
+    UserIdentity, AuthToken, AuthStrategy, Permission, Role,
+)
+
+from cee.causal import (
+    CausalInferenceEngine, PCEngine, LiNGAMEngine,
+    DoCalculus, PropensityScoreMatcher, CounterfactualEngine,
+    CausalGraph, CausalVariable, CausalEdge,
+    CausalMethod, CausalEffectType,
+)
+
+from cee.mq import (
+    MessageQueue, MessagePublisher, MessageSubscriber,
+    DeadLetterQueue as MQDeadLetterQueue,
+    RetryPolicy, MemoryAdapter, RedisAdapter, KafkaAdapter,
+    BaseMQAdapter, Message, ConsumerGroup, MQBackend, DeliveryMode,
+)
+
+from cee.mlops import (
+    ExperimentTracker, ExperimentRun,
+    ModelRegistry, ModelVersion, ModelStage,
+    DriftDetector, DriftType,
+    ABTestEngine, MetricDirection,
+)
+
+from cee.models.open_source import (
+    OpenAIAdapter, OllamaAdapter, MultiProviderRouter,
+    BaseLLMAdapter as LLMAdapter,
+    ChatMessage as LLMChatMessage,
+    CompletionResponse as LLMCompletionResponse,
+    CompletionChoice as LLMCompletionChoice,
+    CompletionUsage as LLMCompletionUsage,
+    EmbeddingResponse as LLMEmbeddingResponse,
+    ProviderType as LLMProviderType,
+)
+
+from cee.trace.data_lineage import (
+    LineageTracker, DataLineageGraph, LineageRecord,
+    DataNode, DataEdge, NodeType, LineageStatus,
+)
+
+__version__ = "4.4.0"
 __all__ = [
     # T1-T6 Engines
     "InvariantEngine", "InvariantTheoretical",
@@ -287,4 +344,31 @@ __all__ = [
     "StreamPipeline", "StreamHandler",
     "MiddleTaskDecomposer", "TaskScheduler", "AgentRegistry",
     "ToolRegistry", "ToolExecutor", "ToolChain",
+    # v4.4: WebSocket / Storage / Auth / Causal / MQ / MLOps / OpenSource LLM
+    "WebSocketHub", "ChannelManager", "MessageRouter",
+    "TokenValidator", "HeartbeatMonitor", "MessageSerializer",
+    "WSMessage", "WSMessageType", "WSConnection", "WSConnectionState",
+    "WSRole", "TokenPayload", "get_ws_hub",
+    "StorageEngine", "SQLiteBackend", "MemoryBackend", "BaseBackend",
+    "ConnectionConfig", "QueryResult", "BackendType", "IsolationLevel",
+    "DatabaseError", "ConnectionError", "QueryError", "TransactionError",
+    "AuthGuard", "JWTEngine", "APIKeyManager", "HMACSigner", "SessionManager",
+    "UserIdentity", "AuthToken", "AuthStrategy", "Permission", "Role",
+    "CausalInferenceEngine", "PCEngine", "LiNGAMEngine",
+    "DoCalculus", "PropensityScoreMatcher", "CounterfactualEngine",
+    "CausalGraph", "CausalVariable", "CausalEdge",
+    "CausalMethod", "CausalEffectType",
+    "MessageQueue", "MessagePublisher", "MessageSubscriber",
+    "MQDeadLetterQueue", "RetryPolicy", "MemoryAdapter", "RedisAdapter",
+    "KafkaAdapter", "BaseMQAdapter", "Message", "ConsumerGroup",
+    "MQBackend", "DeliveryMode",
+    "ExperimentTracker", "ExperimentRun",
+    "ModelRegistry", "ModelVersion", "ModelStage",
+    "DriftDetector", "DriftType", "ABTestEngine", "MetricDirection",
+    "OpenAIAdapter", "OllamaAdapter", "MultiProviderRouter",
+    "LLMAdapter", "LLMChatMessage", "LLMCompletionResponse",
+    "LLMCompletionChoice", "LLMCompletionUsage", "LLMEmbeddingResponse",
+    "LLMProviderType",
+    "LineageTracker", "DataLineageGraph", "LineageRecord",
+    "DataNode", "DataEdge", "NodeType", "LineageStatus",
 ]

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cognitive-emergence-engine"
-version = "4.3.0"
-description = "Cognitive Emergence Engine (CEE) v4.3 — 认知涌现引擎：九项认知几何引擎(T1-T9) + 中端十五层架构(认知管线/推理引擎/知识图谱/多模型/安全守卫/伦理框架/事件总线/流式/反馈/缓存/委派/配置/管线/工具注册/对话记忆 + 七层原架构)"
+version = "4.4.0"
+description = "Cognitive Emergence Engine (CEE) v4.4 — 认知涌现引擎：九项认知几何引擎(T1-T9) + 中端十五层架构 + 8 大核心新模块(WebSocket/Storage/Auth/Causal/MQ/MLOps/OpenSource LLM/Data Lineage)"
 authors = [
     {name = "Qingluan Studio & AI Collaborators"}
 ]
@@ -32,6 +32,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "httpx>=0.24.0",
     "nltk>=3.8.0",
+    "pyjwt>=2.8.0",
 ]
 
 [project.optional-dependencies]
@@ -92,6 +93,14 @@ cee-hands = "cee.core.cli:hands_cli"
 cee-profile = "cee.core.cli:profile_cli"
 cee-triangle = "cee.core.cli:triangle_cli"
 cee-water = "cee.core.cli:water_cli"
+cee-ws = "cee.core.cli:ws_cli"
+cee-storage = "cee.core.cli:storage_cli"
+cee-auth = "cee.core.cli:auth_cli"
+cee-causal = "cee.core.cli:causal_cli"
+cee-mq = "cee.core.cli:mq_cli"
+cee-mlops = "cee.core.cli:mlops_cli"
+cee-ollama = "cee.core.cli:ollama_cli"
+cee-lineage = "cee.core.cli:lineage_cli"
 
 [tool.setuptools.packages.find]
 where = ["src"]

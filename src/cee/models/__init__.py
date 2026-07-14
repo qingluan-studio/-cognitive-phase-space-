@@ -5,6 +5,18 @@ from cee.models.kimi import (
     ModelEntry,
     ModelRegistry,
 )
+from cee.models.open_source import (
+    OpenAIAdapter,
+    OllamaAdapter,
+    MultiProviderRouter,
+    BaseLLMAdapter,
+    ChatMessage,
+    CompletionResponse,
+    CompletionChoice,
+    CompletionUsage,
+    EmbeddingResponse,
+    ProviderType,
+)
 
 __all__ = [
     "ModelProvider",
@@ -12,4 +24,14 @@ __all__ = [
     "KimiProvider",
     "ModelEntry",
     "ModelRegistry",
+    "OpenAIAdapter",
+    "OllamaAdapter",
+    "MultiProviderRouter",
+    "BaseLLMAdapter",
+    "ChatMessage",
+    "CompletionResponse",
+    "CompletionChoice",
+    "CompletionUsage",
+    "EmbeddingResponse",
+    "ProviderType",
 ]
