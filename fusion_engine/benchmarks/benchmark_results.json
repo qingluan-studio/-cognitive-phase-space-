@@ -1,0 +1,172 @@
+{
+  "事实问答": {
+    "majority_vote": {
+      "latency_ms": 3124.1,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.983,
+      "avg_score": 0.876,
+      "top_model": "Qwen3.7-Plus"
+    },
+    "judge": {
+      "latency_ms": 2513.7,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.993,
+      "avg_score": 0.87,
+      "top_model": "GLM-5.2"
+    },
+    "best_of_n": {
+      "latency_ms": 2361.3,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.976,
+      "avg_score": 0.857,
+      "top_model": "GLM-5.2"
+    },
+    "evolutionary": {
+      "latency_ms": 2642.1,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.963,
+      "avg_score": 0.863,
+      "top_model": "GLM-5.1"
+    }
+  },
+  "代码生成": {
+    "majority_vote": {
+      "latency_ms": 2027.3,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.992,
+      "avg_score": 0.88,
+      "top_model": "GLM-5.2"
+    },
+    "judge": {
+      "latency_ms": 2212.5,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.983,
+      "avg_score": 0.875,
+      "top_model": "DeepSeek-V4-Pro"
+    },
+    "best_of_n": {
+      "latency_ms": 2673.9,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.972,
+      "avg_score": 0.893,
+      "top_model": "GLM-5.2"
+    },
+    "evolutionary": {
+      "latency_ms": 2159.5,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.965,
+      "avg_score": 0.895,
+      "top_model": "GLM-5.2"
+    }
+  },
+  "数学推理": {
+    "majority_vote": {
+      "latency_ms": 2582.9,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.942,
+      "avg_score": 0.811,
+      "top_model": "DeepSeek-V4-Pro"
+    },
+    "judge": {
+      "latency_ms": 1850.5,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.952,
+      "avg_score": 0.813,
+      "top_model": "DeepSeek-V4-Pro"
+    },
+    "best_of_n": {
+      "latency_ms": 2690.1,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.961,
+      "avg_score": 0.807,
+      "top_model": "DeepSeek-V4-Pro"
+    },
+    "evolutionary": {
+      "latency_ms": 2811.5,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.985,
+      "avg_score": 0.801,
+      "top_model": "DeepSeek-V4-Pro"
+    }
+  },
+  "创意写作": {
+    "majority_vote": {
+      "latency_ms": 1829.4,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.971,
+      "avg_score": 0.821,
+      "top_model": "MiniMax-M3"
+    },
+    "judge": {
+      "latency_ms": 2219.0,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.982,
+      "avg_score": 0.812,
+      "top_model": "GLM-5.2"
+    },
+    "best_of_n": {
+      "latency_ms": 2568.0,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.963,
+      "avg_score": 0.826,
+      "top_model": "GLM-5.2"
+    },
+    "evolutionary": {
+      "latency_ms": 3610.6,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.972,
+      "avg_score": 0.836,
+      "top_model": "MiniMax-M3"
+    }
+  },
+  "综合分析": {
+    "majority_vote": {
+      "latency_ms": 2171.3,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.983,
+      "avg_score": 0.84,
+      "top_model": "DeepSeek-V4-Pro"
+    },
+    "judge": {
+      "latency_ms": 2420.3,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.961,
+      "avg_score": 0.843,
+      "top_model": "Doubao-Seed-2.1-Pro"
+    },
+    "best_of_n": {
+      "latency_ms": 2624.6,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.956,
+      "avg_score": 0.877,
+      "top_model": "DeepSeek-V4-Flash"
+    },
+    "evolutionary": {
+      "latency_ms": 3069.3,
+      "cost": 13.0,
+      "model_count": 13,
+      "top_score": 0.985,
+      "avg_score": 0.865,
+      "top_model": "DeepSeek-V4-Pro"
+    }
+  }
+}
