@@ -5,6 +5,11 @@ moe/architecture.py
 
 MoE（混合专家）架构核心设计。
 包含 Expert、Gate、MoELayer 以及完整的 MoE Transformer 模型。
+
+该架构对应的融合模型名称为 **合鸣（Harmonia-13）**：
+13 个领域专家共享基座，通过 Gate 动态路由、稀疏激活，
+协同完成文本、代码、推理、创作等多领域任务。
+
 设计目标：
     1. 每个 Expert 为轻量级子网络（两层 MLP）。
     2. Gate 根据输入动态选择 top-k 专家。
@@ -12,6 +17,10 @@ MoE（混合专家）架构核心设计。
     4. 支持容量因子（capacity factor）限制每个专家处理的 token 数量，
        从而保证计算稀疏性。
 """
+
+# 合鸣：由 13 个领域专家融合而成的稀疏激活统一模型
+MODEL_NAME = "Harmonia-13"
+MODEL_NAME_CN = "合鸣"
 
 import math
 from typing import List, Tuple, Optional
