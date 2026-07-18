@@ -9,14 +9,14 @@ export class GödelSentenceGenerator {
   private _sentences: GödelSentence[];
   private _encodingBase: number;
   private _undecidabilityThreshold: number;
-  private _ GödelNumbering: Map<string, number>;
+  private _GödelNumbering: Map<string, number>;
   private _incompletenessMeasure: number;
 
   constructor(encodingBase: number = 256) {
     this._sentences = [];
     this._encodingBase = encodingBase;
     this._undecidabilityThreshold = 0.5;
-    this._ GödelNumbering = new Map();
+    this._GödelNumbering = new Map();
     this._incompletenessMeasure = 0;
   }
 
@@ -39,7 +39,7 @@ export class GödelSentenceGenerator {
       undecidable,
     };
     this._sentences.push(sentence);
-    this._ GödelNumbering.set(statement, GödelNumber);
+    this._GödelNumbering.set(statement, GödelNumber);
     this._incompletenessMeasure = this._computeIncompleteness();
     return sentence;
   }
@@ -68,7 +68,7 @@ export class GödelSentenceGenerator {
   }
 
   public getGödelNumber(statement: string): number | null {
-    return this._ GödelNumbering.get(statement) ?? null;
+    return this._GödelNumbering.get(statement) ?? null;
   }
 
   public computeIncompletenessRatio(): number {

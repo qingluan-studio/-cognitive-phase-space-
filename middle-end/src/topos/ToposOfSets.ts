@@ -1,4 +1,4 @@
-//**
+/**
  * ═══════════════════════════════════════════════════════════════════════════════
  * 集合拓扑斯 —— 数学宇宙的起点
  * Topos of Sets: The Starting Point of the Mathematical Universe

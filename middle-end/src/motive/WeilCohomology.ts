@@ -27,7 +27,7 @@ export interface WeilAxioms {
 
 export class WeilCohomology {
   private _theory: CohomologyTheory;
-  private _axioms: WeilAxioms;
+  private _axioms: { -readonly [K in keyof WeilAxioms]: WeilAxioms[K] };
   private _bettiNumbers: Map<number, number>;
   private _cycleMaps: Map<string, string>;
   private _history: string[];

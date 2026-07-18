@@ -39,7 +39,7 @@ export class ReaderMonad {
     return this._dependencies;
   }
 
-  get pure(): boolean {
+  get isPure(): boolean {
     return this._pure;
   }
 

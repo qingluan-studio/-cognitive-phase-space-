@@ -77,7 +77,7 @@ export class TotalEclipse {
     const entry: EclipsePhase = { phase, obscuration, darkness, timestamp: Date.now() };
     this._phases.push(entry);
     if (this._phases.length > 100) this._phases.shift();
-    this._besselianCorrections.push(obscuration - this._phases[this._phases.length - 1]?.obscuration ?? 0);
+    this._besselianCorrections.push(obscuration - (this._phases[this._phases.length - 1]?.obscuration ?? 0));
     if (this._besselianCorrections.length > 50) this._besselianCorrections.shift();
     return entry;
   }

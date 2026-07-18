@@ -27,7 +27,7 @@ export class MutualismContract {
   private _strategies: Map<string, ContractStrategy> = new Map();
   private _history: ContractOutcome[] = [];
   private _state: Record<string, unknown> = {};
-  private _ ESS: Map<string, number> = new Map();
+  private _ESS: Map<string, number> = new Map();
   private _reciprocityMatrix: Map<string, Map<string, number>> = new Map();
 
   constructor() {}

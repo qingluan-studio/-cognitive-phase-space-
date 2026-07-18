@@ -88,7 +88,7 @@ export class QuantumFoamEngine {
         this._annihilatePair(pair);
       }
     }
-    if (this._ticker % 5 === 0) this._spawnVirtualPair();
+    if (this._ticker % 5 === 0) this.spawnVirtualPair();
     if (this._ticker % 10 === 0) this._decayLongLivedCells();
     return this.getTopology();
   }

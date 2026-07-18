@@ -4,6 +4,9 @@
  * 单子封装了上下文、副作用与计算的序列，是范畴论对程序的温柔诠释。
  */
 
+import { CategoryObject, Morphism } from './Functor';
+import { Adjunction } from './Adjunction';
+
 export interface MonadData {
   /** 函子名称 */
   functor: string;

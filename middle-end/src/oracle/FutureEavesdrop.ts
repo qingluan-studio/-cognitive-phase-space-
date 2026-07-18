@@ -83,7 +83,7 @@ export class FutureEavesdrop {
   readCleanedSnapshot(targetTime: number): Record<string, unknown> | null {
     const snapshot = this.readSnapshot(targetTime);
     if (!snapshot) return null;
-    return this._decontaminate(snapshot.content, snapshot.corruptionLevel);
+    return this._decontaminate(snapshot.content, 1 - snapshot.confidence);
   }
 
   predictFutureValue(key: string, steps: number = 1): number {

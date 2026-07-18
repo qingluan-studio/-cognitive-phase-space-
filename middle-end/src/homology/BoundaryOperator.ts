@@ -102,7 +102,7 @@ export class BoundaryOperator {
 
     for (let j = 0; j < domainSimplices.length; j++) {
       const simplex = domainSimplices[j];
-      const boundary = this._computeSimplexBoundary(simplex);
+      const boundary = this.computeSimplexBoundary(simplex);
       for (const [faceIdx, coeff] of boundary) {
         const row = faceIdx % rows;
         this._matrix[row][j] = coeff;

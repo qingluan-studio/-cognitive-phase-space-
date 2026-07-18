@@ -113,14 +113,6 @@ export class EitherMonad {
     }
   }
 
-  public isLeft(): boolean {
-    return this._isLeft;
-  }
-
-  public isRight(): boolean {
-    return this._isRight;
-  }
-
   public getErrorCount(): number {
     return this._errorCount;
   }

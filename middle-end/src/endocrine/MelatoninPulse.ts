@@ -205,7 +205,7 @@ export class MelatoninPulse {
 
   endSleep(): void {
     this._state.phase = 'awake';
-    this._state.melatoninLevel = 0;
+    this._melatoninLevel = 0;
   }
 
   getState(): Readonly<SleepState> {
@@ -258,7 +258,7 @@ export class MelatoninPulse {
       optimalWindow = [1020, 1380];
     }
 
-    return { phase, melatoninLevel, alertness, optimalWindow };
+    return { phase, melatoninLevel, alertness, optimalSleepWindow: optimalWindow };
   }
 
   findOptimalSleepWindow(targetDuration: number = 7.5): OptimalWindow {

@@ -67,7 +67,6 @@ export class EschatonLogger {
     return this._causalChain[index] ?? null;
   }
 
-  isTerminated(): boolean { return this._terminated; }
   setTerminalThreshold(threshold: number): void {
     this._terminalThreshold = Math.max(0, Math.min(1, threshold));
   }

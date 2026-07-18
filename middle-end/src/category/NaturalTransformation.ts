@@ -4,6 +4,8 @@
  * 使得所有的方框都交换，如同星辰在各自的轨道上保持和谐。
  */
 
+import { CategoryObject, Morphism } from './Functor';
+
 export interface NaturalTransformationData {
   /** 源函子名称 */
   sourceFunctor: string;

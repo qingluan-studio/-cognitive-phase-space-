@@ -1,4 +1,4 @@
-export interface CapabilityOffering {
+export interface CapabilityOfferingData {
   id: string;
   sacrificedCapability: string;
   gainedCapability: string;
@@ -16,15 +16,15 @@ export interface OfferingResult {
 }
 
 export class CapabilityOffering {
-  private _offerings: Map<string, CapabilityOffering> = new Map();
+  private _offerings: Map<string, CapabilityOfferingData> = new Map();
   private _results: OfferingResult[] = [];
   private _sacrificed: Set<string> = new Set();
   private _minValue = 0.3;
   private _maxMultiplier = 5.0;
   private _synergyMap: Map<string, Set<string>> = new Map();
 
-  propose(offering: CapabilityOffering): void {
-    const normalized: CapabilityOffering = {
+  propose(offering: CapabilityOfferingData): void {
+    const normalized: CapabilityOfferingData = {
       ...offering,
       gainMultiplier: Math.min(offering.gainMultiplier, this._maxMultiplier),
       sacrificeValue: Math.max(0, Math.min(1, offering.sacrificeValue)),
@@ -79,7 +79,7 @@ export class CapabilityOffering {
     return this._sacrificed.has(capability);
   }
 
-  findSacrificesForGain(targetGain: number): CapabilityOffering[] {
+  findSacrificesForGain(targetGain: number): CapabilityOfferingData[] {
     return Array.from(this._offerings.values())
       .filter(o => {
         if (this._sacrificed.has(o.sacrificedCapability)) return false;
@@ -89,7 +89,7 @@ export class CapabilityOffering {
       .sort((a, b) => a.sacrificeValue - b.sacrificeValue);
   }
 
-  calculateOptimal(): CapabilityOffering | null {
+  calculateOptimal(): CapabilityOfferingData | null {
     const available = Array.from(this._offerings.values()).filter(
       o => !this._sacrificed.has(o.sacrificedCapability)
     );
@@ -101,7 +101,7 @@ export class CapabilityOffering {
     });
   }
 
-  private _scoreOffering(o: CapabilityOffering): number {
+  private _scoreOffering(o: CapabilityOfferingData): number {
     const synergyBonus = this._computeSynergyBonus(o.sacrificedCapability, o.gainedCapability);
     const gain = o.sacrificeValue * (o.gainMultiplier + synergyBonus);
     return gain - o.sacrificeValue - o.cost;

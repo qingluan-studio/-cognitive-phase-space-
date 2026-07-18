@@ -67,7 +67,8 @@ export class HormoneFeedbackLoop {
 
     const influences = this._computeInfluences();
 
-    for (const type of Object.values(HormoneType)) {
+    const hormoneTypes: HormoneType[] = ['cortisol', 'oxytocin', 'melatonin', 'adrenaline'];
+    for (const type of hormoneTypes) {
       const hormone = this._hormones[type];
       const totalInfluence = influences[type];
       const phaseInfluence = this._computeCircadianInfluence(type);

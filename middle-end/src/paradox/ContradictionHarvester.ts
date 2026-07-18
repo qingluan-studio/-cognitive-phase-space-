@@ -43,7 +43,7 @@ export class ContradictionHarvester {
     this._harvestCount++;
     this._severityDistribution.push(severity);
     if (this._severityDistribution.length > 50) this._severityDistribution.shift();
-    this._entropyLog.push(this._computeSeverityEntropy());
+    this._entropyLog.push(this.computeSeverityEntropy());
     if (this._entropyLog.length > 50) this._entropyLog.shift();
     this._updatePowerLaw();
     return entry;

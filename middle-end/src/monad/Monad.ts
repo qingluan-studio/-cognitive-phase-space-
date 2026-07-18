@@ -27,14 +27,6 @@ export class Monad {
     this._join = 1;
   }
 
-  get unit(): number {
-    return this._unit;
-  }
-
-  get bind(): number {
-    return this._bind;
-  }
-
   get monadicValue(): number {
     return this._monadicValue;
   }

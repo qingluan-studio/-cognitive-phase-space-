@@ -109,10 +109,10 @@ export class RecursionAnchor {
   public applyYCombinator<F extends (x: number) => number>(
     recursiveFn: (self: F) => F
   ): F {
-    const y = ((f: (x: (g: F) => F) => (g: F) => F) =>
-      ((x: (g: F) => F) => f((y: F) => x(x)(y)))((x: (g: F) => F) => f((y: F) => x(x)(y)))) as unknown as ((f: (x: (g: F) => F) => (g: F) => F) => F);
+    const y = ((f: (x: any) => any) =>
+      ((x: any) => f((y: F) => x(x)(y)))((x: any) => f((y: F) => x(x)(y)))) as unknown as ((f: (x: (g: F) => F) => (g: F) => F) => F);
     const wrapper = (rec: (self: F) => F) =>
-      ((self: (g: F) => F) => ((g: F) => rec(self(self))(g))) as (x: (g: F) => F) => (g: F) => F;
+      ((self: any) => ((g: F) => (rec(self(self)) as any)(g))) as unknown as (x: (g: F) => F) => (g: F) => F;
     return y(wrapper(recursiveFn));
   }
 

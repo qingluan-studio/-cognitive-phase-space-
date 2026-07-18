@@ -143,7 +143,7 @@ export class FiveMethodTwoRebirth {
   rebirth(): RebirthCycle {
     this._cycle++;
     const energyTransferred = this._totalEnergy * 0.3;
-    const layerEvolution: Record<Element, number> = {};
+    const layerEvolution: Record<Element, number> = {} as Record<Element, number>;
 
     for (const [element, layer] of this._layers) {
       const baseRecovery = 0.3 + Math.random() * 0.2;

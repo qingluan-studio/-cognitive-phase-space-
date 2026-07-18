@@ -39,14 +39,6 @@ export class ModalLogic {
     return this._worlds;
   }
 
-  get necessary(): number {
-    return this._necessary;
-  }
-
-  get possible(): number {
-    return this._possible;
-  }
-
   get axiomSystem(): string {
     return this._axiomSystem;
   }

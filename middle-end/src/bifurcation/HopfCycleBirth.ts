@@ -103,7 +103,7 @@ export class HopfCycleBirth {
     }
     this._data.controlParameter = this._data.criticalValue + 0.1;
     this._updateRegime();
-    return this._currentRegime === 'oscillating';
+    return this.currentRegime === 'oscillating';
   }
 
   public suppressOscillation(): void {

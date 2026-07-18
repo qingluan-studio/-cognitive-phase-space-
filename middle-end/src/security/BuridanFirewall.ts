@@ -129,6 +129,7 @@ export class BuridanFirewall {
     if (shouldParalyze) {
       attacker.paralyzed = true;
       this._totalParalyzed++;
+      const pairKey = `${decoyId}:${chosen.equivalentTo}`;
       this._recordStarvation(attackerId, pairKey, attacker);
     }
 

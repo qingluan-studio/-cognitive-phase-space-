@@ -1,4 +1,4 @@
-//**
+/**
  * 纤维化与余纤维化 —— 同伦提升性质的诗性对偶。
  * 纤维化是投影的温柔，余纤维化是嵌入的庄严；
  * 在同伦的范畴剧场中，它们是道路提升与扩张的互补之舞。
@@ -191,7 +191,7 @@ export class Cofibration {
   }
 
   /** 道路提升：对特定底空间道路的点对点提升 */
-  public pathLifting(basePath: number[], fiberCoord: number[]): number[][] {
+  public pathLifting(basePath: number[][], fiberCoord: number[]): number[][] {
     const lifted: number[][] = [];
     let currentFiber = [...fiberCoord];
     for (const basePoint of basePath) {

@@ -258,7 +258,7 @@ export class AutophagyScheduler {
       return;
     }
 
-    if (this._compressionMode !== 'dormant') {
+    if ((this._compressionMode as CompressionMode) !== 'dormant') {
       const now = Date.now();
       if (now - this._lastCompressionTime >= this._compressionCooldown) {
         this._executeCompression();

@@ -171,9 +171,9 @@ export class PalimpsestLayer {
       }
     }
 
-    for (const [key, entry] of accumulator) {
-      if (!(key in entry.content)) {
-        ghost[`ghost_${key}`] = entry.value;
+    for (const [key, accEntry] of accumulator) {
+      if (!(key in entry.currentContent)) {
+        ghost[`ghost_${key}`] = accEntry.value;
       }
     }
 

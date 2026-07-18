@@ -1,4 +1,4 @@
-export interface CrepuscularRay {
+export interface CrepuscularRayData {
   id: number;
   azimuth: number;
   elevation: number;
@@ -20,7 +20,7 @@ export interface CrepuscularRayConfig {
 
 export class CrepuscularRay {
   private _config: CrepuscularRayConfig;
-  private _rays: CrepuscularRay[] = [];
+  private _rays: CrepuscularRayData[] = [];
   private _nextId: number = 0;
   private _projection: RayProjection | null = null;
   private _state: Record<string, unknown> = {};
@@ -47,10 +47,10 @@ export class CrepuscularRay {
     return (numerator / denominator) * 0.25 / Math.PI;
   }
 
-  emit(azimuth: number, elevation: number, intensity: number, source: string): CrepuscularRay {
+  emit(azimuth: number, elevation: number, intensity: number, source: string): CrepuscularRayData {
     const scatteringFactor = this._computeMieScattering(elevation * Math.PI / 180);
     const effectiveIntensity = intensity * (1 + scatteringFactor);
-    const ray: CrepuscularRay = {
+    const ray: CrepuscularRayData = {
       id: this._nextId++,
       azimuth,
       elevation,
@@ -87,11 +87,11 @@ export class CrepuscularRay {
     this._state.decayAppliedAt = Date.now();
   }
 
-  filterBySource(source: string): CrepuscularRay[] {
+  filterBySource(source: string): CrepuscularRayData[] {
     return this._rays.filter((r) => r.source === source);
   }
 
-  dominantRay(): CrepuscularRay | null {
+  dominantRay(): CrepuscularRayData | null {
     if (this._rays.length === 0) return null;
     return this._rays.reduce((best, r) => (r.intensity > best.intensity ? r : best));
   }

@@ -93,7 +93,7 @@ export class YangMills {
     };
   }
 
-  public computeGluon propagator(momentum: number): number {
+  public computeGluonPropagator(momentum: number): number {
     if (momentum <= 0) return 0;
     return 1 / (momentum * momentum);
   }

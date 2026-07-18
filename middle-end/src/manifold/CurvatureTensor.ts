@@ -126,7 +126,7 @@ export class CurvatureTensor {
   }
 
   public scalarToRicci(scalar: number): number[][] {
-    const ricci = [];
+    const ricci: number[][] = [];
     for (let i = 0; i < this._dimension; i++) {
       ricci.push([]);
       for (let j = 0; j < this._dimension; j++) {

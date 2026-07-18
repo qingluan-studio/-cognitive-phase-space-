@@ -4,6 +4,8 @@
  * 它们是积、等化子、拉回的上位概念，是范畴的灵魂之眼。
  */
 
+import { CategoryObject, Morphism } from './Functor';
+
 export interface LimitData {
   /** 图表形状 */
   diagramShape: string;

@@ -4,6 +4,8 @@
  * Hom(FA, B) ≅ Hom(A, GB)，这是两个世界之间完美的镜像。
  */
 
+import { CategoryObject, Morphism } from './Functor';
+
 export interface AdjunctionData {
   /** 左伴随 */
   leftAdjoint: string;

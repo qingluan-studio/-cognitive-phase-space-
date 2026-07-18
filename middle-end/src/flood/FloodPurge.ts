@@ -42,7 +42,7 @@ export class FloodPurge {
         this._sediment.push(`washed:${typeof entry.item}`);
       }
     }
-    this._entropyLog.push(this._computeEntropy());
+    this._entropyLog.push(this.computeDurabilityEntropy());
     if (this._entropyLog.length > 50) this._entropyLog.shift();
   }
 

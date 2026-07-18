@@ -141,7 +141,7 @@ export class ChannelCapacity {
 
   public computeErrorProbability(): number {
     const snr = this._signalPower / this._noiseVariance;
-    return 0.5 * Math.erfc(Math.sqrt(snr));
+    return 0.5 * (Math as unknown as { erfc: (x: number) => number }).erfc(Math.sqrt(snr));
   }
 
   public computeRateDistortion(distortion: number): number {

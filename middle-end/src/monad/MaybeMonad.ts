@@ -40,14 +40,6 @@ export class MaybeMonad {
     return this._value;
   }
 
-  get nothing(): boolean {
-    return this._nothing;
-  }
-
-  get just(): boolean {
-    return this._just;
-  }
-
   public just(value: number): MaybeMonad {
     this._hasValue = true;
     this._value = value;

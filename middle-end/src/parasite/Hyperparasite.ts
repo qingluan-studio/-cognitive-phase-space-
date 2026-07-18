@@ -166,6 +166,26 @@ export class Hyperparasite {
     this._rebuildAdjacency();
   }
 
+  public eigenvectorCentrality(): number {
+    const n = this._adjacencyMatrix.length;
+    if (n === 0) return 0;
+    let v = new Array(n).fill(1);
+    let eigenvalue = 0;
+    for (let iter = 0; iter < 50; iter++) {
+      const next = new Array(n).fill(0);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          next[i] += this._adjacencyMatrix[i][j] * v[j];
+        }
+      }
+      const norm = Math.sqrt(next.reduce((s, x) => s + x * x, 0)) || 1;
+      const normalized = next.map((x) => x / norm);
+      eigenvalue = normalized.reduce((s, x, i) => s + x * next[i], 0);
+      v = normalized;
+    }
+    return eigenvalue;
+  }
+
   public hyperparasiteReport(): Record<string, unknown> {
     const tierCounts: Record<number, number> = {};
     this._chain.forEach((n) => {

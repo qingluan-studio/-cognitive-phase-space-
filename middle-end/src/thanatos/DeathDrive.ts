@@ -1,4 +1,4 @@
-export interface DeathDrive {
+export interface DeathDriveData {
   target: string;
   aggression: number;
   decayFactor: number;
@@ -13,7 +13,7 @@ export interface DriveSnapshot {
 }
 
 export class DeathDrive {
-  private _drive: DeathDrive;
+  private _drive: DeathDriveData;
   private _snapshots: DriveSnapshot[] = [];
   private _destructionLog: string[] = [];
   private _selfHarmProbability: number = 0;
@@ -22,7 +22,7 @@ export class DeathDrive {
   private _predationCoefficients: Map<string, number> = new Map();
   private _phasePortrait: { aggression: number; remaining: number }[] = [];
 
-  constructor(drive: DeathDrive) {
+  constructor(drive: DeathDriveData) {
     this._drive = { ...drive };
     this._decayRate = Math.max(0.01, drive.decayFactor);
     this._logisticCarryingCapacity = Math.max(10, 100 / (drive.aggression + 0.1));

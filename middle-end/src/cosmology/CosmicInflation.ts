@@ -100,7 +100,7 @@ export class CosmicInflation {
     this._potentialEnergy = this._computePotential();
     const dN = H * dt;
     this._eFolds += dN;
-    this._computeSlowRollParameters();
+    this.computeSlowRollParameters();
     this._computePerturbations(H);
   }
 

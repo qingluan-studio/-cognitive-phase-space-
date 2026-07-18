@@ -1,4 +1,4 @@
-//**
+/**
  * ═══════════════════════════════════════════════════════════════════════════════
  * 稳定曲线 —— Deligne-Mumford紧化的基石
  * Stable Curve: The Cornerstone of Deligne-Mumford Compactification
