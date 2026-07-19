@@ -1,0 +1,20 @@
+{
+  "name": "cognitive-phase-space-middle-end",
+  "version": "1.0.0",
+  "description": "Cognitive Phase Space Middle-End: A TypeScript subsystem for entangled processing, paradox resolution, and emergent orchestration.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": ["cognitive", "phase-space", "middle-end", "typescript"],
+  "author": "qingluan-studio",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/node": "^20.0.0"
+  }
+}
