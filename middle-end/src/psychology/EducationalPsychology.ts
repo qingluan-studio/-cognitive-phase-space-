@@ -674,6 +674,399 @@ export class EducationalPsychology {
     for (const s of styles) this._styles.set(s.type, s);
   }
 
+  /** Compute the cognitive load of a learning task. */
+  cognitiveLoad(intrinsic: number, extraneous: number, germane: number): { total: number; ratio: number } {
+    const total = intrinsic + extraneous + germane;
+    const ratio = total > 0 ? germane / total : 0;
+    return { total: Number(total.toFixed(2)), ratio: Number(ratio.toFixed(2)) };
+  }
+
+  /** Compute the zone of proximal development. */
+  zoneOfProximalDevelopment(currentLevel: number, potentialLevel: number, scaffolding: number): { lower: number; upper: number; inZPD: boolean } {
+    const lower = currentLevel;
+    const upper = currentLevel + (potentialLevel - currentLevel) * scaffolding;
+    return {
+      lower: Number(lower.toFixed(2)),
+      upper: Number(upper.toFixed(2)),
+      inZPD: potentialLevel > currentLevel,
+    };
+  }
+
+  /** Compute the self-efficacy score (Bandura). */
+  selfEfficacyScore(pastPerformance: number, vicariousExperience: number, verbalPersuasion: number, physiologicalState: number): number {
+    const weights = { past: 0.4, vicarious: 0.2, verbal: 0.25, physiological: 0.15 };
+    const score = pastPerformance * weights.past + vicariousExperience * weights.vicarious + verbalPersuasion * weights.verbal + physiologicalState * weights.physiological;
+    return Number(score.toFixed(2));
+  }
+
+  /** Compute the expectancy-value theory motivation. */
+  expectancyValueMotivation(expectancy: number, value: number, cost: number): number {
+    return Number(Math.max(0, (expectancy * value) - cost).toFixed(2));
+  }
+
+  /** Compute the mastery goal orientation. */
+  masteryOrientation(learningGoals: number, performanceGoals: number, avoidanceGoals: number): { mastery: number; performance: number; orientation: string } {
+    const mastery = learningGoals;
+    const performance = performanceGoals - avoidanceGoals;
+    let orientation: string;
+    if (mastery > performance && mastery > 0.5) orientation = 'mastery-approach';
+    else if (performance > 0.5 && performanceGoals > avoidanceGoals) orientation = 'performance-approach';
+    else if (avoidanceGoals > 0.5) orientation = 'performance-avoidance';
+    else orientation = 'mastery-avoidance';
+    return { mastery: Number(mastery.toFixed(2)), performance: Number(performance.toFixed(2)), orientation };
+  }
+
+  /** Compute the spaced repetition schedule. */
+  spacedRepetitionSchedule(initialStrength: number, targetStrength: number, forgettingRate: number): number[] {
+    const intervals: number[] = [];
+    let strength = initialStrength;
+    let interval = 1;
+    while (strength < targetStrength && intervals.length < 20) {
+      intervals.push(interval);
+      strength = strength * (1 - forgettingRate) + 0.3;
+      interval = Math.round(interval * 2);
+    }
+    return intervals;
+  }
+
+  /** Compute the forgetting curve (Ebbinghaus). */
+  forgettingCurve(initialMemory: number, timeElapsed: number, forgettingRate: number = 0.5): number {
+    return Number((initialMemory * Math.exp(-timeElapsed / forgettingRate)).toFixed(4));
+  }
+
+  /** Compute the encoding strength. */
+  encodingStrength(depth: number, elaboration: number, distinctiveness: number, attention: number): number {
+    return Number(((depth + elaboration + distinctiveness + attention) / 4).toFixed(2));
+  }
+
+  /** Compute the retrieval practice effect. */
+  retrievalPracticeEffect(initialLearning: number, retrievalAttempts: number, feedbackQuality: number): number {
+    return Number(Math.min(1, initialLearning + retrievalAttempts * 0.1 * feedbackQuality).toFixed(2));
+  }
+
+  /** Compute the interleaving benefit. */
+  interleavingBenefit(massedPractice: number, interleavedPractice: number, transferTasks: number): number {
+    return Number(((interleavedPractice - massedPractice) * transferTasks).toFixed(2));
+  }
+
+  /** Compute the Bloom's taxonomy level. */
+  bloomsTaxonomyLevel(verb: string): { level: number; category: string } {
+    const taxonomy: Record<string, { level: number; category: string }> = {
+      'remember': { level: 1, category: 'remembering' },
+      'understand': { level: 2, category: 'understanding' },
+      'apply': { level: 3, category: 'applying' },
+      'analyze': { level: 4, category: 'analyzing' },
+      'evaluate': { level: 5, category: 'evaluating' },
+      'create': { level: 6, category: 'creating' },
+    };
+    return taxonomy[verb.toLowerCase()] ?? { level: 0, category: 'unknown' };
+  }
+
+  /** Compute the Webb's Depth of Knowledge. */
+  webbsDOK(level: number): { description: string; cognitiveComplexity: number } {
+    const levels: Record<number, { description: string; cognitiveComplexity: number }> = {
+      1: { description: 'recall', cognitiveComplexity: 0.2 },
+      2: { description: 'skill-concept', cognitiveComplexity: 0.4 },
+      3: { description: 'strategic-thinking', cognitiveComplexity: 0.7 },
+      4: { description: 'extended-thinking', cognitiveComplexity: 1.0 },
+    };
+    return levels[level] ?? { description: 'unknown', cognitiveComplexity: 0 };
+  }
+
+  /** Compute the formative assessment effectiveness. */
+  formativeAssessmentEffectiveness(frequency: number, feedbackQuality: number, studentEngagement: number): number {
+    const frequencyScore = Math.min(1, frequency / 10);
+    return Number(((frequencyScore + feedbackQuality + studentEngagement) / 3).toFixed(2));
+  }
+
+  /** Compute the summative assessment reliability. */
+  summativeAssessmentReliability(itemCount: number, itemDifficulty: number, itemDiscrimination: number): number {
+    if (itemCount === 0) return 0;
+    const kuder = (itemCount / (itemCount - 1)) * (1 - (itemDifficulty * (1 - itemDifficulty)) / Math.max(0.01, itemDiscrimination));
+    return Number(Math.max(0, Math.min(1, kuder)).toFixed(2));
+  }
+
+  /** Compute the test item difficulty index. */
+  itemDifficultyIndex(correctResponses: number, totalResponses: number): number {
+    if (totalResponses === 0) return 0;
+    return Number((correctResponses / totalResponses).toFixed(2));
+  }
+
+  /** Compute the test item discrimination index. */
+  itemDiscriminationIndex(upperCorrect: number, lowerCorrect: number, totalUpper: number, totalLower: number): number {
+    if (totalUpper === 0 || totalLower === 0) return 0;
+    return Number(((upperCorrect / totalUpper - lowerCorrect / totalLower)).toFixed(2));
+  }
+
+  /** Compute the assessment validity coefficient. */
+  assessmentValidity(predictorScores: number[], criterionScores: number[]): number {
+    if (predictorScores.length === 0 || criterionScores.length === 0) return 0;
+    const n = Math.min(predictorScores.length, criterionScores.length);
+    const meanP = predictorScores.slice(0, n).reduce((a, b) => a + b, 0) / n;
+    const meanC = criterionScores.slice(0, n).reduce((a, b) => a + b, 0) / n;
+    let cov = 0;
+    let varP = 0;
+    let varC = 0;
+    for (let i = 0; i < n; i++) {
+      cov += (predictorScores[i] - meanP) * (criterionScores[i] - meanC);
+      varP += Math.pow(predictorScores[i] - meanP, 2);
+      varC += Math.pow(criterionScores[i] - meanC, 2);
+    }
+    const denom = Math.sqrt(varP * varC);
+    return denom === 0 ? 0 : Number((cov / denom).toFixed(4));
+  }
+
+  /** Compute the standard error of measurement. */
+  standardErrorOfMeasurement(testReliability: number, testStdDev: number): number {
+    return Number((testStdDev * Math.sqrt(1 - testReliability)).toFixed(4));
+  }
+
+  /** Compute the confidence interval for a test score. */
+  scoreConfidenceInterval(observedScore: number, sem: number, confidence: number = 0.95): [number, number] {
+    const z = confidence === 0.99 ? 2.58 : confidence === 0.95 ? 1.96 : 1.645;
+    return [Number((observedScore - z * sem).toFixed(2)), Number((observedScore + z * sem).toFixed(2))];
+  }
+
+  /** Compute the peer tutoring effectiveness. */
+  peerTutoringEffectiveness(tutorTraining: number, sessionFrequency: number, tutorTuteeRatio: number): number {
+    const frequencyScore = Math.min(1, sessionFrequency / 5);
+    const ratioScore = Math.min(1, 1 / Math.max(1, tutorTuteeRatio));
+    return Number(((tutorTraining + frequencyScore + ratioScore) / 3).toFixed(2));
+  }
+
+  /** Compute the cooperative learning benefit. */
+  cooperativeLearningBenefit(groupCohesion: number, individualAccountability: number, positiveInterdependence: number): number {
+    return Number(((groupCohesion + individualAccountability + positiveInterdependence) / 3).toFixed(2));
+  }
+
+  /** Compute the project-based learning effectiveness. */
+  projectBasedLearningEffectiveness(realWorldRelevance: number, studentChoice: number, sustainedInquiry: number, reflection: number): number {
+    return Number(((realWorldRelevance + studentChoice + sustainedInquiry + reflection) / 4).toFixed(2));
+  }
+
+  /** Compute the flipped classroom benefit. */
+  flippedClassroomBenefit(preClassEngagement: number, inClassActivity: number, postClassReflection: number): number {
+    return Number(((preClassEngagement + inClassActivity + postClassReflection) / 3).toFixed(2));
+  }
+
+  /** Compute the multimedia learning principles adherence. */
+  multimediaLearningAdherence(principles: { principle: string; applied: boolean }[]): number {
+    if (principles.length === 0) return 0;
+    return Number((principles.filter(p => p.applied).length / principles.length).toFixed(2));
+  }
+
+  /** Compute the cognitive apprenticeship components. */
+  cognitiveApprenticeship(modeling: number, coaching: number, scaffolding: number, articulation: number, reflection: number, exploration: number): number {
+    return Number(((modeling + coaching + scaffolding + articulation + reflection + exploration) / 6).toFixed(2));
+  }
+
+  /** Compute the metacognitive strategy use. */
+  metacognitiveStrategyUse(planning: number, monitoring: number, evaluating: number, revising: number): number {
+    return Number(((planning + monitoring + evaluating + revising) / 4).toFixed(2));
+  }
+
+  /** Compute the self-regulated learning score. */
+  selfRegulatedLearningScore(goalSetting: number, selfMonitoring: number, selfInstruction: number, selfReinforcement: number): number {
+    return Number(((goalSetting + selfMonitoring + selfInstruction + selfReinforcement) / 4).toFixed(2));
+  }
+
+  /** Compute the transfer of learning. */
+  transferOfLearning(nearTransfer: number, farTransfer: number, transferTasks: number): { total: number; nearTransferRatio: number } {
+    const total = (nearTransfer + farTransfer) * transferTasks;
+    const nearTransferRatio = total > 0 ? (nearTransfer * transferTasks) / total : 0;
+    return { total: Number(total.toFixed(2)), nearTransferRatio: Number(nearTransferRatio.toFixed(2)) };
+  }
+
+  /** Compute the academic engagement score. */
+  academicEngagement(behavioral: number, emotional: number, cognitive: number): number {
+    return Number(((behavioral + emotional + cognitive) / 3).toFixed(2));
+  }
+
+  /** Compute the school connectedness. */
+  schoolConnectedness(belonging: number, teacherRelationships: number, peerRelationships: number, fairness: number): number {
+    return Number(((belonging + teacherRelationships + peerRelationships + fairness) / 4).toFixed(2));
+  }
+
+  /** Compute the achievement gap indicator. */
+  achievementGap(groupA: number[], groupB: number[]): number {
+    if (groupA.length === 0 || groupB.length === 0) return 0;
+    const meanA = groupA.reduce((a, b) => a + b, 0) / groupA.length;
+    const meanB = groupB.reduce((a, b) => a + b, 0) / groupB.length;
+    return Number(Math.abs(meanA - meanB).toFixed(2));
+  }
+
+  /** Compute the growth mindset indicator. */
+  growthMindsetIndicator(beliefsAboutIntelligence: number, responseToFailure: number, effortAttribution: number): number {
+    return Number(((beliefsAboutIntelligence + responseToFailure + effortAttribution) / 3).toFixed(2));
+  }
+
+  /** Compute the stereotype threat impact. */
+  stereotypeThreatImpact(identification: number, stereotypeSalience: number, testDifficulty: number): number {
+    return Number((identification * stereotypeSalience * testDifficulty).toFixed(2));
+  }
+
+  /** Compute the Pygmalion effect. */
+  pygmalionEffect(teacherExpectations: number, studentAwareness: number, interactionQuality: number): number {
+    return Number((teacherExpectations * studentAwareness * interactionQuality).toFixed(2));
+  }
+
+  /** Compute the Matthew effect in reading. */
+  matthewEffectReading(initialReadingLevel: number, practiceOpportunities: number, timeSpent: number): number {
+    const growth = initialReadingLevel * 0.1 + practiceOpportunities * 0.05 + timeSpent * 0.02;
+    return Number((initialReadingLevel + growth).toFixed(2));
+  }
+
+  /** Compute the class size effect. */
+  classSizeEffect(classSize: number, baselineAchievement: number): number {
+    const idealClassSize = 20;
+    const deviation = Math.abs(classSize - idealClassSize);
+    const effect = -0.01 * deviation;
+    return Number((baselineAchievement * (1 + effect)).toFixed(2));
+  }
+
+  /** Compute the school funding adequacy. */
+  schoolFundingAdequacy(perPupilSpending: number, costIndex: number, needsFactor: number): { adequate: boolean; adjustedSpending: number } {
+    const adjustedSpending = perPupilSpending / Math.max(0.5, costIndex) * needsFactor;
+    const adequate = adjustedSpending >= 12000;
+    return { adequate, adjustedSpending: Math.round(adjustedSpending) };
+  }
+
+  /** Compute the teacher effectiveness score. */
+  teacherEffectiveness(contentKnowledge: number, pedagogicalSkill: number, classroomManagement: number, studentRelationships: number): number {
+    return Number(((contentKnowledge + pedagogicalSkill + classroomManagement + studentRelationships) / 4).toFixed(2));
+  }
+
+  /** Compute the professional development impact. */
+  professionalDevelopmentImpact(hoursCompleted: number, relevance: number, application: number, followUpSupport: number): number {
+    const hoursScore = Math.min(1, hoursCompleted / 40);
+    return Number(((hoursScore + relevance + application + followUpSupport) / 4).toFixed(2));
+  }
+
+  /** Compute the curriculum alignment score. */
+  curriculumAlignment(intended: string[], taught: string[], tested: string[]): number {
+    const intendedTaught = intended.filter(i => taught.includes(i)).length / Math.max(1, intended.length);
+    const taughtTested = taught.filter(t => tested.includes(t)).length / Math.max(1, taught.length);
+    const intendedTested = intended.filter(i => tested.includes(i)).length / Math.max(1, intended.length);
+    return Number(((intendedTaught + taughtTested + intendedTested) / 3).toFixed(2));
+  }
+
+  /** Compute the differentiated instruction effectiveness. */
+  differentiatedInstruction(readiness: number, interest: number, learningProfile: number): number {
+    return Number(((readiness + interest + learningProfile) / 3).toFixed(2));
+  }
+
+  /** Compute the Universal Design for Learning adherence. */
+  udlAdherence(multipleMeansOfRepresentation: number, multipleMeansOfEngagement: number, multipleMeansOfExpression: number): number {
+    return Number(((multipleMeansOfRepresentation + multipleMeansOfEngagement + multipleMeansOfExpression) / 3).toFixed(2));
+  }
+
+  /** Compute the response to intervention (RTI) tier placement. */
+  rtiTierPlacement(gradeLevelPerformance: number, rateOfProgress: number, intensityOfIntervention: number): 1 | 2 | 3 {
+    if (gradeLevelPerformance > 0.6 && rateOfProgress > 0.6) return 1;
+    if (gradeLevelPerformance > 0.3 && rateOfProgress > 0.3) return 2;
+    return 3;
+  }
+
+  /** Compute the Individualized Education Program (IEP) goal attainment. */
+  iepGoalAttainment(currentPerformance: number, goalPerformance: number, timeElapsed: number, totalTime: number): { onTrack: boolean; projectedAttainment: number } {
+    const expectedProgress = (goalPerformance - currentPerformance) * (timeElapsed / totalTime);
+    const projected = currentPerformance + expectedProgress;
+    return {
+      onTrack: projected >= goalPerformance * 0.9,
+      projectedAttainment: Number(projected.toFixed(2)),
+    };
+  }
+
+  /** Compute the gifted program eligibility. */
+  giftedProgramEligibility(iqScore: number, achievementScore: number, creativityScore: number, motivationScore: number): { eligible: boolean; composite: number } {
+    const composite = iqScore * 0.4 + achievementScore * 0.3 + creativityScore * 0.2 + motivationScore * 0.1;
+    return {
+      eligible: composite >= 130 || (iqScore >= 130 && achievementScore >= 120),
+      composite: Math.round(composite),
+    };
+  }
+
+  /** Compute the attendance impact on achievement. */
+  attendanceImpact(attendanceRate: number, baselineAchievement: number): number {
+    const impact = -2 * (1 - attendanceRate) * 100;
+    return Number(Math.max(0, baselineAchievement + impact).toFixed(2));
+  }
+
+  /** Compute the homework effectiveness. */
+  homeworkEffectiveness(timeSpent: number, homeworkQuality: number, completionRate: number, gradeLevel: number): number {
+    const optimalTime = gradeLevel * 10;
+    const timeScore = 1 - Math.min(1, Math.abs(timeSpent - optimalTime) / optimalTime);
+    return Number((timeScore * homeworkQuality * completionRate).toFixed(2));
+  }
+
+  /** Compute the summer learning loss. */
+  summerLearningLoss(endOfYearScore: number, subject: 'math' | 'reading'): number {
+    const lossRate = subject === 'math' ? 0.15 : 0.05;
+    return Number((endOfYearScore * (1 - lossRate)).toFixed(2));
+  }
+
+  /** Compute the grade retention impact. */
+  gradeRetentionImpact(achievementScore: number, socialEmotionalImpact: number, yearsAfterRetention: number): number {
+    const initialGain = 0.05 * achievementScore;
+    const decay = Math.max(0, 1 - yearsAfterRetention * 0.2);
+    const socialEmotionalLoss = socialEmotionalImpact * 0.1;
+    return Number((achievementScore + initialGain * decay - socialEmotionalLoss).toFixed(2));
+  }
+
+  /** Compute the school climate score. */
+  schoolClimateScore(safety: number, relationships: number, teachingLearning: number, institutionalEnvironment: number): number {
+    return Number(((safety + relationships + teachingLearning + institutionalEnvironment) / 4).toFixed(2));
+  }
+
+  /** Compute the parent involvement impact. */
+  parentInvolvementImpact(atHome: number, atSchool: number, communication: number): number {
+    return Number(((atHome + atSchool + communication) / 3).toFixed(2));
+  }
+
+  /** Compute the dropout risk. */
+  dropoutRisk(attendance: number, gpa: number, behavior: number, engagement: number): { risk: number; level: 'low' | 'moderate' | 'high' } {
+    const risk = (1 - attendance) * 0.4 + (1 - gpa / 4) * 0.3 + (1 - behavior) * 0.15 + (1 - engagement) * 0.15;
+    const level = risk < 0.2 ? 'low' : risk < 0.5 ? 'moderate' : 'high';
+    return { risk: Number(risk.toFixed(2)), level };
+  }
+
+  /** Compute the college readiness score. */
+  collegeReadiness(academicPreparation: number, cognitiveStrategies: number, transitionKnowledge: number, keyContentKnowledge: number, academicBehaviors: number): number {
+    return Number(((academicPreparation + cognitiveStrategies + transitionKnowledge + keyContentKnowledge + academicBehaviors) / 5).toFixed(2));
+  }
+
+  /** Generate an educational intervention recommendation. */
+  recommendIntervention(learningIssue: string, severity: number, currentPerformance: number): string[] {
+    const recommendations: string[] = [];
+    if (learningIssue === 'reading' && severity > 0.5) {
+      recommendations.push('phonics-instruction', 'guided-reading', 'fluency-practice');
+    } else if (learningIssue === 'math' && severity > 0.5) {
+      recommendations.push('concrete-representational-abstract', 'math-facts-practice', 'problem-solving-strategies');
+    } else if (learningIssue === 'attention') {
+      recommendations.push('behavioral-intervention', 'classroom-accommodations', 'self-monitoring-strategies');
+    } else if (learningIssue === 'organization') {
+      recommendations.push('executive-function-training', 'planner-use', 'checklist-systems');
+    } else {
+      recommendations.push('small-group-instruction', 'differentiated-instruction', 'progress-monitoring');
+    }
+    if (currentPerformance < 0.3) recommendations.push('intensive-intervention', 'special-education-evaluation');
+    return recommendations;
+  }
+
+  /** Generate an educational psychology dashboard. */
+  educationalDashboard(): Record<string, unknown> {
+    return {
+      learningStyles: this._styles.size,
+      motivationalTheories: 'multiple',
+      bloomLevels: 6,
+      dokLevels: 4,
+      assessmentTypes: ['formative', 'summative', 'diagnostic', 'interim'],
+      interventionTiers: 3,
+      udlPrinciples: 3,
+      timestamp: Date.now(),
+    };
+  }
+
   toPacket(): DataPacket<{
     styles: number;
     motivations: Motivation[];

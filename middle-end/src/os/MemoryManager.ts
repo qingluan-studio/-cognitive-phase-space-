@@ -48,6 +48,13 @@ export interface SwapInfo {
   readonly pageOuts: number;
 }
 
+export interface NUMAInfo {
+  readonly node: number;
+  readonly localMemory: number;
+  readonly freeMemory: number;
+  readonly cpuMask: number;
+}
+
 export class MemoryManager {
   private _segments: MemorySegment[] = [];
   private _pageTable: PageTable = { pages: new Map(), pageSize: 4096, totalPages: 0, usedPages: 0, level: 2 };
@@ -61,6 +68,8 @@ export class MemoryManager {
   private _swapInfo: SwapInfo = { total: 0, used: 0, pageIns: 0, pageOuts: 0 };
   private _processMemory: Map<number, { segments: MemorySegment[]; pageTable: PageTable }> = new Map();
   private _memoryMappings: Map<string, { fd: number; offset: number; length: number; prot: string }> = new Map();
+  private _numaNodes: Map<number, NUMAInfo> = new Map();
+  private _cacheLines: Map<number, { data: number[]; dirty: boolean }> = new Map();
 
   get segmentCount(): number {
     return this._segments.length;
@@ -88,6 +97,14 @@ export class MemoryManager {
 
   get swapUsage(): number {
     return this._swapInfo.used;
+  }
+
+  get numaNodeCount(): number {
+    return this._numaNodes.size;
+  }
+
+  get cacheLineCount(): number {
+    return this._cacheLines.size;
   }
 
   public memoryAllocation(size: number, method: 'first-fit' | 'best-fit' | 'worst-fit' | 'next-fit'): { address: number; size: number; method: string; success: boolean; fragment: number } {
@@ -645,6 +662,52 @@ export class MemoryManager {
     return { swapped: true, page, diskBlock, latency, success: true };
   }
 
+  public numaAllocate(node: number, size: number): { node: number; size: number; allocated: boolean; local: boolean; latency: number } {
+    const info = this._numaNodes.get(node);
+    const local = !!info && info.freeMemory >= size;
+    const latency = local ? 50 : 200;
+    if (info) {
+      this._numaNodes.set(node, { ...info, freeMemory: info.freeMemory - size });
+    }
+    this._recordHistory(`numaAllocate(node=${node}, size=${size}) -> local=${local}`);
+    return { node, size, allocated: true, local, latency };
+  }
+
+  public numaInitialize(nodes: number[], memoryPerNode: number): { nodes: number; totalMemory: number; initialized: boolean } {
+    for (let i = 0; i < nodes.length; i++) {
+      this._numaNodes.set(nodes[i], { node: nodes[i], localMemory: memoryPerNode, freeMemory: memoryPerNode, cpuMask: 1 << i });
+    }
+    this._recordHistory(`numaInitialize(nodes=${nodes.length}, memoryPerNode=${memoryPerNode})`);
+    return { nodes: nodes.length, totalMemory: nodes.length * memoryPerNode, initialized: true };
+  }
+
+  public memoryBarrier(type: 'load' | 'store' | 'full'): { barrier: string; type: string; synchronized: boolean; overhead: number } {
+    const overhead = type === 'full' ? 100 : 50;
+    this._recordHistory(`memoryBarrier(type=${type}) -> overhead=${overhead}ns`);
+    return { barrier: `${type}-barrier`, type, synchronized: true, overhead };
+  }
+
+  public prefetch(address: number, stride: number, count: number): { prefetched: number; address: number; stride: number; cacheLines: number } {
+    const cacheLines = count;
+    for (let i = 0; i < count; i++) {
+      const addr = address + i * stride;
+      this._cacheLines.set(addr, { data: [], dirty: false });
+    }
+    this._recordHistory(`prefetch(addr=${address}, stride=${stride}, count=${count}) -> ${cacheLines} cache lines`);
+    return { prefetched: count, address, stride, cacheLines };
+  }
+
+  public cacheLineFlush(address: number): { flushed: boolean; address: number; dirty: boolean; writeBack: boolean } {
+    const line = this._cacheLines.get(address);
+    const dirty = line?.dirty ?? false;
+    const writeBack = dirty;
+    if (line) {
+      this._cacheLines.set(address, { ...line, dirty: false });
+    }
+    this._recordHistory(`cacheLineFlush(addr=${address}) -> dirty=${dirty}`);
+    return { flushed: true, address, dirty, writeBack };
+  }
+
   public getMemoryStats(): { total: number; used: number; free: number; swapUsed: number; pageFaults: number; tlbHits: number; fragmentation: number } {
     const free = this._freeFrames.length * this._pageTable.pageSize;
     const fragmentation = this._calculateExternalFragmentation();
@@ -668,6 +731,8 @@ export class MemoryManager {
     freeFrames: number;
     tlbEntries: number;
     swapUsage: number;
+    numaNodes: number;
+    cacheLines: number;
     history: string[];
   }> {
     return {
@@ -680,6 +745,8 @@ export class MemoryManager {
         freeFrames: this._freeFrames.length,
         tlbEntries: this._tlb.size,
         swapUsage: this._swapInfo.used,
+        numaNodes: this._numaNodes.size,
+        cacheLines: this._cacheLines.size,
         history: [...this._history],
       },
       metadata: {
@@ -704,6 +771,8 @@ export class MemoryManager {
     this._swapInfo = { total: 0, used: 0, pageIns: 0, pageOuts: 0 };
     this._processMemory.clear();
     this._memoryMappings.clear();
+    this._numaNodes.clear();
+    this._cacheLines.clear();
   }
 
   private _recordHistory(entry: string): void {

@@ -520,6 +520,217 @@ export class BuildingMaterials {
     return { rating, expectedLife: Math.round(expectedLife), maintenance };
   }
 
+  /** Compute material fatigue life using S-N curve approximation. */
+  public fatigueLife(materialName: string, stressAmplitude: number, fatigueStrengthCoeff: number = 1000, fatigueStrengthExp: number = -0.085): number {
+    const material = this._materials.get(materialName);
+    const ultimateStrength = material ? material.properties.tensileStrength / 1e6 : 400;
+    const fatigueLimit = ultimateStrength * 0.4;
+    if (stressAmplitude <= fatigueLimit) return Infinity;
+    const cycles = Math.pow(stressAmplitude / fatigueStrengthCoeff, 1 / fatigueStrengthExp);
+    return Number(cycles.toFixed(0));
+  }
+
+  /** Compute Miner's rule cumulative damage. */
+  public minersRule(stressCycles: { amplitude: number; cycles: number }[], materialName: string): { damage: number; lifeConsumed: number; remainingLife: number } {
+    let damage = 0;
+    for (const sc of stressCycles) {
+      const nf = this.fatigueLife(materialName, sc.amplitude);
+      if (nf > 0 && nf !== Infinity) {
+        damage += sc.cycles / nf;
+      }
+    }
+    return { damage: Number(damage.toFixed(6)), lifeConsumed: Number((damage * 100).toFixed(2)), remainingLife: Number(((1 - damage) * 100).toFixed(2)) };
+  }
+
+  /** Compute thermal expansion for a temperature change. */
+  public thermalExpansion(materialName: string, deltaT: number, originalLength: number): { expansion: number; strain: number; stress: number } {
+    const alphaMap: Record<string, number> = {
+      steel: 12e-6, aluminum: 23e-6, concrete: 10e-6, wood: 5e-6, glass: 9e-6,
+      masonry: 8e-6, polymer: 80e-6, composite: 3e-6,
+    };
+    const material = this._materials.get(materialName);
+    const alpha = alphaMap[material?.type ?? 'steel'];
+    const expansion = alpha * deltaT * originalLength;
+    const strain = alpha * deltaT;
+    const E = material ? material.properties.youngsModulus : 200e9;
+    const stress = E * strain;
+    return { expansion: Number(expansion.toFixed(6)), strain: Number(strain.toFixed(8)), stress: Number((stress / 1e6).toFixed(4)) };
+  }
+
+  /** Compute moisture content effect on wood properties. */
+  public woodMoistureEffect(species: 'spruce' | 'pine' | 'oak' | 'bamboo' | 'cedar', moistureContent: number): { strengthFactor: number; stiffnessFactor: number; shrinkage: number } {
+    const baseStrength = { spruce: 36, pine: 40, oak: 55, bamboo: 80, cedar: 30 };
+    const baseStiffness = { spruce: 11e9, pine: 12e9, oak: 16e9, bamboo: 18e9, cedar: 8e9 };
+    const fiberSaturation = 30;
+    const mc = Math.min(moistureContent, fiberSaturation);
+    const strengthFactor = Math.max(0.5, 1 - (mc / fiberSaturation) * 0.3);
+    const stiffnessFactor = Math.max(0.5, 1 - (mc / fiberSaturation) * 0.25);
+    const shrinkage = mc > 20 ? (mc - 20) * 0.002 : 0;
+    return {
+      strengthFactor: Number(strengthFactor.toFixed(4)),
+      stiffnessFactor: Number(stiffnessFactor.toFixed(4)),
+      shrinkage: Number(shrinkage.toFixed(6)),
+    };
+  }
+
+  /** Compute creep deformation for concrete under sustained load. */
+  public concreteCreep(initialStrain: number, loadDurationDays: number, relativeHumidity: number, concreteStrength: number): { creepCoefficient: number; creepStrain: number; totalStrain: number } {
+    const betaRH = 1.55 * (1 - Math.pow(relativeHumidity / 100, 3));
+    const betaCM = 16.8 / Math.sqrt(concreteStrength);
+    const betaT0 = 1 / (0.1 + Math.pow(loadDurationDays, 0.2));
+    const creepCoefficient = betaRH * betaCM * betaT0;
+    const creepStrain = initialStrain * creepCoefficient;
+    return {
+      creepCoefficient: Number(creepCoefficient.toFixed(4)),
+      creepStrain: Number(creepStrain.toFixed(8)),
+      totalStrain: Number((initialStrain + creepStrain).toFixed(8)),
+    };
+  }
+
+  /** Compute material selection index for a given objective. */
+  public materialSelectionIndex(materialName: string, objective: 'min-weight' | 'min-cost' | 'min-eco'): number {
+    const material = this._materials.get(materialName);
+    if (!material) return 0;
+    const density = material.properties.density;
+    const strength = material.properties.yieldStrength;
+    const carbon = material.sustainability.embodiedCarbon;
+    if (objective === 'min-weight') return Number((strength / density).toFixed(4));
+    if (objective === 'min-cost') return Number((strength / (density * 0.5)).toFixed(4));
+    return Number((strength / (density * carbon)).toFixed(4));
+  }
+
+  /** Compute life cycle cost of a material over a building lifespan. */
+  public lifeCycleCost(materialName: string, initialCost: number, lifespan: number, buildingLife: number, maintenanceRate: number = 0.02, discountRate: number = 0.03): number {
+    const replacements = Math.ceil(buildingLife / lifespan) - 1;
+    let lcc = initialCost;
+    for (let i = 1; i <= replacements; i++) {
+      lcc += initialCost / Math.pow(1 + discountRate, i * lifespan);
+    }
+    for (let year = 1; year <= buildingLife; year++) {
+      lcc += initialCost * maintenanceRate / Math.pow(1 + discountRate, year);
+    }
+    return Number(lcc.toFixed(2));
+  }
+
+  /** Compute recycling potential score. */
+  public recyclingPotential(materialName: string): { recyclability: number; downcyclingRisk: number; recoveryValue: number } {
+    const material = this._materials.get(materialName);
+    const baseRecyclability = material ? material.sustainability.recyclability : 0.5;
+    const downcyclingRisk = material?.type === 'composite' ? 0.8 : material?.type === 'concrete' ? 0.4 : 0.2;
+    const recoveryValue = baseRecyclability * (1 - downcyclingRisk);
+    return {
+      recyclability: Number(baseRecyclability.toFixed(4)),
+      downcyclingRisk: Number(downcyclingRisk.toFixed(4)),
+      recoveryValue: Number(recoveryValue.toFixed(4)),
+    };
+  }
+
+  /** Compute embodied energy of a material assembly. */
+  public embodiedEnergy(materials: { name: string; massKg: number }[]): { totalMJ: number; breakdown: Record<string, number>; perKg: number } {
+    const energyMap: Record<string, number> = {
+      concrete: 1.1, steel: 20.1, wood: 0.5, glass: 15.0, masonry: 0.8,
+      insulation: 25.0, polymer: 80.0, composite: 100.0,
+    };
+    let total = 0;
+    const breakdown: Record<string, number> = {};
+    let totalMass = 0;
+    for (const m of materials) {
+      const material = this._materials.get(m.name);
+      const type = material?.type ?? 'concrete';
+      const energy = (energyMap[type] ?? 1.0) * m.massKg;
+      breakdown[m.name] = Number(energy.toFixed(2));
+      total += energy;
+      totalMass += m.massKg;
+    }
+    return { totalMJ: Number(total.toFixed(2)), breakdown, perKg: totalMass > 0 ? Number((total / totalMass).toFixed(2)) : 0 };
+  }
+
+  /** Compute thermal mass effectiveness. */
+  public thermalMassEffectiveness(materialName: string, thickness: number, surfaceArea: number): { heatCapacity: number; timeLag: number; decrementFactor: number } {
+    const material = this._materials.get(materialName);
+    const density = material?.properties.density ?? 2400;
+    const specificHeat = material?.properties.specificHeat ?? 880;
+    const conductivity = material?.properties.thermalConductivity ?? 1.7;
+    const heatCapacity = density * specificHeat * thickness * surfaceArea;
+    const thermalDiffusivity = conductivity / (density * specificHeat);
+    const timeLag = thickness * thickness / (2 * thermalDiffusivity * 3600);
+    const decrementFactor = Math.exp(-thickness * Math.sqrt(Math.PI * 0.0001 / thermalDiffusivity));
+    return {
+      heatCapacity: Number(heatCapacity.toFixed(2)),
+      timeLag: Number(timeLag.toFixed(2)),
+      decrementFactor: Number(decrementFactor.toFixed(4)),
+    };
+  }
+
+  /** Compute material compatibility between two materials. */
+  public materialCompatibility(materialA: string, materialB: string): { compatible: boolean; galvanicRisk: number; thermalStressRisk: number; recommendation: string } {
+    const a = this._materials.get(materialA);
+    const b = this._materials.get(materialB);
+    const types = [a?.type, b?.type];
+    const steelAndAluminum = types.includes('steel') && types.includes('aluminum');
+    const galvanicRisk = steelAndAluminum ? 0.8 : 0.2;
+    const thermalStressRisk = a && b ? Math.abs(a.properties.thermalConductivity - b.properties.thermalConductivity) / Math.max(a.properties.thermalConductivity, b.properties.thermalConductivity) : 0;
+    const compatible = galvanicRisk < 0.5 && thermalStressRisk < 0.8;
+    return {
+      compatible,
+      galvanicRisk: Number(galvanicRisk.toFixed(4)),
+      thermalStressRisk: Number(thermalStressRisk.toFixed(4)),
+      recommendation: compatible ? 'direct-contact-acceptable' : 'use-isolation-layer',
+    };
+  }
+
+  /** Compute water-cement ratio effect on concrete properties. */
+  public waterCementRatioEffect(wcRatio: number): { strength28d: number; permeability: number; durability: number; workability: number } {
+    const strength28d = Math.max(10, 80 - 40 * wcRatio);
+    const permeability = Math.pow(10, wcRatio * 3 - 1);
+    const durability = Math.max(0, 1 - (wcRatio - 0.4) * 2);
+    const workability = Math.min(1, wcRatio * 1.5);
+    return {
+      strength28d: Number(strength28d.toFixed(2)),
+      permeability: Number(permeability.toFixed(6)),
+      durability: Number(durability.toFixed(4)),
+      workability: Number(workability.toFixed(4)),
+    };
+  }
+
+  /** Compute aggregate grading curve analysis. */
+  public aggregateGrading(sizes: number[], percentages: number[]): { finenessModulus: number; uniformityCoefficient: number; gradingZone: string } {
+    let sum = 0;
+    let cumulative = 0;
+    for (let i = 0; i < sizes.length; i++) {
+      cumulative += percentages[i];
+      sum += cumulative;
+    }
+    const finenessModulus = sum / 100;
+    const d60 = sizes.find((_, i) => percentages.slice(0, i + 1).reduce((a, b) => a + b, 0) >= 60) ?? sizes[sizes.length - 1];
+    const d10 = sizes.find((_, i) => percentages.slice(0, i + 1).reduce((a, b) => a + b, 0) >= 10) ?? sizes[0];
+    const uniformityCoefficient = d10 > 0 ? d60 / d10 : 1;
+    let gradingZone: string;
+    if (finenessModulus > 3.5) gradingZone = 'coarse';
+    else if (finenessModulus > 2.5) gradingZone = 'medium';
+    else gradingZone = 'fine';
+    return {
+      finenessModulus: Number(finenessModulus.toFixed(4)),
+      uniformityCoefficient: Number(uniformityCoefficient.toFixed(4)),
+      gradingZone,
+    };
+  }
+
+  /** Compute alkali-silica reaction risk. */
+  public asrRisk(alkaliContent: number, silicaReactivity: 'low' | 'moderate' | 'high', humidity: number): { risk: string; probability: number; mitigation: string } {
+    const reactivityMap = { low: 0.2, moderate: 0.6, high: 1.0 };
+    const reactivity = reactivityMap[silicaReactivity];
+    const humidityFactor = humidity > 75 ? 1.0 : humidity > 50 ? 0.6 : 0.2;
+    const score = alkaliContent * reactivity * humidityFactor;
+    let risk: string;
+    let probability: number;
+    let mitigation: string;
+    if (score > 3) { risk = 'high'; probability = 0.85; mitigation = 'use-low-alkali-cement-supplementary-cementitious-materials'; }
+    else if (score > 1.5) { risk = 'moderate'; probability = 0.5; mitigation = 'limit-alkali-content-use-fly-ash'; }
+    else { risk = 'low'; probability = 0.15; mitigation = 'standard-practice-sufficient'; }
+    return { risk, probability: Number(probability.toFixed(4)), mitigation };
+  }
+
   get materialCount(): number { return this._materials.size; }
   get concreteMixCount(): number { return this._concrete.size; }
   get steelGradeCount(): number { return this._steel.size; }

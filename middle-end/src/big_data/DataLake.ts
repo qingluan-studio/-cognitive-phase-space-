@@ -721,6 +721,135 @@ export class DataLake {
     return { table: tableName, optimized: true, zOrderBy, autoCompact, filesCompacted, timeTaken };
   }
 
+  public tableStatistics(tableName: string): { table: string; totalFiles: number; totalSize: number; avgFileSize: number; partitions: number; lastModified: number; zoneDistribution: Record<string, number> } | null {
+    const table = this._tables.get(tableName);
+    if (!table) return null;
+    const totalFiles = table.partitions.reduce((s, p) => s + p.fileCount, 0);
+    const totalSize = table.partitions.reduce((s, p) => s + p.sizeBytes, 0);
+    const zoneDistribution: Record<string, number> = {};
+    for (const zone of this._zones.values()) {
+      const count = zone.tables.filter(t => t.name === tableName).length;
+      if (count > 0) zoneDistribution[zone.name] = count;
+    }
+    return {
+      table: tableName,
+      totalFiles,
+      totalSize,
+      avgFileSize: totalFiles > 0 ? Math.round(totalSize / totalFiles) : 0,
+      partitions: table.partitions.length,
+      lastModified: table.lastModified,
+      zoneDistribution,
+    };
+  }
+
+  public lakeOverview(): { lakes: number; tables: number; zones: number; totalSize: number; totalPartitions: number; totalFiles: number; largestTable: string | null } {
+    let totalSize = 0;
+    let totalPartitions = 0;
+    let totalFiles = 0;
+    let largestTable: string | null = null;
+    let largestSize = 0;
+    for (const table of this._tables.values()) {
+      const tableSize = table.partitions.reduce((s, p) => s + p.sizeBytes, 0);
+      totalSize += tableSize;
+      totalPartitions += table.partitions.length;
+      totalFiles += table.partitions.reduce((s, p) => s + p.fileCount, 0);
+      if (tableSize > largestSize) {
+        largestSize = tableSize;
+        largestTable = table.name;
+      }
+    }
+    return {
+      lakes: this._lakes.size,
+      tables: this._tables.size,
+      zones: this._zones.size,
+      totalSize,
+      totalPartitions,
+      totalFiles,
+      largestTable,
+    };
+  }
+
+  public searchTables(query: { name?: string; format?: string; minSize?: number; zone?: string }): LakeTable[] {
+    return Array.from(this._tables.values()).filter(t => {
+      if (query.name && !t.name.includes(query.name)) return false;
+      if (query.format && t.format !== query.format) return false;
+      if (query.minSize) {
+        const size = t.partitions.reduce((s, p) => s + p.sizeBytes, 0);
+        if (size < query.minSize) return false;
+      }
+      if (query.zone) {
+        const zone = this._zones.get(query.zone);
+        if (!zone || !zone.tables.find(tt => tt.name === t.name)) return false;
+      }
+      return true;
+    });
+  }
+
+  public exportMetadata(format: 'json' | 'csv' | 'yaml'): string {
+    const tables = Array.from(this._tables.values());
+    if (format === 'csv') {
+      const header = 'name,format,partitionCount,fileCount,sizeBytes,createdAt';
+      const rows = tables.map(t => `${t.name},${t.format},${t.partitions.length},${t.partitions.reduce((s, p) => s + p.fileCount, 0)},${t.partitions.reduce((s, p) => s + p.sizeBytes, 0)},${t.createdAt}`);
+      return [header, ...rows].join('\n');
+    }
+    if (format === 'yaml') {
+      const lines: string[] = ['tables:'];
+      for (const t of tables) {
+        lines.push(`  - name: ${t.name}`);
+        lines.push(`    format: ${t.format}`);
+        lines.push(`    partitions: ${t.partitions.length}`);
+        lines.push(`    size: ${t.partitions.reduce((s, p) => s + p.sizeBytes, 0)}`);
+      }
+      return lines.join('\n');
+    }
+    return JSON.stringify(tables, null, 2);
+  }
+
+  public bulkRegisterTables(tables: Array<{ name: string; format: LakeTable['format']; schema: LakeTable['schema'] }>): { registered: number; failed: number } {
+    let registered = 0;
+    let failed = 0;
+    tables.forEach(t => {
+      if (this._tables.has(t.name)) {
+        failed++;
+      } else {
+        this.registerTable(t.name, t.format, t.schema);
+        registered++;
+      }
+    });
+    this._recordHistory(`bulkRegisterTables(${tables.length}) -> ${registered}/${failed}`);
+    return { registered, failed };
+  }
+
+  public archiveTable(tableName: string, archiveZone: string): boolean {
+    const table = this._tables.get(tableName);
+    if (!table) return false;
+    const zone = this._zones.get(archiveZone);
+    if (!zone) return false;
+    zone.tables.push(table);
+    this._recordHistory(`archiveTable(table=${tableName}, zone=${archiveZone})`);
+    return true;
+  }
+
+  public purgeOldData(tableName: string, olderThanDays: number): { purgedFiles: number; purgedSize: number } {
+    const table = this._tables.get(tableName);
+    if (!table) return { purgedFiles: 0, purgedSize: 0 };
+    const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    let purgedFiles = 0;
+    let purgedSize = 0;
+    const remaining: typeof table.partitions = [];
+    for (const p of table.partitions) {
+      if (p.createdAt < cutoff) {
+        purgedFiles += p.fileCount;
+        purgedSize += p.sizeBytes;
+      } else {
+        remaining.push(p);
+      }
+    }
+    this._tables.set(tableName, { ...table, partitions: remaining, lastModified: Date.now() });
+    this._recordHistory(`purgeOldData(table=${tableName}, days=${olderThanDays}) -> ${purgedFiles} files, ${purgedSize} bytes`);
+    return { purgedFiles, purgedSize };
+  }
+
   public toPacket(): DataPacket<{
     lakes: Map<string, DataLakeConfig>;
     tables: Map<string, LakeTable>;

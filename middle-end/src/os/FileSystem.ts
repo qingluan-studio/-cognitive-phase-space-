@@ -12,6 +12,8 @@ export interface File {
   readonly owner: string;
   readonly group: string;
   readonly links: number;
+  content?: string;
+  isSymlink?: boolean;
 }
 
 export interface Directory {
@@ -596,6 +598,237 @@ export class FileSystem {
     };
     this._recordHistory(`getFileSystemStats()`);
     return stats;
+  }
+
+  public diskUsage(path: string): { path: string; totalSize: number; fileCount: number; dirCount: number; largestFile: string | null; largestSize: number } | null {
+    if (!this._directories.has(path) && !this._files.has(path)) return null;
+    let totalSize = 0;
+    let fileCount = 0;
+    let dirCount = 0;
+    let largestFile: string | null = null;
+    let largestSize = 0;
+    for (const [p, file] of this._files.entries()) {
+      if (p.startsWith(path + '/') || p === path) {
+        totalSize += file.size;
+        fileCount++;
+        if (file.size > largestSize) {
+          largestSize = file.size;
+          largestFile = p;
+        }
+      }
+    }
+    for (const dir of this._directories.keys()) {
+      if (dir.startsWith(path + '/') && dir !== path) dirCount++;
+    }
+    this._recordHistory(`diskUsage(path=${path}) -> ${fileCount} files, ${totalSize} bytes`);
+    return { path, totalSize, fileCount, dirCount, largestFile, largestSize };
+  }
+
+  public findFiles(predicate: (path: string, file: FileEntry) => boolean, rootPath: string = '/'): FileEntry[] {
+    const results: FileEntry[] = [];
+    for (const [path, file] of this._files.entries()) {
+      if (path.startsWith(rootPath) && predicate(path, file)) {
+        results.push(file);
+      }
+    }
+    return results;
+  }
+
+  public searchByExtension(extension: string, rootPath: string = '/'): { path: string; size: number }[] {
+    const results: { path: string; size: number }[] = [];
+    const ext = extension.startsWith('.') ? extension : `.${extension}`;
+    for (const [path, file] of this._files.entries()) {
+      if (path.startsWith(rootPath) && path.endsWith(ext)) {
+        results.push({ path, size: file.size });
+      }
+    }
+    return results;
+  }
+
+  public searchByName(pattern: string, rootPath: string = '/'): { path: string; type: 'file' | 'directory' }[] {
+    const results: { path: string; type: 'file' | 'directory' }[] = [];
+    for (const [path] of this._files.entries()) {
+      if (path.startsWith(rootPath) && path.includes(pattern)) {
+        results.push({ path, type: 'file' });
+      }
+    }
+    for (const dir of this._directories.keys()) {
+      if (dir.startsWith(rootPath) && dir.includes(pattern)) {
+        results.push({ path: dir, type: 'directory' });
+      }
+    }
+    return results;
+  }
+
+  public chmod(path: string, permissions: string): boolean {
+    const file = this._files.get(path);
+    if (file) {
+      const inode = this._inodes.get(file.inode);
+      if (inode) {
+        this._inodes.set(file.inode, { ...inode, permissions, ctime: Date.now() });
+        this._recordHistory(`chmod(path=${path}, perms=${permissions})`);
+        return true;
+      }
+    }
+    const dir = this._directories.get(path);
+    if (dir) {
+      const inode = this._inodes.get(dir.inode);
+      if (inode) {
+        this._inodes.set(dir.inode, { ...inode, permissions, ctime: Date.now() });
+        this._recordHistory(`chmod(path=${path}, perms=${permissions})`);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public chown(path: string, owner: number, group: number): boolean {
+    const file = this._files.get(path) ?? this._directories.get(path);
+    if (!file) return false;
+    const inode = this._inodes.get(file.inode);
+    if (!inode) return false;
+    this._inodes.set(file.inode, { ...inode, owner, group, ctime: Date.now() });
+    this._recordHistory(`chown(path=${path}, owner=${owner}, group=${group})`);
+    return true;
+  }
+
+  public hardlinkFile(target: string, linkPath: string): boolean {
+    const file = this._files.get(target);
+    if (!file) return false;
+    const inode = this._inodes.get(file.inode);
+    if (!inode) return false;
+    this._inodes.set(file.inode, { ...inode, links: inode.links + 1 });
+    this._files.set(linkPath, { ...file, path: linkPath, name: linkPath.split('/').pop() ?? 'link' });
+    this._recordHistory(`hardlinkFile(target=${target}, link=${linkPath})`);
+    return true;
+  }
+
+  public symlink(target: string, linkPath: string): boolean {
+    const now = Date.now();
+    this._files.set(linkPath, {
+      name: linkPath.split('/').pop() ?? 'link',
+      size: target.length,
+      permissions: 'l rwxrwxrwx',
+      created: now,
+      modified: now,
+      accessed: now,
+      path: linkPath,
+      inode: 0,
+      owner: 'root',
+      group: 'root',
+      links: 1,
+      content: target,
+      isSymlink: true,
+    });
+    this._recordHistory(`symlink(target=${target}, link=${linkPath})`);
+    return true;
+  }
+
+  public readlink(linkPath: string): string | null {
+    const file = this._files.get(linkPath);
+    if (!file || !file.isSymlink) return null;
+    return file.content ?? null;
+  }
+
+  public realpath(path: string): string | null {
+    let current = path;
+    const visited = new Set<string>();
+    while (visited.size < 40) {
+      visited.add(current);
+      const file = this._files.get(current);
+      if (!file || !file.isSymlink) return current;
+      current = file.content ?? current;
+      if (visited.has(current)) return null;
+    }
+    return null;
+  }
+
+  public truncateToSize(path: string, newSize: number): boolean {
+    const file = this._files.get(path);
+    if (!file) return false;
+    const inode = this._inodes.get(file.inode);
+    if (!inode) return false;
+    const content = (file.content ?? '').substring(0, newSize);
+    this._files.set(path, { ...file, content, size: newSize, modified: Date.now() });
+    this._inodes.set(file.inode, { ...inode, size: newSize, mtime: Date.now() });
+    this._recordHistory(`truncateToSize(path=${path}, size=${newSize})`);
+    return true;
+  }
+
+  public fileChecksum(path: string, algorithm: 'md5' | 'sha1' | 'sha256' = 'sha256'): string | null {
+    const file = this._files.get(path);
+    if (!file) return null;
+    let hash = 0;
+    const content = file.content ?? String(file.size + file.inode);
+    for (let i = 0; i < content.length; i++) {
+      hash = (hash * 31 + content.charCodeAt(i)) >>> 0;
+    }
+    return `${algorithm}:${hash.toString(16).padStart(8, '0')}`;
+  }
+
+  public defragment(): { filesDefragged: number; blocksReclaimed: number; duration: number } {
+    const start = Date.now();
+    let blocksReclaimed = 0;
+    for (const [path, file] of this._files.entries()) {
+      const inode = this._inodes.get(file.inode);
+      if (inode && inode.blocks.length > 0) {
+        const compactBlocks = inode.blocks.slice(0, Math.ceil(inode.size / this._superBlock.blockSize));
+        blocksReclaimed += inode.blocks.length - compactBlocks.length;
+        this._inodes.set(file.inode, { ...inode, blocks: compactBlocks });
+      }
+    }
+    const duration = Date.now() - start;
+    this._recordHistory(`defragment() -> ${blocksReclaimed} blocks reclaimed`);
+    return { filesDefragged: this._files.size, blocksReclaimed, duration };
+  }
+
+  public checkDiskIntegrity(): { errors: string[]; fixedErrors: number; orphanedInodes: number } {
+    const errors: string[] = [];
+    let fixedErrors = 0;
+    let orphanedInodes = 0;
+    const referencedInodes = new Set<number>();
+    for (const file of this._files.values()) referencedInodes.add(file.inode);
+    for (const dir of this._directories.values()) referencedInodes.add(dir.inode);
+    for (const inodeNum of this._inodes.keys()) {
+      if (!referencedInodes.has(inodeNum)) {
+        orphanedInodes++;
+        errors.push(`Orphaned inode ${inodeNum}`);
+      }
+    }
+    this._recordHistory(`checkDiskIntegrity() -> ${orphanedInodes} orphaned inodes`);
+    return { errors, fixedErrors, orphanedInodes };
+  }
+
+  public snapshot(): { files: number; directories: number; inodes: number; freeBlocks: number; freeInodes: number; timestamp: number } {
+    return {
+      files: this._files.size,
+      directories: this._directories.size,
+      inodes: this._inodes.size,
+      freeBlocks: this._superBlock.freeBlocks,
+      freeInodes: this._superBlock.freeInodes,
+      timestamp: Date.now(),
+    };
+  }
+
+  public exportTree(path: string = '/', format: 'json' | 'text' = 'text'): string {
+    if (format === 'json') {
+      const tree: Record<string, unknown> = {};
+      for (const [p, f] of this._files.entries()) {
+        if (p.startsWith(path)) tree[p] = { type: 'file', size: f.size };
+      }
+      for (const d of this._directories.keys()) {
+        if (d.startsWith(path) && d !== path) tree[d] = { type: 'directory' };
+      }
+      return JSON.stringify(tree, null, 2);
+    }
+    const lines: string[] = [path];
+    for (const [p, f] of this._files.entries()) {
+      if (p.startsWith(path + '/')) lines.push(`  [file] ${p} (${f.size} bytes)`);
+    }
+    for (const d of this._directories.keys()) {
+      if (d.startsWith(path + '/') && d !== path) lines.push(`  [dir]  ${d}`);
+    }
+    return lines.join('\n');
   }
 
   public toPacket(): DataPacket<{

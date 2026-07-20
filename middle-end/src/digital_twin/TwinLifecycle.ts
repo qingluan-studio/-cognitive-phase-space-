@@ -1,601 +1,680 @@
 import { DataPacket } from '../shared/types';
 
 export interface TwinVersion {
+  id: string;
   version: string;
-  major: number;
-  minor: number;
-  patch: number;
   createdAt: number;
-  createdBy: string;
-  description: string;
-  changes: string[];
-  status: 'draft' | 'testing' | 'stable' | 'deprecated';
+  author: string;
+  changelog: string;
+  parentVersion: string | null;
+  checksum: string;
+  status: 'draft' | 'approved' | 'deprecated' | 'archived';
   tags: string[];
 }
 
 export interface TwinDeployment {
   id: string;
-  twinId: string;
-  version: string;
-  environment: 'development' | 'staging' | 'production';
-  status: 'pending' | 'deploying' | 'deployed' | 'failed' | 'rollback';
+  versionId: string;
+  environment: 'development' | 'staging' | 'production' | 'edge';
   deployedAt: number;
   deployedBy: string;
-  targetSystem: string;
-  configuration: Record<string, unknown>;
-  healthChecks: { name: string; status: 'pass' | 'fail' | 'warning'; lastChecked: number }[];
+  rollbackVersion: string | null;
+  healthCheckUrl: string;
+  scalingConfig: { minInstances: number; maxInstances: number; targetCpu: number };
+  status: 'deploying' | 'running' | 'scaling' | 'unhealthy' | 'stopped';
+  metadata: Record<string, unknown>;
 }
 
 export interface TwinMaintenance {
   id: string;
-  twinId: string;
-  type: 'preventive' | 'corrective' | 'adaptive' | 'perfective';
-  status: 'scheduled' | 'in_progress' | 'completed' | 'failed';
-  scheduledAt: number;
-  startedAt: number;
-  completedAt: number;
+  type: 'scheduled' | 'emergency' | 'patch' | 'upgrade';
+  scheduledStart: number;
+  scheduledEnd: number;
+  actualStart?: number;
+  actualEnd?: number;
   description: string;
-  operations: string[];
-  performedBy: string;
-  downtime: number;
+  impact: 'none' | 'minimal' | 'moderate' | 'severe';
+  affectedVersions: string[];
+  status: 'planned' | 'in-progress' | 'completed' | 'cancelled' | 'failed';
+  metadata: Record<string, unknown>;
 }
 
 export interface TwinLifecycleState {
-  twinId: string;
-  phase: 'creation' | 'deployment' | 'operation' | 'maintenance' | 'decommission';
-  phaseStartTime: number;
-  phaseDuration: number;
-  totalLifetime: number;
-  health: number;
-  performance: number;
-  utilization: number;
+  id: string;
+  name: string;
+  description: string;
+  allowedTransitions: string[];
+  requiredApprovals: number;
+  autoDeploy: boolean;
+  notifications: string[];
+  metadata: Record<string, unknown>;
 }
 
 export interface LifecycleEvent {
   id: string;
-  twinId: string;
-  eventType: string;
   timestamp: number;
-  description: string;
+  type: 'version-created' | 'version-approved' | 'deployment-started' | 'deployment-completed' | 'maintenance-started' | 'maintenance-completed' | 'rollback-initiated' | 'state-changed';
+  entityId: string;
   actor: string;
+  details: string;
   metadata: Record<string, unknown>;
 }
 
-export interface TwinLifecycleResult {
-  versions: TwinVersion[];
-  deployments: TwinDeployment[];
-  maintenanceRecords: TwinMaintenance[];
-  lifecycleStates: TwinLifecycleState[];
-  events: LifecycleEvent[];
-  activeTwins: number;
-  retiredTwins: number;
-  totalTwins: number;
-  avgLifetime: number;
+export interface ApprovalWorkflow {
+  id: string;
+  versionId: string;
+  approvers: string[];
+  approvals: { approver: string; approved: boolean; timestamp: number; comment: string }[];
+  requiredCount: number;
+  status: 'pending' | 'approved' | 'rejected';
+  deadline: number;
+}
+
+export interface DeploymentPipeline {
+  id: string;
+  name: string;
+  stages: { name: string; environment: string; gates: string[]; autoPromote: boolean }[];
+  trigger: 'manual' | 'auto' | 'scheduled';
+  rollbackStrategy: 'automatic' | 'manual' | 'none';
+  metadata: Record<string, unknown>;
+}
+
+export interface EnvironmentConfig {
+  id: string;
+  name: string;
+  type: 'development' | 'staging' | 'production' | 'edge';
+  resources: { cpu: number; memory: number; storage: number; gpu: number };
+  networkPolicy: string;
+  secrets: string[];
+  monitoringEnabled: boolean;
+  backupEnabled: boolean;
 }
 
 export class TwinLifecycle {
-  private _versions: Map<string, TwinVersion[]> = new Map();
+  private _versions: Map<string, TwinVersion> = new Map();
   private _deployments: Map<string, TwinDeployment> = new Map();
-  private _maintenanceRecords: Map<string, TwinMaintenance[]> = new Map();
+  private _maintenanceWindows: Map<string, TwinMaintenance> = new Map();
   private _lifecycleStates: Map<string, TwinLifecycleState> = new Map();
-  private _events: LifecycleEvent[] = [];
+  private _lifecycleEvents: LifecycleEvent[] = [];
+  private _approvalWorkflows: Map<string, ApprovalWorkflow> = new Map();
+  private _deploymentPipelines: Map<string, DeploymentPipeline> = new Map();
+  private _environmentConfigs: Map<string, EnvironmentConfig> = new Map();
+  private _lastResult: TwinVersion | null = null;
   private _counter: number = 0;
-  private _lastResult: TwinLifecycleResult | null = null;
-  private _twinRegistry: Map<string, {
-    name: string;
-    createdAt: number;
-    status: 'active' | 'retired' | 'archived';
-    owner: string;
-  }> = new Map();
-  private _versionTemplates: Map<string, {
-    type: string;
-    template: Record<string, unknown>;
-  }> = new Map();
-  private _deploymentPipelines: Map<string, {
-    name: string;
-    stages: string[];
-    currentStage: number;
-    status: 'idle' | 'running' | 'success' | 'failed';
-  }> = new Map();
-  private _lifecycleStats: {
-    totalCreated: number;
-    totalDeployed: number;
-    totalMaintained: number;
-    totalRetired: number;
-    avgUptime: number;
-    avgDowntime: number;
-  } = {
-    totalCreated: 0,
-    totalDeployed: 0,
-    totalMaintained: 0,
-    totalRetired: 0,
-    avgUptime: 0,
-    avgDowntime: 0,
-  };
+  private _versionCounter: number = 0;
+  private _autoApproveMinor: boolean = false;
+  private _retentionDays: number = 365;
+  private _deploymentHistory: Map<string, TwinDeployment[]> = new Map();
+  private _maintenanceHistory: Map<string, TwinMaintenance[]> = new Map();
+  private _notificationChannels: string[] = [];
+  private _complianceRules: Map<string, { rule: string; enabled: boolean }> = new Map();
+  private _auditLog: { timestamp: number; action: string; user: string; details: string }[] = [];
 
   constructor() {
-    this._initVersionTemplates();
-    this._initDeploymentPipelines();
+    this._initDefaultLifecycleStates();
+    this._initDefaultEnvironmentConfigs();
+    this._initDefaultComplianceRules();
   }
 
-  private _initVersionTemplates(): void {
-    const templates = [
-      { name: 'initial', template: { type: 'major', description: 'Initial version', status: 'draft' } },
-      { name: 'feature', template: { type: 'minor', description: 'Feature addition', status: 'testing' } },
-      { name: 'bugfix', template: { type: 'patch', description: 'Bug fix', status: 'testing' } },
-      { name: 'hotfix', template: { type: 'patch', description: 'Critical hotfix', status: 'stable' } },
-    ];
-    templates.forEach(t => this._versionTemplates.set(t.name, t));
-  }
-
-  private _initDeploymentPipelines(): void {
-    const pipelines = [
-      {
-        name: 'standard',
-        pipeline: {
-          stages: ['build', 'test', 'staging', 'production'],
-          currentStage: 0,
-          status: 'idle' as const,
-        },
-      },
-      {
-        name: 'blue_green',
-        pipeline: {
-          stages: ['build', 'test', 'blue', 'green', 'switch'],
-          currentStage: 0,
-          status: 'idle' as const,
-        },
-      },
-      {
-        name: 'canary',
-        pipeline: {
-          stages: ['build', 'test', 'canary_10pct', 'canary_50pct', 'full'],
-          currentStage: 0,
-          status: 'idle' as const,
-        },
-      },
-    ];
-    pipelines.forEach(p => this._deploymentPipelines.set(p.name, p.pipeline));
-  }
-
-  get versions(): TwinVersion[] {
-    const all: TwinVersion[] = [];
-    for (const versionList of this._versions.values()) {
-      all.push(...versionList);
-    }
-    return all;
-  }
-
-  get deployments(): TwinDeployment[] {
-    return Array.from(this._deployments.values());
-  }
-
-  get maintenanceRecords(): TwinMaintenance[] {
-    const all: TwinMaintenance[] = [];
-    for (const records of this._maintenanceRecords.values()) {
-      all.push(...records);
-    }
-    return all;
-  }
-
-  get lifecycleStates(): TwinLifecycleState[] {
-    return Array.from(this._lifecycleStates.values());
-  }
-
-  get events(): LifecycleEvent[] {
-    return [...this._events];
-  }
-
-  get activeTwins(): number {
-    let count = 0;
-    for (const state of this._lifecycleStates.values()) {
-      if (state.phase === 'operation' || state.phase === 'deployment' || state.phase === 'maintenance') {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  get retiredTwins(): number {
-    let count = 0;
-    for (const state of this._lifecycleStates.values()) {
-      if (state.phase === 'decommission') count++;
-    }
-    return count;
-  }
-
-  get totalTwins(): number {
-    return this._twinRegistry.size;
-  }
-
-  get lifecycleStats(): {
-    totalCreated: number;
-    totalDeployed: number;
-    totalMaintained: number;
-    totalRetired: number;
-    avgUptime: number;
-    avgDowntime: number;
-  } {
-    return { ...this._lifecycleStats };
-  }
-
-  createTwin(
-    twinId: string,
-    name: string,
-    owner: string,
-    initialVersion: string = '1.0.0'
-  ): TwinLifecycleState {
-    const now = Date.now();
-    this._twinRegistry.set(twinId, {
-      name,
-      createdAt: now,
-      status: 'active',
-      owner,
+  private _initDefaultLifecycleStates(): void {
+    this._lifecycleStates.set('draft', {
+      id: 'draft',
+      name: 'Draft',
+      description: 'Initial version under development',
+      allowedTransitions: ['review', 'deprecated'],
+      requiredApprovals: 0,
+      autoDeploy: false,
+      notifications: ['author'],
+      metadata: {}
     });
-    const state: TwinLifecycleState = {
-      twinId,
-      phase: 'creation',
-      phaseStartTime: now,
-      phaseDuration: 0,
-      totalLifetime: 0,
-      health: 1,
-      performance: 1,
-      utilization: 0,
-    };
-    this._lifecycleStates.set(twinId, state);
-    const [major, minor, patch] = initialVersion.split('.').map(v => parseInt(v) || 0);
-    const version: TwinVersion = {
-      version: initialVersion,
-      major,
-      minor,
-      patch,
-      createdAt: now,
-      createdBy: owner,
-      description: 'Initial version',
-      changes: ['Initial creation'],
-      status: 'stable',
-      tags: ['initial'],
-    };
-    this._versions.set(twinId, [version]);
-    this._addEvent(twinId, 'create', 'Twin created', owner);
-    this._lifecycleStats.totalCreated++;
-    return state;
+
+    this._lifecycleStates.set('review', {
+      id: 'review',
+      name: 'Under Review',
+      description: 'Version pending approval',
+      allowedTransitions: ['approved', 'rejected', 'deprecated'],
+      requiredApprovals: 2,
+      autoDeploy: false,
+      notifications: ['reviewers', 'author'],
+      metadata: {}
+    });
+
+    this._lifecycleStates.set('approved', {
+      id: 'approved',
+      name: 'Approved',
+      description: 'Version approved for deployment',
+      allowedTransitions: ['deployed', 'deprecated'],
+      requiredApprovals: 0,
+      autoDeploy: true,
+      notifications: ['deploy-team', 'author'],
+      metadata: {}
+    });
+
+    this._lifecycleStates.set('deployed', {
+      id: 'deployed',
+      name: 'Deployed',
+      description: 'Version currently deployed',
+      allowedTransitions: ['archived', 'rollback'],
+      requiredApprovals: 0,
+      autoDeploy: false,
+      notifications: ['operations'],
+      metadata: {}
+    });
+
+    this._lifecycleStates.set('archived', {
+      id: 'archived',
+      name: 'Archived',
+      description: 'Historical version preserved for audit',
+      allowedTransitions: [],
+      requiredApprovals: 0,
+      autoDeploy: false,
+      notifications: [],
+      metadata: {}
+    });
+
+    this._lifecycleStates.set('deprecated', {
+      id: 'deprecated',
+      name: 'Deprecated',
+      description: 'Version no longer supported',
+      allowedTransitions: ['archived'],
+      requiredApprovals: 1,
+      autoDeploy: false,
+      notifications: ['users'],
+      metadata: {}
+    });
   }
 
-  createVersion(
-    twinId: string,
-    type: 'major' | 'minor' | 'patch',
-    createdBy: string,
-    description: string,
-    changes: string[]
-  ): TwinVersion | null {
-    const versionList = this._versions.get(twinId);
-    if (!versionList || versionList.length === 0) return null;
-    const lastVersion = versionList[versionList.length - 1];
-    let major = lastVersion.major;
-    let minor = lastVersion.minor;
-    let patch = lastVersion.patch;
-    if (type === 'major') {
-      major++;
-      minor = 0;
-      patch = 0;
-    } else if (type === 'minor') {
-      minor++;
-      patch = 0;
-    } else {
-      patch++;
+  private _initDefaultEnvironmentConfigs(): void {
+    this._environmentConfigs.set('dev', {
+      id: 'dev',
+      name: 'Development',
+      type: 'development',
+      resources: { cpu: 2, memory: 4, storage: 50, gpu: 0 },
+      networkPolicy: 'permissive',
+      secrets: ['db-dev', 'api-dev'],
+      monitoringEnabled: true,
+      backupEnabled: false
+    });
+
+    this._environmentConfigs.set('staging', {
+      id: 'staging',
+      name: 'Staging',
+      type: 'staging',
+      resources: { cpu: 4, memory: 8, storage: 100, gpu: 1 },
+      networkPolicy: 'restricted',
+      secrets: ['db-staging', 'api-staging'],
+      monitoringEnabled: true,
+      backupEnabled: true
+    });
+
+    this._environmentConfigs.set('production', {
+      id: 'production',
+      name: 'Production',
+      type: 'production',
+      resources: { cpu: 16, memory: 64, storage: 500, gpu: 4 },
+      networkPolicy: 'strict',
+      secrets: ['db-prod', 'api-prod', 'tls-cert'],
+      monitoringEnabled: true,
+      backupEnabled: true
+    });
+  }
+
+  private _initDefaultComplianceRules(): void {
+    this._complianceRules.set('require-approval', { rule: 'All production deployments require approval', enabled: true });
+    this._complianceRules.set('require-tests', { rule: 'All versions must pass automated tests', enabled: true });
+    this._complianceRules.set('require-docs', { rule: 'All versions must have documentation', enabled: false });
+    this._complianceRules.set('require-security-scan', { rule: 'Security scan required before deployment', enabled: true });
+  }
+
+  get versions(): Map<string, TwinVersion> {
+    return new Map(this._versions);
+  }
+
+  get deployments(): Map<string, TwinDeployment> {
+    return new Map(this._deployments);
+  }
+
+  get maintenanceWindows(): Map<string, TwinMaintenance> {
+    return new Map(this._maintenanceWindows);
+  }
+
+  get lifecycleStates(): Map<string, TwinLifecycleState> {
+    return new Map(this._lifecycleStates);
+  }
+
+  get lifecycleEvents(): LifecycleEvent[] {
+    return [...this._lifecycleEvents];
+  }
+
+  get approvalWorkflows(): Map<string, ApprovalWorkflow> {
+    return new Map(this._approvalWorkflows);
+  }
+
+  get deploymentPipelines(): Map<string, DeploymentPipeline> {
+    return new Map(this._deploymentPipelines);
+  }
+
+  get environmentConfigs(): Map<string, EnvironmentConfig> {
+    return new Map(this._environmentConfigs);
+  }
+
+  get lastResult(): TwinVersion | null {
+    return this._lastResult;
+  }
+
+  get autoApproveMinor(): boolean {
+    return this._autoApproveMinor;
+  }
+
+  get retentionDays(): number {
+    return this._retentionDays;
+  }
+
+  get versionCount(): number {
+    return this._versions.size;
+  }
+
+  get activeDeploymentCount(): number {
+    return Array.from(this._deployments.values()).filter(d => d.status === 'running').length;
+  }
+
+  get pendingMaintenanceCount(): number {
+    return Array.from(this._maintenanceWindows.values()).filter(m => m.status === 'planned' || m.status === 'in-progress').length;
+  }
+
+  setAutoApproveMinor(enabled: boolean): void {
+    this._autoApproveMinor = enabled;
+  }
+
+  setRetentionDays(days: number): void {
+    this._retentionDays = days;
+  }
+
+  addNotificationChannel(channel: string): void {
+    if (!this._notificationChannels.includes(channel)) {
+      this._notificationChannels.push(channel);
     }
+  }
+
+  removeNotificationChannel(channel: string): void {
+    const idx = this._notificationChannels.indexOf(channel);
+    if (idx >= 0) {
+      this._notificationChannels.splice(idx, 1);
+    }
+  }
+
+  createVersion(author: string, changelog: string, parentVersion?: string): TwinVersion {
+    this._versionCounter++;
     const version: TwinVersion = {
-      version: `${major}.${minor}.${patch}`,
-      major,
-      minor,
-      patch,
+      id: `version-${Date.now()}`,
+      version: `1.0.${this._versionCounter}`,
       createdAt: Date.now(),
-      createdBy,
-      description,
-      changes: [...changes],
+      author,
+      changelog,
+      parentVersion: parentVersion || null,
+      checksum: `sha256-${Date.now()}-${Math.random().toString(36).substring(7)}`,
       status: 'draft',
-      tags: [type],
+      tags: []
     };
-    versionList.push(version);
-    this._addEvent(twinId, 'version_create', `Version ${version.version} created`, createdBy);
+
+    this._versions.set(version.id, version);
+    this._lastResult = version;
+    this._recordEvent('version-created', version.id, author, `Created version ${version.version}`);
+    this._audit('create-version', author, `Created version ${version.version}`);
     return version;
   }
 
-  getVersions(twinId: string): TwinVersion[] {
-    return this._versions.get(twinId) ?? [];
-  }
+  updateVersionStatus(versionId: string, newStatus: TwinVersion['status'], actor: string): boolean {
+    const version = this._versions.get(versionId);
+    if (!version) return false;
 
-  getCurrentVersion(twinId: string): TwinVersion | null {
-    const versionList = this._versions.get(twinId);
-    if (!versionList || versionList.length === 0) return null;
-    return versionList[versionList.length - 1];
-  }
-
-  promoteVersion(twinId: string, version: string, status: 'testing' | 'stable' | 'deprecated'): boolean {
-    const versionList = this._versions.get(twinId);
-    if (!versionList) return false;
-    const v = versionList.find(v => v.version === version);
-    if (!v) return false;
-    v.status = status;
-    this._addEvent(twinId, 'version_promote', `Version ${version} promoted to ${status}`, 'system');
+    version.status = newStatus;
+    this._versions.set(versionId, version);
+    this._recordEvent('state-changed', versionId, actor, `Status changed to ${newStatus}`);
+    this._audit('update-version-status', actor, `Version ${versionId} status -> ${newStatus}`);
     return true;
   }
 
-  deployTwin(
-    twinId: string,
-    version: string,
-    environment: 'development' | 'staging' | 'production',
-    deployedBy: string,
-    targetSystem: string,
-    configuration: Record<string, unknown> = {}
-  ): TwinDeployment | null {
-    const state = this._lifecycleStates.get(twinId);
-    if (!state) return null;
-    const id = `deploy-${Date.now()}-${this._counter++}`;
+  submitForApproval(versionId: string, approvers: string[]): ApprovalWorkflow | null {
+    const version = this._versions.get(versionId);
+    if (!version) return null;
+
+    const workflow: ApprovalWorkflow = {
+      id: `approval-${versionId}`,
+      versionId,
+      approvers,
+      approvals: [],
+      requiredCount: this._lifecycleStates.get('review')?.requiredApprovals || 2,
+      status: 'pending',
+      deadline: Date.now() + 86400000
+    };
+
+    this._approvalWorkflows.set(workflow.id, workflow);
+    this.updateVersionStatus(versionId, 'approved', 'system');
+    this._recordEvent('version-approved', versionId, 'system', 'Auto-approved via workflow');
+    return workflow;
+  }
+
+  approveVersion(workflowId: string, approver: string, comment: string): boolean {
+    const workflow = this._approvalWorkflows.get(workflowId);
+    if (!workflow) return false;
+
+    workflow.approvals.push({ approver, approved: true, timestamp: Date.now(), comment });
+
+    if (workflow.approvals.filter(a => a.approved).length >= workflow.requiredCount) {
+      workflow.status = 'approved';
+      this.updateVersionStatus(workflow.versionId, 'approved', approver);
+    }
+
+    this._approvalWorkflows.set(workflowId, workflow);
+    this._audit('approve-version', approver, `Approved workflow ${workflowId}`);
+    return true;
+  }
+
+  rejectVersion(workflowId: string, approver: string, comment: string): boolean {
+    const workflow = this._approvalWorkflows.get(workflowId);
+    if (!workflow) return false;
+
+    workflow.approvals.push({ approver, approved: false, timestamp: Date.now(), comment });
+    workflow.status = 'rejected';
+    this.updateVersionStatus(workflow.versionId, 'draft', approver);
+    this._approvalWorkflows.set(workflowId, workflow);
+    this._audit('reject-version', approver, `Rejected workflow ${workflowId}: ${comment}`);
+    return true;
+  }
+
+  deployVersion(versionId: string, environment: TwinDeployment['environment'], deployedBy: string): TwinDeployment | null {
+    const version = this._versions.get(versionId);
+    if (!version) return null;
+
+    const envConfig = Array.from(this._environmentConfigs.values()).find(e => e.type === environment);
+    if (!envConfig) return null;
+
     const deployment: TwinDeployment = {
-      id,
-      twinId,
-      version,
+      id: `deployment-${Date.now()}`,
+      versionId,
       environment,
-      status: 'deploying',
       deployedAt: Date.now(),
       deployedBy,
-      targetSystem,
-      configuration,
-      healthChecks: [
-        { name: 'connectivity', status: 'pass', lastChecked: Date.now() },
-        { name: 'performance', status: 'warning', lastChecked: Date.now() },
-        { name: 'data_sync', status: 'pass', lastChecked: Date.now() },
-      ],
+      rollbackVersion: null,
+      healthCheckUrl: `${envConfig.name.toLowerCase()}/health`,
+      scalingConfig: { minInstances: envConfig.type === 'production' ? 3 : 1, maxInstances: envConfig.type === 'production' ? 20 : 2, targetCpu: 70 },
+      status: 'deploying',
+      metadata: { version: version.version }
     };
-    this._deployments.set(id, deployment);
-    state.phase = 'deployment';
-    state.phaseStartTime = Date.now();
-    deployment.status = 'deployed';
-    state.phase = 'operation';
-    state.phaseStartTime = Date.now();
-    this._addEvent(twinId, 'deploy', `Deployed version ${version} to ${environment}`, deployedBy);
-    this._lifecycleStats.totalDeployed++;
+
+    this._deployments.set(deployment.id, deployment);
+    this._addToDeploymentHistory(versionId, deployment);
+    this.updateVersionStatus(versionId, 'deployed', deployedBy);
+    this._recordEvent('deployment-started', deployment.id, deployedBy, `Deploying to ${environment}`);
+    this._audit('deploy-version', deployedBy, `Deployed ${versionId} to ${environment}`);
     return deployment;
   }
 
-  rollbackDeployment(deploymentId: string): boolean {
+  updateDeploymentStatus(deploymentId: string, status: TwinDeployment['status']): boolean {
     const deployment = this._deployments.get(deploymentId);
     if (!deployment) return false;
-    deployment.status = 'rollback';
-    const state = this._lifecycleStates.get(deployment.twinId);
-    if (state) {
-      state.phase = 'deployment';
-      state.phaseStartTime = Date.now();
-    }
-    this._addEvent(deployment.twinId, 'rollback', `Rollback deployment ${deploymentId}`, 'system');
+
+    deployment.status = status;
+    this._deployments.set(deploymentId, deployment);
+    this._recordEvent('deployment-completed', deploymentId, 'system', `Status: ${status}`);
     return true;
   }
 
-  scheduleMaintenance(
-    twinId: string,
-    type: 'preventive' | 'corrective' | 'adaptive' | 'perfective',
-    scheduledAt: number,
-    description: string,
-    operations: string[],
-    performedBy: string
-  ): TwinMaintenance | null {
-    const state = this._lifecycleStates.get(twinId);
-    if (!state) return null;
-    const id = `maint-${Date.now()}-${this._counter++}`;
-    const maintenance: TwinMaintenance = {
-      id,
-      twinId,
-      type,
-      status: 'scheduled',
-      scheduledAt,
-      startedAt: 0,
-      completedAt: 0,
-      description,
-      operations: [...operations],
-      performedBy,
-      downtime: 0,
-    };
-    if (!this._maintenanceRecords.has(twinId)) {
-      this._maintenanceRecords.set(twinId, []);
-    }
-    this._maintenanceRecords.get(twinId)!.push(maintenance);
-    this._addEvent(twinId, 'maintenance_schedule', `Maintenance scheduled: ${description}`, performedBy);
-    return maintenance;
-  }
-
-  startMaintenance(maintenanceId: string): boolean {
-    for (const records of this._maintenanceRecords.values()) {
-      const record = records.find(r => r.id === maintenanceId);
-      if (record) {
-        record.status = 'in_progress';
-        record.startedAt = Date.now();
-        const state = this._lifecycleStates.get(record.twinId);
-        if (state) {
-          state.phase = 'maintenance';
-          state.phaseStartTime = Date.now();
-        }
-        this._addEvent(record.twinId, 'maintenance_start', 'Maintenance started', record.performedBy);
-        return true;
-      }
-    }
-    return false;
-  }
-
-  completeMaintenance(maintenanceId: string): boolean {
-    for (const records of this._maintenanceRecords.values()) {
-      const record = records.find(r => r.id === maintenanceId);
-      if (record) {
-        record.status = 'completed';
-        record.completedAt = Date.now();
-        record.downtime = record.startedAt > 0 ? record.completedAt - record.startedAt : 0;
-        const state = this._lifecycleStates.get(record.twinId);
-        if (state) {
-          state.phase = 'operation';
-          state.phaseStartTime = Date.now();
-          state.health = Math.min(1, state.health + 0.1);
-        }
-        this._addEvent(record.twinId, 'maintenance_complete', 'Maintenance completed', record.performedBy);
-        this._lifecycleStats.totalMaintained++;
-        return true;
-      }
-    }
-    return false;
-  }
-
-  getMaintenanceRecords(twinId: string): TwinMaintenance[] {
-    return this._maintenanceRecords.get(twinId) ?? [];
-  }
-
-  updateHealth(twinId: string, health: number): boolean {
-    const state = this._lifecycleStates.get(twinId);
-    if (!state) return false;
-    state.health = Math.max(0, Math.min(1, health));
-    return true;
-  }
-
-  updatePerformance(twinId: string, performance: number): boolean {
-    const state = this._lifecycleStates.get(twinId);
-    if (!state) return false;
-    state.performance = Math.max(0, Math.min(1, performance));
-    return true;
-  }
-
-  updateUtilization(twinId: string, utilization: number): boolean {
-    const state = this._lifecycleStates.get(twinId);
-    if (!state) return false;
-    state.utilization = Math.max(0, Math.min(1, utilization));
-    return true;
-  }
-
-  decommissionTwin(twinId: string, actor: string): boolean {
-    const state = this._lifecycleStates.get(twinId);
-    if (!state) return false;
-    state.phase = 'decommission';
-    state.phaseStartTime = Date.now();
-    const twinInfo = this._twinRegistry.get(twinId);
-    if (twinInfo) {
-      twinInfo.status = 'retired';
-    }
-    this._addEvent(twinId, 'decommission', 'Twin decommissioned', actor);
-    this._lifecycleStats.totalRetired++;
-    return true;
-  }
-
-  getLifecycleState(twinId: string): TwinLifecycleState | null {
-    return this._lifecycleStates.get(twinId) ?? null;
-  }
-
-  getDeployment(deploymentId: string): TwinDeployment | null {
-    return this._deployments.get(deploymentId) ?? null;
-  }
-
-  getDeploymentsForTwin(twinId: string): TwinDeployment[] {
-    const result: TwinDeployment[] = [];
-    for (const deployment of this._deployments.values()) {
-      if (deployment.twinId === twinId) {
-        result.push(deployment);
-      }
-    }
-    return result.sort((a, b) => b.deployedAt - a.deployedAt);
-  }
-
-  getEvents(twinId: string, limit?: number): LifecycleEvent[] {
-    const filtered = this._events.filter(e => e.twinId === twinId);
-    if (limit === undefined) return filtered;
-    return filtered.slice(-limit);
-  }
-
-  addHealthCheck(
-    deploymentId: string,
-    name: string,
-    status: 'pass' | 'fail' | 'warning'
-  ): boolean {
+  rollbackDeployment(deploymentId: string, actor: string): boolean {
     const deployment = this._deployments.get(deploymentId);
     if (!deployment) return false;
-    const existing = deployment.healthChecks.find(h => h.name === name);
-    if (existing) {
-      existing.status = status;
-      existing.lastChecked = Date.now();
-    } else {
-      deployment.healthChecks.push({ name, status, lastChecked: Date.now() });
-    }
+
+    const version = this._versions.get(deployment.versionId);
+    if (!version || !version.parentVersion) return false;
+
+    deployment.rollbackVersion = version.parentVersion;
+    deployment.status = 'stopped';
+    this._deployments.set(deploymentId, deployment);
+    this._recordEvent('rollback-initiated', deploymentId, actor, `Rollback to ${version.parentVersion}`);
+    this._audit('rollback-deployment', actor, `Rolled back ${deploymentId} to ${version.parentVersion}`);
     return true;
   }
 
-  getVersionTemplateNames(): string[] {
-    return Array.from(this._versionTemplates.keys());
+  scheduleMaintenance(maintenance: TwinMaintenance): void {
+    this._maintenanceWindows.set(maintenance.id, maintenance);
+    this._addToMaintenanceHistory(maintenance.id, maintenance);
+    this._recordEvent('maintenance-started', maintenance.id, 'system', `Scheduled: ${maintenance.description}`);
+    this._audit('schedule-maintenance', 'system', `Scheduled maintenance ${maintenance.id}`);
   }
 
-  getPipelineNames(): string[] {
-    return Array.from(this._deploymentPipelines.keys());
+  updateMaintenanceStatus(maintenanceId: string, status: TwinMaintenance['status']): boolean {
+    const maintenance = this._maintenanceWindows.get(maintenanceId);
+    if (!maintenance) return false;
+
+    maintenance.status = status;
+    if (status === 'in-progress' && !maintenance.actualStart) {
+      maintenance.actualStart = Date.now();
+    }
+    if (status === 'completed' && !maintenance.actualEnd) {
+      maintenance.actualEnd = Date.now();
+    }
+
+    this._maintenanceWindows.set(maintenanceId, maintenance);
+    this._recordEvent('maintenance-completed', maintenanceId, 'system', `Status: ${status}`);
+    return true;
   }
 
-  private _addEvent(
-    twinId: string,
-    eventType: string,
-    description: string,
-    actor: string,
-    metadata: Record<string, unknown> = {}
-  ): void {
-    const event: LifecycleEvent = {
+  addDeploymentPipeline(pipeline: DeploymentPipeline): void {
+    this._deploymentPipelines.set(pipeline.id, pipeline);
+  }
+
+  removeDeploymentPipeline(id: string): boolean {
+    return this._deploymentPipelines.delete(id);
+  }
+
+  addEnvironmentConfig(config: EnvironmentConfig): void {
+    this._environmentConfigs.set(config.id, config);
+  }
+
+  removeEnvironmentConfig(id: string): boolean {
+    return this._environmentConfigs.delete(id);
+  }
+
+  addLifecycleState(state: TwinLifecycleState): void {
+    this._lifecycleStates.set(state.id, state);
+  }
+
+  removeLifecycleState(id: string): boolean {
+    return this._lifecycleStates.delete(id);
+  }
+
+  getVersionHistory(versionId: string): TwinVersion[] {
+    const history: TwinVersion[] = [];
+    let current = this._versions.get(versionId);
+    while (current) {
+      history.push(current);
+      current = current.parentVersion ? this._versions.get(current.parentVersion) || null : null;
+    }
+    return history;
+  }
+
+  getDeploymentHistory(versionId: string): TwinDeployment[] {
+    return this._deploymentHistory.get(versionId) || [];
+  }
+
+  private _addToDeploymentHistory(versionId: string, deployment: TwinDeployment): void {
+    const history = this._deploymentHistory.get(versionId) || [];
+    history.push(deployment);
+    this._deploymentHistory.set(versionId, history);
+  }
+
+  private _addToMaintenanceHistory(maintenanceId: string, maintenance: TwinMaintenance): void {
+    const history = this._maintenanceHistory.get(maintenanceId) || [];
+    history.push(maintenance);
+    this._maintenanceHistory.set(maintenanceId, history);
+  }
+
+  private _recordEvent(type: LifecycleEvent['type'], entityId: string, actor: string, details: string): void {
+    this._lifecycleEvents.push({
       id: `event-${Date.now()}-${this._counter++}`,
-      twinId,
-      eventType,
       timestamp: Date.now(),
-      description,
+      type,
+      entityId,
       actor,
-      metadata,
-    };
-    this._events.push(event);
-    if (this._events.length > 1000) {
-      this._events.shift();
+      details,
+      metadata: {}
+    });
+
+    if (this._lifecycleEvents.length > 10000) {
+      this._lifecycleEvents.shift();
     }
   }
 
-  toPacket(): DataPacket<TwinLifecycleResult> {
-    const result: TwinLifecycleResult = {
-      versions: this.versions,
-      deployments: this.deployments,
-      maintenanceRecords: this.maintenanceRecords,
-      lifecycleStates: this.lifecycleStates,
-      events: this._events,
-      activeTwins: this.activeTwins,
-      retiredTwins: this.retiredTwins,
-      totalTwins: this.totalTwins,
-      avgLifetime: 0,
+  private _audit(action: string, user: string, details: string): void {
+    this._auditLog.push({ timestamp: Date.now(), action, user, details });
+    if (this._auditLog.length > 10000) {
+      this._auditLog.shift();
+    }
+  }
+
+  getEventsByEntity(entityId: string): LifecycleEvent[] {
+    return this._lifecycleEvents.filter(e => e.entityId === entityId);
+  }
+
+  getEventsByType(type: LifecycleEvent['type']): LifecycleEvent[] {
+    return this._lifecycleEvents.filter(e => e.type === type);
+  }
+
+  getEventsInRange(start: number, end: number): LifecycleEvent[] {
+    return this._lifecycleEvents.filter(e => e.timestamp >= start && e.timestamp <= end);
+  }
+
+  checkCompliance(versionId: string): { compliant: boolean; violations: string[] } {
+    const violations: string[] = [];
+    const version = this._versions.get(versionId);
+
+    if (!version) {
+      violations.push('Version not found');
+      return { compliant: false, violations };
+    }
+
+    for (const [name, rule] of this._complianceRules) {
+      if (!rule.enabled) continue;
+
+      if (name === 'require-approval' && version.status === 'deployed') {
+        const workflow = Array.from(this._approvalWorkflows.values()).find(w => w.versionId === versionId);
+        if (!workflow || workflow.status !== 'approved') {
+          violations.push(rule.rule);
+        }
+      }
+    }
+
+    return { compliant: violations.length === 0, violations };
+  }
+
+  setComplianceRule(name: string, enabled: boolean): void {
+    const rule = this._complianceRules.get(name);
+    if (rule) {
+      rule.enabled = enabled;
+    }
+  }
+
+  getComplianceRules(): Map<string, { rule: string; enabled: boolean }> {
+    return new Map(this._complianceRules);
+  }
+
+  cleanupOldVersions(): number {
+    const cutoff = Date.now() - this._retentionDays * 86400000;
+    let removed = 0;
+
+    for (const [id, version] of this._versions) {
+      if (version.status === 'archived' && version.createdAt < cutoff) {
+        this._versions.delete(id);
+        removed++;
+      }
+    }
+
+    return removed;
+  }
+
+  getHealthStatus(): Record<string, string> {
+    const status: Record<string, string> = {};
+    for (const [id, deployment] of this._deployments) {
+      status[id] = deployment.status;
+    }
+    return status;
+  }
+
+  getMetrics(): Record<string, number> {
+    return {
+      totalVersions: this._versions.size,
+      totalDeployments: this._deployments.size,
+      totalMaintenanceWindows: this._maintenanceWindows.size,
+      totalEvents: this._lifecycleEvents.length,
+      pendingApprovals: Array.from(this._approvalWorkflows.values()).filter(w => w.status === 'pending').length,
+      activeDeployments: this.activeDeploymentCount,
+      failedDeployments: Array.from(this._deployments.values()).filter(d => d.status === 'unhealthy' || d.status === 'stopped').length,
+      complianceViolations: Array.from(this._versions.keys()).reduce((sum, id) => sum + this.checkCompliance(id).violations.length, 0)
     };
-    this._lastResult = result;
+  }
+
+  exportVersion(versionId: string): string {
+    const version = this._versions.get(versionId);
+    return version ? JSON.stringify(version, null, 2) : '';
+  }
+
+  importVersion(json: string): TwinVersion | null {
+    try {
+      const version = JSON.parse(json) as TwinVersion;
+      this._versions.set(version.id, version);
+      return version;
+    } catch {
+      return null;
+    }
+  }
+
+  toPacket(): DataPacket<TwinVersion> {
+    const result = this._lastResult || {
+      id: '',
+      version: '',
+      createdAt: Date.now(),
+      author: '',
+      changelog: '',
+      parentVersion: null,
+      checksum: '',
+      status: 'draft',
+      tags: []
+    };
     this._counter++;
     return {
       id: `twin-lifecycle-${Date.now()}-${this._counter}`,
       payload: result,
       metadata: {
         createdAt: Date.now(),
-        route: ['digital_twin', 'twin_lifecycle'],
+        route: ['digital-twin', 'twin-lifecycle'],
         priority: 1,
-        phase: 'lifecycle',
-      },
+        phase: 'lifecycle'
+      }
     };
   }
 
   reset(): void {
     this._versions.clear();
     this._deployments.clear();
-    this._maintenanceRecords.clear();
+    this._maintenanceWindows.clear();
     this._lifecycleStates.clear();
-    this._events = [];
-    this._counter = 0;
+    this._lifecycleEvents = [];
+    this._approvalWorkflows.clear();
+    this._deploymentPipelines.clear();
+    this._environmentConfigs.clear();
     this._lastResult = null;
-    this._twinRegistry.clear();
-    this._lifecycleStats = {
-      totalCreated: 0,
-      totalDeployed: 0,
-      totalMaintained: 0,
-      totalRetired: 0,
-      avgUptime: 0,
-      avgDowntime: 0,
-    };
+    this._counter = 0;
+    this._versionCounter = 0;
+    this._autoApproveMinor = false;
+    this._retentionDays = 365;
+    this._deploymentHistory.clear();
+    this._maintenanceHistory.clear();
+    this._notificationChannels = [];
+    this._complianceRules.clear();
+    this._auditLog = [];
+    this._initDefaultLifecycleStates();
+    this._initDefaultEnvironmentConfigs();
+    this._initDefaultComplianceRules();
   }
 }

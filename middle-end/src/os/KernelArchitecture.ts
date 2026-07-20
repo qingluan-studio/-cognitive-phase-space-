@@ -66,6 +66,20 @@ export interface IDTEntry {
   readonly flags: string;
 }
 
+export interface SecurityModule {
+  readonly name: string;
+  readonly loaded: boolean;
+  readonly hooks: string[];
+  readonly policyVersion: string;
+}
+
+export interface CPUProfile {
+  readonly cycles: number;
+  readonly instructions: number;
+  readonly cacheMisses: number;
+  readonly branchMispredictions: number;
+}
+
 export class KernelArchitecture {
   private _kernel: KernelInfo | null = null;
   private _syscalls: Map<string, SystemCall> = new Map();
@@ -80,6 +94,9 @@ export class KernelArchitecture {
   private _tickCount = 0;
   private _contextSwitchCount = 0;
   private _syscallCount = 0;
+  private _securityModules: Map<string, SecurityModule> = new Map();
+  private _cpuProfiles: CPUProfile[] = [];
+  private _powerState: 'active' | 'idle' | 'sleep' | 'deep-sleep' = 'active';
 
   get kernelType(): string {
     return this._kernel?.type ?? 'none';
@@ -115,6 +132,22 @@ export class KernelArchitecture {
 
   get architecture(): string {
     return this._kernel?.architecture ?? 'unknown';
+  }
+
+  get gdtCount(): number {
+    return this._gdt.length;
+  }
+
+  get idtCount(): number {
+    return this._idt.length;
+  }
+
+  get powerState(): string {
+    return this._powerState;
+  }
+
+  get securityModuleCount(): number {
+    return this._securityModules.size;
   }
 
   public monolithicKernel(services: string[]): { type: string; services: number; performance: number; size: string; modules: string[] } {
@@ -580,6 +613,182 @@ export class KernelArchitecture {
     return { interrupts, count: interrupts.length, enabled, disabled: 0 };
   }
 
+  public gdtDump(): { entries: typeof this._gdt; count: number; codeSegments: number; dataSegments: number } {
+    const entries = [...this._gdt];
+    const codeSegments = entries.filter(e => e.access.includes('CODE')).length;
+    const dataSegments = entries.filter(e => e.access.includes('DATA')).length;
+    this._recordHistory(`gdtDump(entries=${entries.length})`);
+    return { entries, count: entries.length, codeSegments, dataSegments };
+  }
+
+  public idtDump(): { entries: typeof this._idt; count: number; trapGates: number; interruptGates: number } {
+    const entries = [...this._idt];
+    const trapGates = entries.filter(e => e.flags === 'TRAP_GATE').length;
+    const interruptGates = entries.filter(e => e.flags === 'INT_GATE').length;
+    this._recordHistory(`idtDump(entries=${entries.length})`);
+    return { entries, count: entries.length, trapGates, interruptGates };
+  }
+
+  public moduleList(): string[] {
+    const modules = [...this._modules];
+    this._recordHistory(`moduleList(count=${modules.length})`);
+    return modules;
+  }
+
+  public findModule(name: string): string | null {
+    return this._modules.find(m => m === name) ?? null;
+  }
+
+  public isModuleLoaded(name: string): boolean {
+    return this._modules.includes(name);
+  }
+
+  public syscallStatistics(): { totalCalls: number; byName: Record<string, number>; avgLatency: number } {
+    const byName: Record<string, number> = {};
+    let total = 0;
+    for (const syscall of this._syscalls.values()) {
+      byName[syscall.name] = (byName[syscall.name] ?? 0) + 1;
+      total++;
+    }
+    return {
+      totalCalls: total,
+      byName,
+      avgLatency: total > 0 ? Math.round(this._syscallCount / total) : 0,
+    };
+  }
+
+  public processByPid(pid: number): ProcessControlBlock | null {
+    return this._processTable.get(pid) ?? null;
+  }
+
+  public processesByState(state: string): ProcessControlBlock[] {
+    return Array.from(this._processTable.values()).filter(p => p.state === state);
+  }
+
+  public processTree(): { pid: number; ppid: number; children: number[] }[] {
+    const tree: { pid: number; ppid: number; children: number[] }[] = [];
+    const byPid = new Map<number, ProcessControlBlock>();
+    for (const p of this._processTable.values()) byPid.set(p.pid, p);
+    for (const p of byPid.values()) {
+      const children = Array.from(byPid.values()).filter(c => c.ppid === p.pid).map(c => c.pid);
+      tree.push({ pid: p.pid, ppid: p.ppid, children });
+    }
+    return tree;
+  }
+
+  public killProcess(pid: number, signal: number): boolean {
+    const proc = this._processTable.get(pid);
+    if (!proc) return false;
+    if (signal === 9) {
+      this._processTable.delete(pid);
+      this._recordHistory(`killProcess(pid=${pid}, signal=SIGKILL) -> terminated`);
+    } else if (signal === 15) {
+      this._processTable.set(pid, { ...proc, state: 'terminated' });
+      this._recordHistory(`killProcess(pid=${pid}, signal=SIGTERM) -> terminating`);
+    } else {
+      this._recordHistory(`killProcess(pid=${pid}, signal=${signal}) -> signaled`);
+    }
+    return true;
+  }
+
+  public setProcessPriority(pid: number, priority: number): boolean {
+    const proc = this._processTable.get(pid);
+    if (!proc) return false;
+    this._processTable.set(pid, { ...proc, priority });
+    this._recordHistory(`setProcessPriority(pid=${pid}, priority=${priority})`);
+    return true;
+  }
+
+  public memoryRegionsByType(type: MemoryRegion['type']): MemoryRegion[] {
+    return this._memoryRegions.filter(r => r.type === type);
+  }
+
+  public memoryRegionByStart(start: number): MemoryRegion | null {
+    return this._memoryRegions.find(r => r.start === start) ?? null;
+  }
+
+  public kernelHealth(): {
+    uptime: number;
+    totalProcesses: number;
+    runningProcesses: number;
+    totalSyscalls: number;
+    contextSwitches: number;
+    tickRate: number;
+    loadedModules: number;
+    memoryRegions: number;
+    enabledInterrupts: number;
+  } {
+    const running = Array.from(this._processTable.values()).filter(p => p.state === 'running').length;
+    return {
+      uptime: this._tickCount,
+      totalProcesses: this._processTable.size,
+      runningProcesses: running,
+      totalSyscalls: this._syscallCount,
+      contextSwitches: this._contextSwitchCount,
+      tickRate: 100,
+      loadedModules: this._modules.length,
+      memoryRegions: this._memoryRegions.length,
+      enabledInterrupts: this._interrupts.size,
+    };
+  }
+
+  public contextSwitchRate(): number {
+    if (this._tickCount === 0) return 0;
+    return Math.round((this._contextSwitchCount / this._tickCount) * 10000) / 100;
+  }
+
+  public healthCheck(): { healthy: boolean; issues: string[]; loadAverage: number } {
+    const issues: string[] = [];
+    const running = Array.from(this._processTable.values()).filter(p => p.state === 'running').length;
+    if (running > 1000) issues.push('high process count');
+    if (this._contextSwitchCount > 1000000) issues.push('high context switch count');
+    const userSize = this._memoryRegions.filter(r => r.type === 'user').reduce((s, r) => s + (r.end - r.start), 0);
+    const totalSize = this._memoryRegions.reduce((s, r) => s + (r.end - r.start), 0);
+    if (totalSize > 0 && userSize / totalSize > 0.9) issues.push('high memory pressure');
+    const loadAverage = running / 4;
+    return { healthy: issues.length === 0, issues, loadAverage };
+  }
+
+  public securityModuleLoad(name: string, hooks: string[], policyVersion: string): { module: string; loaded: boolean; hooks: number; policyVersion: string } {
+    const mod: SecurityModule = { name, loaded: true, hooks, policyVersion };
+    this._securityModules.set(name, mod);
+    this._recordHistory(`securityModuleLoad(name=${name}, hooks=${hooks.length})`);
+    return { module: name, loaded: true, hooks: hooks.length, policyVersion };
+  }
+
+  public securityModuleUnload(name: string): { module: string; unloaded: boolean; remaining: number } {
+    const unloaded = this._securityModules.delete(name);
+    this._recordHistory(`securityModuleUnload(name=${name}) -> ${unloaded}`);
+    return { module: name, unloaded, remaining: this._securityModules.size };
+  }
+
+  public kernelProfiling(duration: number): { profile: CPUProfile; duration: number; samples: number } {
+    const profile: CPUProfile = {
+      cycles: Math.floor(Math.random() * 1000000),
+      instructions: Math.floor(Math.random() * 5000000),
+      cacheMisses: Math.floor(Math.random() * 50000),
+      branchMispredictions: Math.floor(Math.random() * 20000),
+    };
+    this._cpuProfiles.push(profile);
+    this._recordHistory(`kernelProfiling(duration=${duration}ms)`);
+    return { profile, duration, samples: this._cpuProfiles.length };
+  }
+
+  public powerManagement(state: 'active' | 'idle' | 'sleep' | 'deep-sleep'): { state: string; previous: string; transitionTime: number; powerDraw: number } {
+    const previous = this._powerState;
+    this._powerState = state;
+    const transitionTime = state === 'deep-sleep' ? 1000 : state === 'sleep' ? 500 : 10;
+    const powerDraw = state === 'active' ? 100 : state === 'idle' ? 50 : state === 'sleep' ? 10 : 1;
+    this._recordHistory(`powerManagement(state=${state}, prev=${previous})`);
+    return { state, previous, transitionTime, powerDraw };
+  }
+
+  public cpuidInfo(leaf: number): { leaf: number; eax: number; ebx: number; ecx: number; edx: number; features: string[] } {
+    const features = leaf === 1 ? ['SSE', 'SSE2', 'AVX'] : leaf === 7 ? ['AVX2', 'AVX-512'] : ['FPU', 'VME'];
+    this._recordHistory(`cpuidInfo(leaf=${leaf}) -> features=${features.join(',')}`);
+    return { leaf, eax: 0, ebx: 0, ecx: 0, edx: 0, features };
+  }
+
   public toPacket(): DataPacket<{
     kernelType: string;
     syscalls: number;
@@ -590,6 +799,8 @@ export class KernelArchitecture {
     contextSwitches: number;
     syscallCount: number;
     history: string[];
+    securityModules: number;
+    powerState: string;
   }> {
     return {
       id: `kernel-arch-${Date.now()}-${this._counter}`,
@@ -603,6 +814,8 @@ export class KernelArchitecture {
         contextSwitches: this._contextSwitchCount,
         syscallCount: this._syscallCount,
         history: [...this._history],
+        securityModules: this._securityModules.size,
+        powerState: this._powerState,
       },
       metadata: {
         createdAt: Date.now(),
@@ -627,6 +840,9 @@ export class KernelArchitecture {
     this._tickCount = 0;
     this._contextSwitchCount = 0;
     this._syscallCount = 0;
+    this._securityModules.clear();
+    this._cpuProfiles = [];
+    this._powerState = 'active';
   }
 
   private _recordHistory(entry: string): void {

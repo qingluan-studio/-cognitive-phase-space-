@@ -727,6 +727,278 @@ export class Neuropsychology {
     for (const nt of neurotransmitters) this._neurotransmitters.set(nt.name, nt);
   }
 
+  /** Compute a neurocognitive profile summary. */
+  neurocognitiveProfile(domainScores: { domain: string; score: number }[]): { strengths: string[]; weaknesses: string[]; average: number } {
+    const avg = domainScores.reduce((s, d) => s + d.score, 0) / Math.max(1, domainScores.length);
+    const strengths = domainScores.filter(d => d.score > avg + 10).map(d => d.domain);
+    const weaknesses = domainScores.filter(d => d.score < avg - 10).map(d => d.domain);
+    return { strengths, weaknesses, average: Number(avg.toFixed(2)) };
+  }
+
+  /** Compute the lateralization index. */
+  lateralizationIndex(leftHemisphereScore: number, rightHemisphereScore: number): number {
+    const total = leftHemisphereScore + rightHemisphereScore;
+    if (total === 0) return 0;
+    return Number(((leftHemisphereScore - rightHemisphereScore) / total).toFixed(2));
+  }
+
+  /** Compute the brain age gap estimate. */
+  brainAgeGap(chronologicalAge: number, estimatedBrainAge: number): number {
+    return Number((estimatedBrainAge - chronologicalAge).toFixed(2));
+  }
+
+  /** Compute the cognitive reserve index. */
+  cognitiveReserveIndex(education: number, occupation: number, leisure: number): number {
+    return Number(((education + occupation + leisure) / 3).toFixed(2));
+  }
+
+  /** Compute the neuroplasticity potential. */
+  neuroplasticityPotential(age: number, cognitiveActivity: number, physicalActivity: number, sleep: number): number {
+    const ageFactor = Math.max(0.2, 1 - age / 120);
+    return Number(((ageFactor + cognitiveActivity + physicalActivity + sleep) / 4).toFixed(2));
+  }
+
+  /** Compute the synaptic pruning rate (developmental). */
+  synapticPruningRate(age: number): number {
+    if (age < 2) return 0;
+    if (age < 12) return 0.05;
+    if (age < 25) return 0.03;
+    return 0.005;
+  }
+
+  /** Compute the myelination progress. */
+  myelinationProgress(age: number): number {
+    if (age < 0) return 0;
+    if (age < 2) return 0.3;
+    if (age < 12) return 0.7;
+    if (age < 25) return 0.95;
+    return 1;
+  }
+
+  /** Compute the neural network efficiency. */
+  neuralNetworkEfficiency(connections: number, signalStrength: number, processingSpeed: number): number {
+    const connectionFactor = Math.min(1, connections / 1000);
+    return Number(((connectionFactor + signalStrength + processingSpeed) / 3).toFixed(2));
+  }
+
+  /** Compute the default mode network activity. */
+  defaultModeNetworkActivity(restingState: number, taskEvokedDeactivation: number): number {
+    return Number((restingState * (1 - taskEvokedDeactivation)).toFixed(2));
+  }
+
+  /** Compute the executive function composite. */
+  executiveFunctionComposite(inhibition: number, workingMemory: number, cognitiveFlexibility: number, planning: number): number {
+    return Number(((inhibition + workingMemory + cognitiveFlexibility + planning) / 4).toFixed(2));
+  }
+
+  /** Compute the prefrontal cortex maturation. */
+  prefrontalCortexMaturation(age: number): number {
+    if (age < 12) return 0.5;
+    if (age < 25) return 0.5 + (age - 12) / 13 * 0.5;
+    return 1;
+  }
+
+  /** Compute the hippocampal volume percentile. */
+  hippocampalVolumePercentile(volume: number, ageNorms: { age: number; mean: number; stdDev: number }[], age: number): number {
+    const norm = ageNorms.find(n => n.age === age);
+    if (!norm) return 50;
+    const z = (volume - norm.mean) / Math.max(0.0001, norm.stdDev);
+    return Math.round(50 + z * 10);
+  }
+
+  /** Compute the amygdala reactivity. */
+  amygdalaReactivity(threatDetection: number, emotionalRegulation: number): number {
+    return Number(Math.max(0, threatDetection - emotionalRegulation * 0.5).toFixed(2));
+  }
+
+  /** Compute the brain connectivity strength. */
+  brainConnectivityStrength(structural: number, functional: number, effective: number): number {
+    return Number(((structural + functional + effective) / 3).toFixed(2));
+  }
+
+  /** Compute the neural efficiency (IQ vs brain activation). */
+  neuralEfficiency(iqScore: number, brainActivation: number): number {
+    if (brainActivation === 0) return 0;
+    return Number((iqScore / brainActivation).toFixed(2));
+  }
+
+  /** Compute the cerebral blood flow adequacy. */
+  cerebralBloodFlowAdequacy(flowRate: number, oxygenDemand: number): number {
+    if (oxygenDemand === 0) return 1;
+    return Number(Math.min(1, flowRate / oxygenDemand).toFixed(2));
+  }
+
+  /** Compute the neuroinflammation index. */
+  neuroinflammationIndex(markers: { marker: string; level: number; threshold: number }[]): number {
+    if (markers.length === 0) return 0;
+    const elevated = markers.filter(m => m.level > m.threshold).length;
+    return Number((elevated / markers.length).toFixed(2));
+  }
+
+  /** Compute the neurotransmitter balance. */
+  neurotransmitterBalance(dopamine: number, serotonin: number, norepinephrine: number, gaba: number, glutamate: number): number {
+    const mean = (dopamine + serotonin + norepinephrine + gaba + glutamate) / 5;
+    const variance = (Math.pow(dopamine - mean, 2) + Math.pow(serotonin - mean, 2) + Math.pow(norepinephrine - mean, 2) + Math.pow(gaba - mean, 2) + Math.pow(glutamate - mean, 2)) / 5;
+    return Number(Math.max(0, 1 - Math.sqrt(variance) / mean).toFixed(2));
+  }
+
+  /** Compute the sleep architecture quality. */
+  sleepArchitectureQuality(deepSleep: number, remSleep: number, lightSleep: number, awakenings: number): number {
+    const architectureScore = deepSleep * 0.4 + remSleep * 0.3 + lightSleep * 0.3;
+    const fragmentationPenalty = Math.min(0.5, awakenings * 0.05);
+    return Number(Math.max(0, architectureScore - fragmentationPenalty).toFixed(2));
+  }
+
+  /** Compute the circadian rhythm alignment. */
+  circadianRhythmAlignment(sleepTime: number, wakeTime: number, lightExposure: number, melatonin: number): number {
+    const sleepDuration = wakeTime - sleepTime;
+    const durationScore = sleepDuration >= 7 && sleepDuration <= 9 ? 1 : 0.5;
+    return Number(((durationScore + lightExposure + melatonin) / 3).toFixed(2));
+  }
+
+  /** Compute the glymphatic system clearance rate. */
+  glymphaticClearanceRate(sleepQuality: number, hydration: number, bodyPosition: number): number {
+    return Number(((sleepQuality + hydration + bodyPosition) / 3).toFixed(2));
+  }
+
+  /** Compute the blood-brain barrier integrity. */
+  bloodBrainBarrierIntegrity(tightJunctions: number, transporters: number, enzymes: number): number {
+    return Number(((tightJunctions + transporters + enzymes) / 3).toFixed(2));
+  }
+
+  /** Compute the neurogenesis rate. */
+  neurogenesisRate(exercise: number, learning: number, stressLevel: number, sleep: number): number {
+    return Number((exercise * 0.3 + learning * 0.3 + (1 - stressLevel) * 0.2 + sleep * 0.2).toFixed(2));
+  }
+
+  /** Compute the brain-derived neurotrophic factor (BDNF) level estimate. */
+  bdnfLevelEstimate(exercise: number, diet: number, sleep: number, stressLevel: number): number {
+    return Number((exercise * 0.4 + diet * 0.2 + sleep * 0.2 + (1 - stressLevel) * 0.2).toFixed(2));
+  }
+
+  /** Compute the cortical thickness percentile. */
+  corticalThicknessPercentile(thickness: number, ageNorms: { mean: number; stdDev: number }): number {
+    const z = (thickness - ageNorms.mean) / Math.max(0.0001, ageNorms.stdDev);
+    return Math.round(50 + z * 10);
+  }
+
+  /** Compute the gray matter volume percentile. */
+  grayMatterVolumePercentile(volume: number, ageNorms: { mean: number; stdDev: number }): number {
+    const z = (volume - ageNorms.mean) / Math.max(0.0001, ageNorms.stdDev);
+    return Math.round(50 + z * 10);
+  }
+
+  /** Compute the white matter integrity. */
+  whiteMatterIntegrity(fractionalAnisotropy: number, meanDiffusivity: number): number {
+    return Number((fractionalAnisotropy * (1 - meanDiffusivity)).toFixed(2));
+  }
+
+  /** Compute the functional connectivity matrix summary. */
+  functionalConnectivitySummary(matrix: number[][]): { mean: number; variance: number; density: number } {
+    const values: number[] = [];
+    for (let i = 0; i < matrix.length; i++) {
+      for (let j = i + 1; j < matrix[i].length; j++) {
+        values.push(matrix[i][j]);
+      }
+    }
+    if (values.length === 0) return { mean: 0, variance: 0, density: 0 };
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    const variance = values.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / values.length;
+    const density = values.filter(v => v > 0.3).length / values.length;
+    return { mean: Number(mean.toFixed(4)), variance: Number(variance.toFixed(4)), density: Number(density.toFixed(2)) };
+  }
+
+  /** Compute the cognitive workload. */
+  cognitiveWorkload(pupilDilation: number, eegThetaBeta: number, heartRateVariability: number): number {
+    return Number(((pupilDilation + eegThetaBeta + (1 - heartRateVariability)) / 3).toFixed(2));
+  }
+
+  /** Compute the attentional capacity. */
+  attentionalCapacity(sustainedAttention: number, selectiveAttention: number, dividedAttention: number): number {
+    return Number(((sustainedAttention + selectiveAttention + dividedAttention) / 3).toFixed(2));
+  }
+
+  /** Compute the memory consolidation rate. */
+  memoryConsolidationRate(encoding: number, sleep: number, repetition: number): number {
+    return Number((encoding * sleep * Math.min(1, repetition * 0.2)).toFixed(2));
+  }
+
+  /** Compute the long-term potentiation indicator. */
+  longTermPotentiation(stimulation: number, repetition: number, rest: number): number {
+    return Number(Math.min(1, stimulation * repetition * 0.2 + rest * 0.5).toFixed(2));
+  }
+
+  /** Compute the long-term depression indicator. */
+  longTermDepression(lowFreqStimulation: number, duration: number): number {
+    return Number(Math.min(1, lowFreqStimulation * duration * 0.1).toFixed(2));
+  }
+
+  /** Compute the cortical excitability. */
+  corticalExcitability(glutamateLevel: number, gabaLevel: number): number {
+    const denom = glutamateLevel + gabaLevel;
+    if (denom === 0) return 0;
+    return Number((glutamateLevel / denom).toFixed(2));
+  }
+
+  /** Compute the neural adaptation rate. */
+  neuralAdaptationRate(exposureFrequency: number, intensity: number, novelty: number): number {
+    return Number(Math.min(1, exposureFrequency * 0.2 + intensity * 0.4 + novelty * 0.4).toFixed(2));
+  }
+
+  /** Compute the sensory processing sensitivity. */
+  sensoryProcessingSensitivity(visual: number, auditory: number, tactile: number, olfactory: number): number {
+    return Number(((visual + auditory + tactile + olfactory) / 4).toFixed(2));
+  }
+
+  /** Compute the motor cortex excitability. */
+  motorCortexExcitability(restingThreshold: number, motorEvokedPotential: number): number {
+    if (restingThreshold === 0) return 0;
+    return Number((motorEvokedPotential / restingThreshold).toFixed(2));
+  }
+
+  /** Compute the cerebellar function score. */
+  cerebellarFunctionScore(motorCoordination: number, balance: number, timing: number, motorLearning: number): number {
+    return Number(((motorCoordination + balance + timing + motorLearning) / 4).toFixed(2));
+  }
+
+  /** Compute the basal ganglia function score. */
+  basalGangliaFunctionScore(motorControl: number, habitFormation: number, reward: number, habitLearning: number): number {
+    return Number(((motorControl + habitFormation + reward + habitLearning) / 4).toFixed(2));
+  }
+
+  /** Compute the limbic system function score. */
+  limbicSystemFunctionScore(emotion: number, memory: number, motivation: number, olfaction: number): number {
+    return Number(((emotion + memory + motivation + olfaction) / 4).toFixed(2));
+  }
+
+  /** Compute the brain volume loss rate (aging). */
+  brainVolumeLossRate(age: number): number {
+    if (age < 30) return 0.001;
+    if (age < 60) return 0.005;
+    return 0.01;
+  }
+
+  /** Compute the cognitive decline trajectory. */
+  cognitiveDeclineTrajectory(baselineScore: number, age: number, ageAtBaseline: number, declineRate: number = 0.5): number {
+    const yearsElapsed = age - ageAtBaseline;
+    if (yearsElapsed <= 0) return baselineScore;
+    return Number(Math.max(0, baselineScore - declineRate * yearsElapsed).toFixed(2));
+  }
+
+  /** Generate a neuropsychological assessment summary. */
+  neuropsychologicalSummary(domainScores: { domain: string; score: number; percentile: number }[]): Record<string, unknown> {
+    const profile = this.neurocognitiveProfile(domainScores);
+    return {
+      domainCount: domainScores.length,
+      strengths: profile.strengths,
+      weaknesses: profile.weaknesses,
+      averageScore: profile.average,
+      lowestDomain: domainScores.reduce((min, d) => d.score < min.score ? d : min, domainScores[0])?.domain,
+      highestDomain: domainScores.reduce((max, d) => d.score > max.score ? d : max, domainScores[0])?.domain,
+      overallImpression: profile.average > 70 ? 'within-normal-limits' : profile.average > 50 ? 'borderline' : 'impaired',
+    };
+  }
+
   toPacket(): DataPacket<{
     regions: number;
     domains: CognitiveDomain[];

@@ -45,6 +45,20 @@ export interface MultiCoreAssignment {
   readonly efficiency: number;
 }
 
+export interface EnergyProfile {
+  readonly core: number;
+  readonly frequency: number;
+  readonly voltage: number;
+  readonly powerDraw: number;
+}
+
+export interface FairShareGroup {
+  readonly name: string;
+  readonly shares: number;
+  readonly members: string[];
+  readonly allocated: number;
+}
+
 export class Scheduler {
   private _tasks: ScheduledTask[] = [];
   private _algorithms: Map<string, SchedulingAlgorithm> = new Map();
@@ -66,6 +80,9 @@ export class Scheduler {
     totalTasks: 0, completedTasks: 0, avgWait: 0, avgTurnaround: 0, avgResponse: 0,
     totalContextSwitches: 0, throughput: 0, fairness: 0
   };
+  private _energyProfiles: Map<number, EnergyProfile> = new Map();
+  private _fairShareGroups: Map<string, FairShareGroup> = new Map();
+  private _lastAlgorithm: string = 'none';
 
   get taskCount(): number {
     return this._tasks.length;
@@ -89,6 +106,18 @@ export class Scheduler {
 
   get completedTasks(): number {
     return this._completedTasks;
+  }
+
+  get lastAlgorithm(): string {
+    return this._lastAlgorithm;
+  }
+
+  get energyProfileCount(): number {
+    return this._energyProfiles.size;
+  }
+
+  get fairShareGroupCount(): number {
+    return this._fairShareGroups.size;
   }
 
   public fcfsScheduling(tasks: ScheduledTask[]): ScheduleResult {
@@ -118,6 +147,7 @@ export class Scheduler {
     const fairness = 1.0;
     
     this._updateStats(avgWait, avgTurnaround, avgResponse, throughput, fairness, 0);
+    this._lastAlgorithm = 'fcfs';
     this._recordHistory(`fcfs(tasks=${tasks.length}) -> avgWait=${avgWait.toFixed(1)}, avgTurn=${avgTurnaround.toFixed(1)}`);
     return { schedule, avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches: 0 };
   }
@@ -137,6 +167,7 @@ export class Scheduler {
     const contextSwitches = preemptive ? Math.floor(tasks.length * 0.3) : 0;
     
     this._updateStats(avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches);
+    this._lastAlgorithm = 'sjf';
     this._recordHistory(`sjf(tasks=${tasks.length}, preemptive=${preemptive}) -> avgWait=${avgWait.toFixed(1)}`);
     return { schedule, avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches };
   }
@@ -195,6 +226,7 @@ export class Scheduler {
     const fairness = 0.9;
     
     this._updateStats(avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches);
+    this._lastAlgorithm = 'srtf';
     this._recordHistory(`srtf(tasks=${tasks.length}) -> preemptions=${contextSwitches}`);
     return { schedule, avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches };
   }
@@ -214,6 +246,7 @@ export class Scheduler {
     const contextSwitches = preemptive ? Math.floor(tasks.length * 0.5) : 0;
     
     this._updateStats(avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches);
+    this._lastAlgorithm = 'priority';
     this._recordHistory(`priority(tasks=${tasks.length}, preemptive=${preemptive})`);
     return { schedule, avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches };
   }
@@ -260,6 +293,7 @@ export class Scheduler {
     const fairness = 0.95;
     
     this._updateStats(avgWait, avgTurnaround, avgResponse, throughput, fairness, switches);
+    this._lastAlgorithm = 'rr';
     this._recordHistory(`rr(tasks=${tasks.length}, quantum=${quantum}) -> switches=${switches}`);
     return { schedule, avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches: switches };
   }
@@ -284,6 +318,7 @@ export class Scheduler {
     const contextSwitches = queues - 1;
     
     this._updateStats(avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches);
+    this._lastAlgorithm = 'mlq';
     this._recordHistory(`mlq(tasks=${tasks.length}, queues=${queues})`);
     return { schedule, avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches };
   }
@@ -299,6 +334,7 @@ export class Scheduler {
     const contextSwitches = Math.floor(tasks.length * 0.4);
     
     this._updateStats(avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches);
+    this._lastAlgorithm = 'mlfq';
     this._recordHistory(`mlfq(tasks=${tasks.length}, queues=${queues}, boost=${boostInterval}) -> boosted=${boosted}`);
     return { schedule, avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches };
   }
@@ -498,6 +534,122 @@ export class Scheduler {
     return { utilization, idleTime, processors, activeTime, efficiency };
   }
 
+  public cfsScheduling(tasks: ScheduledTask[], targetLatency: number, minGranularity: number): ScheduleResult {
+    const totalWeight = tasks.reduce((s, t) => s + t.priority + 1, 0);
+    const period = Math.max(targetLatency, tasks.length * minGranularity);
+    const schedule: string[] = [];
+    
+    for (const t of tasks) {
+      const slice = (t.priority + 1) / totalWeight * period;
+      const repetitions = Math.max(1, Math.floor(slice / minGranularity));
+      for (let i = 0; i < repetitions; i++) {
+        schedule.push(t.id);
+      }
+    }
+    
+    const avgWait = period / Math.max(1, tasks.length);
+    const avgTurnaround = avgWait * 1.5;
+    const avgResponse = minGranularity;
+    const throughput = tasks.length / period;
+    const fairness = 0.98;
+    const contextSwitches = schedule.length;
+    
+    this._updateStats(avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches);
+    this._lastAlgorithm = 'cfs';
+    this._recordHistory(`cfs(tasks=${tasks.length}, latency=${targetLatency})`);
+    return { schedule, avgWait, avgTurnaround, avgResponse, throughput, fairness, contextSwitches };
+  }
+
+  public energyAwareScheduling(tasks: ScheduledTask[], cores: number, powerBudget: number): { schedule: string[]; energy: number; powerBudget: number; thermalThrottled: boolean; efficiency: number } {
+    const schedule = tasks.map(t => t.id);
+    const energy = tasks.reduce((s, t) => s + t.burst * 10, 0);
+    const thermalThrottled = energy > powerBudget * 0.9;
+    const efficiency = Math.min(1, powerBudget / Math.max(1, energy));
+    
+    for (let i = 0; i < cores; i++) {
+      this._energyProfiles.set(i, { core: i, frequency: 2.0, voltage: 1.0, powerDraw: energy / cores });
+    }
+    
+    this._recordHistory(`energyAware(tasks=${tasks.length}, cores=${cores}, budget=${powerBudget}) -> throttled=${thermalThrottled}`);
+    return { schedule, energy, powerBudget, thermalThrottled, efficiency };
+  }
+
+  public gangScheduling(tasks: ScheduledTask[], gangSize: number, slots: number): { schedule: string[]; gangs: number; slotUtilization: number; synchronizationOverhead: number } {
+    const gangs = Math.ceil(tasks.length / gangSize);
+    const schedule: string[] = [];
+    
+    for (let g = 0; g < gangs; g++) {
+      const start = g * gangSize;
+      const gangTasks = tasks.slice(start, start + gangSize);
+      for (const t of gangTasks) {
+        schedule.push(t.id);
+      }
+    }
+    
+    const slotUtilization = tasks.length / (gangs * gangSize);
+    const synchronizationOverhead = gangs * 2;
+    this._recordHistory(`gangScheduling(tasks=${tasks.length}, gangSize=${gangSize}) -> gangs=${gangs}`);
+    return { schedule, gangs, slotUtilization, synchronizationOverhead };
+  }
+
+  public deadlineMonotonic(tasks: RealTimeTask[]): { schedule: string[]; feasible: boolean; missedDeadlines: number; utilization: number; priorityOrder: string[] } {
+    const sorted = [...tasks].sort((a, b) => a.deadline - b.deadline);
+    const schedule = sorted.map(t => t.id);
+    const utilization = tasks.reduce((s, t) => s + t.executionTime / t.period, 0);
+    const feasible = utilization <= tasks.length * (Math.pow(2, 1 / tasks.length) - 1);
+    const missedDeadlines = feasible ? 0 : Math.floor(tasks.length * 0.1);
+    const priorityOrder = sorted.map(t => `${t.id}(D=${t.deadline})`);
+    
+    this._recordHistory(`dm(tasks=${tasks.length}, utilization=${utilization.toFixed(2)}) -> feasible=${feasible}`);
+    return { schedule, feasible, missedDeadlines, utilization, priorityOrder };
+  }
+
+  public fairShareScheduling(groups: FairShareGroup[], totalShares: number): { allocations: { group: string; allocated: number; shareRatio: number }[]; totalAllocated: number; fairness: number } {
+    const allocations = groups.map(g => {
+      const shareRatio = g.shares / totalShares;
+      const allocated = Math.floor(shareRatio * 100);
+      return { group: g.name, allocated, shareRatio };
+    });
+    const totalAllocated = allocations.reduce((s, a) => s + a.allocated, 0);
+    const fairness = 0.95;
+    
+    for (const g of groups) {
+      this._fairShareGroups.set(g.name, g);
+    }
+    
+    this._recordHistory(`fairShare(groups=${groups.length}, totalShares=${totalShares})`);
+    return { allocations, totalAllocated, fairness };
+  }
+
+  public loadBalancing(coreLoads: number[], threshold: number): { balanced: boolean; migrations: { from: number; to: number; amount: number }[]; maxLoad: number; minLoad: number } {
+    const maxLoad = Math.max(...coreLoads);
+    const minLoad = Math.min(...coreLoads);
+    const balanced = (maxLoad - minLoad) <= threshold;
+    const migrations: { from: number; to: number; amount: number }[] = [];
+    
+    if (!balanced) {
+      const avg = coreLoads.reduce((s, l) => s + l, 0) / coreLoads.length;
+      for (let i = 0; i < coreLoads.length; i++) {
+        if (coreLoads[i] > avg + threshold) {
+          const target = coreLoads.indexOf(Math.min(...coreLoads));
+          const amount = Math.floor((coreLoads[i] - avg) / 2);
+          migrations.push({ from: i, to: target, amount });
+        }
+      }
+    }
+    
+    this._recordHistory(`loadBalancing(cores=${coreLoads.length}, threshold=${threshold}) -> balanced=${balanced}`);
+    return { balanced, migrations, maxLoad, minLoad };
+  }
+
+  public schedulingLatency(algorithm: string, taskCount: number): { algorithm: string; taskCount: number; decisionTime: number; queueOverhead: number; totalLatency: number } {
+    const decisionTime = algorithm === 'fcfs' ? 1 : algorithm === 'cfs' ? 5 : algorithm === 'edf' ? 3 : 2;
+    const queueOverhead = taskCount * 0.1;
+    const totalLatency = decisionTime + queueOverhead;
+    this._recordHistory(`schedulingLatency(algorithm=${algorithm}, tasks=${taskCount}) -> ${totalLatency.toFixed(2)}us`);
+    return { algorithm, taskCount, decisionTime, queueOverhead, totalLatency };
+  }
+
   public registerAlgorithm(name: string, type: 'preemptive' | 'non-preemptive', features: string[]): { registered: boolean; name: string; type: string; features: string[] } {
     const algorithm: SchedulingAlgorithm = {
       name,
@@ -592,6 +744,9 @@ export class Scheduler {
     completedTasks: number;
     stats: typeof this._schedulingStats;
     history: string[];
+    lastAlgorithm: string;
+    energyProfiles: number;
+    fairShareGroups: number;
   }> {
     return {
       id: `scheduler-${Date.now()}-${this._counter}`,
@@ -603,6 +758,9 @@ export class Scheduler {
         completedTasks: this._completedTasks,
         stats: { ...this._schedulingStats },
         history: [...this._history],
+        lastAlgorithm: this._lastAlgorithm,
+        energyProfiles: this._energyProfiles.size,
+        fairShareGroups: this._fairShareGroups.size,
       },
       metadata: {
         createdAt: Date.now(),
@@ -625,6 +783,9 @@ export class Scheduler {
       totalTasks: 0, completedTasks: 0, avgWait: 0, avgTurnaround: 0, avgResponse: 0,
       totalContextSwitches: 0, throughput: 0, fairness: 0
     };
+    this._energyProfiles.clear();
+    this._fairShareGroups.clear();
+    this._lastAlgorithm = 'none';
   }
 
   private _recordHistory(entry: string): void {

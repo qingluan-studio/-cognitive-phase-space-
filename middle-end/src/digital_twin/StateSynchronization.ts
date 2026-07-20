@@ -1,600 +1,767 @@
 import { DataPacket } from '../shared/types';
 
 export interface TwinState {
-  twinId: string;
+  id: string;
   timestamp: number;
-  state: Record<string, number>;
-  confidence: number;
-  source: 'physical' | 'virtual' | 'fused';
+  values: Map<string, number | string | boolean | number[]>;
+  quality: number;
+  source: string;
+  version: number;
+  checksum: string;
 }
 
 export interface RealTimeSyncConfig {
   id: string;
-  twinId: string;
-  protocol: 'mqtt' | 'opc_ua' | 'websocket' | 'grpc' | 'http';
-  endpoint: string;
-  updateInterval: number;
-  retryInterval: number;
-  maxRetries: number;
-  status: 'connected' | 'disconnected' | 'connecting' | 'error';
-  lastSyncTime: number;
-  syncCount: number;
+  name: string;
+  updateRate: number;
+  bufferSize: number;
+  retryAttempts: number;
+  timeout: number;
+  priority: number;
+  compressionEnabled: boolean;
+  encryptionEnabled: boolean;
+  qosLevel: number;
+  metadata: Record<string, unknown>;
 }
 
 export interface LatencyCompensation {
-  id: string;
-  twinId: string;
-  measuredLatency: number;
-  smoothedLatency: number;
-  jitter: number;
-  compensationStrategy: 'predictive' | 'buffering' | 'adaptive_delay' | 'none';
-  bufferSize: number;
-  predictionHorizon: number;
-  lastCompensatedTime: number;
+  enabled: boolean;
+  estimatedLatency: number;
+  compensationMethod: 'extrapolation' | 'interpolation' | 'buffering' | 'prediction';
+  bufferDepth: number;
+  maxCompensatedLatency: number;
+  confidenceThreshold: number;
 }
 
 export interface StatePredictor {
   id: string;
-  twinId: string;
-  algorithm: 'kalman_filter' | 'linear_extrapolation' | 'polynomial' | 'lstm' | 'hybrid';
-  modelParameters: Record<string, number>;
-  predictionHorizon: number;
+  modelType: 'linear' | 'kalman' | 'arima' | 'lstm' | 'ensemble';
+  horizon: number;
+  confidenceInterval: number;
+  updateInterval: number;
+  features: string[];
+  weights: number[];
+  lastTrainingTime: number;
   accuracy: number;
-  lastPredictionTime: number;
-  predictions: Record<string, number>;
 }
 
 export interface CorrectionMechanism {
   id: string;
-  twinId: string;
-  method: 'proportional' | 'pid' | 'adaptive' | 'optimization';
+  trigger: 'threshold' | 'manual' | 'periodic' | 'anomaly';
   threshold: number;
   maxCorrection: number;
-  correctionGain: number;
-  integralTerm: number;
-  lastCorrection: number;
-  correctionCount: number;
+  smoothingFactor: number;
+  historyWindow: number;
+  enabled: boolean;
 }
 
-export interface StateSynchronizationResult {
-  realTimeConfigs: RealTimeSyncConfig[];
-  latencyCompensations: LatencyCompensation[];
-  statePredictors: StatePredictor[];
-  correctionMechanisms: CorrectionMechanism[];
-  syncStatus: {
-    syncedTwins: number;
-    avgLatency: number;
-    syncAccuracy: number;
-    drift: number;
-  };
-  overallStatus: 'synced' | 'syncing' | 'out_of_sync' | 'degraded';
+export interface SyncEvent {
+  id: string;
+  timestamp: number;
+  type: 'state-update' | 'sync-start' | 'sync-complete' | 'sync-error' | 'correction' | 'prediction';
+  sourceId: string;
+  targetId: string;
+  data: Record<string, unknown>;
+  latency: number;
+  success: boolean;
+}
+
+export interface StateHistory {
+  stateId: string;
+  entries: TwinState[];
+  maxSize: number;
+  retentionPolicy: 'count' | 'time' | 'both';
+  retentionValue: number;
+}
+
+export interface SyncHealth {
+  sourceId: string;
+  lastSyncTime: number;
+  averageLatency: number;
+  syncSuccessRate: number;
+  driftRate: number;
+  status: 'healthy' | 'degraded' | 'critical' | 'offline';
+}
+
+export interface TimeSyncConfig {
+  protocol: 'ntp' | 'ptp' | 'gps' | 'manual';
+  pollingInterval: number;
+  accuracyThreshold: number;
+  timezone: string;
+  daylightSaving: boolean;
 }
 
 export class StateSynchronization {
-  private _states: Map<string, TwinState> = new Map();
-  private _realTimeConfigs: Map<string, RealTimeSyncConfig> = new Map();
-  private _latencyCompensations: Map<string, LatencyCompensation> = new Map();
-  private _statePredictors: Map<string, StatePredictor> = new Map();
-  private _correctionMechanisms: Map<string, CorrectionMechanism> = new Map();
-  private _counter: number = 0;
-  private _lastResult: StateSynchronizationResult | null = null;
-  private _syncHistory: Map<string, { time: number; latency: number; drift: number }[]> = new Map();
-  private _syncStats: {
-    totalSyncs: number;
-    successfulSyncs: number;
-    failedSyncs: number;
-    avgLatency: number;
-    maxLatency: number;
-    minLatency: number;
-    avgDrift: number;
-  } = {
-    totalSyncs: 0,
-    successfulSyncs: 0,
-    failedSyncs: 0,
-    avgLatency: 0,
-    maxLatency: 0,
-    minLatency: Infinity,
-    avgDrift: 0,
+  private _currentState: TwinState | null = null;
+  private _stateHistory: Map<string, StateHistory> = new Map();
+  private _syncConfigs: Map<string, RealTimeSyncConfig> = new Map();
+  private _latencyCompensation: LatencyCompensation = {
+    enabled: true,
+    estimatedLatency: 0,
+    compensationMethod: 'extrapolation',
+    bufferDepth: 10,
+    maxCompensatedLatency: 500,
+    confidenceThreshold: 0.8
   };
-  private _connectionPool: Map<string, { connected: boolean; lastHeartbeat: number }> = new Map();
-  private _syncPolicies: Map<string, {
-    mode: 'push' | 'pull' | 'hybrid';
-    priority: number;
-    consistency: 'strong' | 'eventual' | 'weak';
-  }> = new Map();
+  private _predictors: Map<string, StatePredictor> = new Map();
+  private _correctionMechanisms: Map<string, CorrectionMechanism> = new Map();
+  private _syncEvents: SyncEvent[] = [];
+  private _lastSyncTime: number = 0;
+  private _counter: number = 0;
+  private _syncInterval: number = 1000;
+  private _isRunning: boolean = false;
+  private _buffer: TwinState[] = [];
+  private _maxBufferSize: number = 1000;
+  private _timeSyncConfig: TimeSyncConfig = {
+    protocol: 'ntp',
+    pollingInterval: 64,
+    accuracyThreshold: 10,
+    timezone: 'UTC',
+    daylightSaving: false
+  };
+  private _healthMetrics: Map<string, SyncHealth> = new Map();
+  private _stateSubscriptions: Map<string, ((state: TwinState) => void)[]> = new Map();
+  private _syncLock: Map<string, boolean> = new Map();
+  private _driftCompensation: Map<string, number> = new Map();
+  private _batchSize: number = 50;
+  private _conflictResolution: 'latest' | 'priority' | 'merge' | 'manual' = 'latest';
+  private _auditTrail: { timestamp: number; action: string; details: string }[] = [];
 
   constructor() {
-    this._initDefaultPolicies();
+    this._initDefaultPredictors();
+    this._initDefaultCorrectionMechanisms();
   }
 
-  private _initDefaultPolicies(): void {
-    const policies = [
-      { name: 'realtime', config: { mode: 'push' as const, priority: 0, consistency: 'strong' as const } },
-      { name: 'near_realtime', config: { mode: 'hybrid' as const, priority: 1, consistency: 'eventual' as const } },
-      { name: 'periodic', config: { mode: 'pull' as const, priority: 2, consistency: 'eventual' as const } },
-      { name: 'on_demand', config: { mode: 'pull' as const, priority: 3, consistency: 'weak' as const } },
-    ];
-    policies.forEach(p => this._syncPolicies.set(p.name, p.config));
+  private _initDefaultPredictors(): void {
+    this._predictors.set('default-linear', {
+      id: 'default-linear',
+      modelType: 'linear',
+      horizon: 10,
+      confidenceInterval: 0.95,
+      updateInterval: 1000,
+      features: ['value', 'velocity', 'acceleration'],
+      weights: [0.5, 0.3, 0.2],
+      lastTrainingTime: Date.now(),
+      accuracy: 0.85
+    });
+
+    this._predictors.set('default-kalman', {
+      id: 'default-kalman',
+      modelType: 'kalman',
+      horizon: 5,
+      confidenceInterval: 0.99,
+      updateInterval: 500,
+      features: ['position', 'velocity'],
+      weights: [0.7, 0.3],
+      lastTrainingTime: Date.now(),
+      accuracy: 0.92
+    });
   }
 
-  get states(): TwinState[] {
-    return Array.from(this._states.values());
+  private _initDefaultCorrectionMechanisms(): void {
+    this._correctionMechanisms.set('threshold-correction', {
+      id: 'threshold-correction',
+      trigger: 'threshold',
+      threshold: 0.1,
+      maxCorrection: 1.0,
+      smoothingFactor: 0.5,
+      historyWindow: 10,
+      enabled: true
+    });
+
+    this._correctionMechanisms.set('periodic-correction', {
+      id: 'periodic-correction',
+      trigger: 'periodic',
+      threshold: 0.05,
+      maxCorrection: 0.5,
+      smoothingFactor: 0.3,
+      historyWindow: 20,
+      enabled: true
+    });
   }
 
-  get realTimeConfigs(): RealTimeSyncConfig[] {
-    return Array.from(this._realTimeConfigs.values());
+  get currentState(): TwinState | null {
+    return this._currentState;
   }
 
-  get latencyCompensations(): LatencyCompensation[] {
-    return Array.from(this._latencyCompensations.values());
+  get stateHistory(): Map<string, StateHistory> {
+    return new Map(this._stateHistory);
   }
 
-  get statePredictors(): StatePredictor[] {
-    return Array.from(this._statePredictors.values());
+  get syncConfigs(): Map<string, RealTimeSyncConfig> {
+    return new Map(this._syncConfigs);
   }
 
-  get correctionMechanisms(): CorrectionMechanism[] {
-    return Array.from(this._correctionMechanisms.values());
+  get latencyCompensation(): LatencyCompensation {
+    return { ...this._latencyCompensation };
   }
 
-  get syncedTwinCount(): number {
-    let count = 0;
-    for (const config of this._realTimeConfigs.values()) {
-      if (config.status === 'connected') count++;
-    }
-    return count;
+  get predictors(): Map<string, StatePredictor> {
+    return new Map(this._predictors);
   }
 
-  get avgLatency(): number {
-    return this._syncStats.avgLatency;
+  get correctionMechanisms(): Map<string, CorrectionMechanism> {
+    return new Map(this._correctionMechanisms);
   }
 
-  get syncAccuracy(): number {
-    if (this._syncStats.totalSyncs === 0) return 0;
-    return this._syncStats.successfulSyncs / this._syncStats.totalSyncs;
+  get syncEvents(): SyncEvent[] {
+    return [...this._syncEvents];
   }
 
-  get syncStats(): {
-    totalSyncs: number;
-    successfulSyncs: number;
-    failedSyncs: number;
-    avgLatency: number;
-    maxLatency: number;
-    minLatency: number;
-    avgDrift: number;
-  } {
-    return { ...this._syncStats };
+  get lastSyncTime(): number {
+    return this._lastSyncTime;
   }
 
-  createRealTimeSync(
-    twinId: string,
-    protocol: 'mqtt' | 'opc_ua' | 'websocket' | 'grpc' | 'http',
-    params: {
-      endpoint?: string;
-      updateInterval?: number;
-      retryInterval?: number;
-      maxRetries?: number;
-    } = {}
-  ): RealTimeSyncConfig {
-    const id = `rt-sync-${Date.now()}-${this._counter++}`;
-    const config: RealTimeSyncConfig = {
-      id,
-      twinId,
-      protocol,
-      endpoint: params.endpoint ?? '',
-      updateInterval: params.updateInterval ?? 100,
-      retryInterval: params.retryInterval ?? 5000,
-      maxRetries: params.maxRetries ?? 3,
-      status: 'disconnected',
-      lastSyncTime: 0,
-      syncCount: 0,
-    };
-    this._realTimeConfigs.set(id, config);
-    this._connectionPool.set(id, { connected: false, lastHeartbeat: 0 });
-    if (!this._states.has(twinId)) {
-      this._states.set(twinId, {
-        twinId,
-        timestamp: 0,
-        state: {},
-        confidence: 0,
-        source: 'virtual',
-      });
-    }
-    return config;
+  get isRunning(): boolean {
+    return this._isRunning;
   }
 
-  createLatencyCompensation(
-    twinId: string,
-    strategy: 'predictive' | 'buffering' | 'adaptive_delay' | 'none',
-    params: {
-      bufferSize?: number;
-      predictionHorizon?: number;
-    } = {}
-  ): LatencyCompensation {
-    const id = `lat-comp-${Date.now()}-${this._counter++}`;
-    const compensation: LatencyCompensation = {
-      id,
-      twinId,
-      measuredLatency: 0,
-      smoothedLatency: 0,
-      jitter: 0,
-      compensationStrategy: strategy,
-      bufferSize: params.bufferSize ?? 100,
-      predictionHorizon: params.predictionHorizon ?? 100,
-      lastCompensatedTime: 0,
-    };
-    this._latencyCompensations.set(id, compensation);
-    return compensation;
+  get bufferSize(): number {
+    return this._buffer.length;
   }
 
-  createStatePredictor(
-    twinId: string,
-    algorithm: 'kalman_filter' | 'linear_extrapolation' | 'polynomial' | 'lstm' | 'hybrid',
-    params: {
-      modelParameters?: Record<string, number>;
-      predictionHorizon?: number;
-    } = {}
-  ): StatePredictor {
-    const id = `pred-${Date.now()}-${this._counter++}`;
-    const predictor: StatePredictor = {
-      id,
-      twinId,
-      algorithm,
-      modelParameters: params.modelParameters ?? {},
-      predictionHorizon: params.predictionHorizon ?? 10,
-      accuracy: 0.8,
-      lastPredictionTime: 0,
-      predictions: {},
-    };
-    if (algorithm === 'kalman_filter') {
-      predictor.modelParameters = {
-        processNoise: 0.01,
-        measurementNoise: 0.1,
-        estimationError: 1,
-        ...params.modelParameters,
-      };
-    }
-    this._statePredictors.set(id, predictor);
-    return predictor;
+  get healthMetrics(): Map<string, SyncHealth> {
+    return new Map(this._healthMetrics);
   }
 
-  createCorrectionMechanism(
-    twinId: string,
-    method: 'proportional' | 'pid' | 'adaptive' | 'optimization',
-    params: {
-      threshold?: number;
-      maxCorrection?: number;
-      correctionGain?: number;
-    } = {}
-  ): CorrectionMechanism {
-    const id = `corr-${Date.now()}-${this._counter++}`;
-    const mechanism: CorrectionMechanism = {
-      id,
-      twinId,
-      method,
-      threshold: params.threshold ?? 0.01,
-      maxCorrection: params.maxCorrection ?? 1,
-      correctionGain: params.correctionGain ?? 0.1,
-      integralTerm: 0,
-      lastCorrection: 0,
-      correctionCount: 0,
-    };
-    this._correctionMechanisms.set(id, mechanism);
-    return mechanism;
+  get timeSyncConfig(): TimeSyncConfig {
+    return { ...this._timeSyncConfig };
   }
 
-  connectSync(syncId: string): boolean {
-    const config = this._realTimeConfigs.get(syncId);
+  get syncInterval(): number {
+    return this._syncInterval;
+  }
+
+  get batchSize(): number {
+    return this._batchSize;
+  }
+
+  get conflictResolution(): string {
+    return this._conflictResolution;
+  }
+
+  setSyncInterval(interval: number): void {
+    this._syncInterval = interval;
+  }
+
+  setBatchSize(size: number): void {
+    this._batchSize = size;
+  }
+
+  setConflictResolution(strategy: 'latest' | 'priority' | 'merge' | 'manual'): void {
+    this._conflictResolution = strategy;
+  }
+
+  setLatencyCompensation(config: Partial<LatencyCompensation>): void {
+    this._latencyCompensation = { ...this._latencyCompensation, ...config };
+  }
+
+  setTimeSyncConfig(config: Partial<TimeSyncConfig>): void {
+    this._timeSyncConfig = { ...this._timeSyncConfig, ...config };
+  }
+
+  addSyncConfig(config: RealTimeSyncConfig): void {
+    this._syncConfigs.set(config.id, config);
+  }
+
+  removeSyncConfig(id: string): boolean {
+    return this._syncConfigs.delete(id);
+  }
+
+  updateSyncConfig(id: string, updates: Partial<RealTimeSyncConfig>): boolean {
+    const config = this._syncConfigs.get(id);
     if (!config) return false;
-    config.status = 'connecting';
-    config.status = 'connected';
-    const conn = this._connectionPool.get(syncId);
-    if (conn) {
-      conn.connected = true;
-      conn.lastHeartbeat = Date.now();
-    }
+    this._syncConfigs.set(id, { ...config, ...updates, id });
     return true;
   }
 
-  disconnectSync(syncId: string): boolean {
-    const config = this._realTimeConfigs.get(syncId);
-    if (!config) return false;
-    config.status = 'disconnected';
-    const conn = this._connectionPool.get(syncId);
-    if (conn) {
-      conn.connected = false;
-    }
-    return true;
+  addPredictor(predictor: StatePredictor): void {
+    this._predictors.set(predictor.id, predictor);
   }
 
-  updateState(twinId: string, state: Record<string, number>, source: 'physical' | 'virtual' | 'fused' = 'physical'): boolean {
-    const existing = this._states.get(twinId);
-    const timestamp = Date.now();
-    const newState: TwinState = {
-      twinId,
+  removePredictor(id: string): boolean {
+    return this._predictors.delete(id);
+  }
+
+  addCorrectionMechanism(mechanism: CorrectionMechanism): void {
+    this._correctionMechanisms.set(mechanism.id, mechanism);
+  }
+
+  removeCorrectionMechanism(id: string): boolean {
+    return this._correctionMechanisms.delete(id);
+  }
+
+  updateState(state: TwinState): void {
+    this._currentState = state;
+    this._buffer.push(state);
+
+    if (this._buffer.length > this._maxBufferSize) {
+      this._buffer.shift();
+    }
+
+    this._addToHistory(state);
+    this._lastSyncTime = Date.now();
+    this._counter++;
+
+    this._notifySubscribers(state);
+    this._recordSyncEvent({
+      id: `sync-${Date.now()}`,
+      timestamp: Date.now(),
+      type: 'state-update',
+      sourceId: state.source,
+      targetId: 'twin-core',
+      data: { stateId: state.id, quality: state.quality },
+      latency: 0,
+      success: true
+    });
+
+    this._audit('update-state', `Updated state ${state.id} from source ${state.source}`);
+  }
+
+  private _addToHistory(state: TwinState): void {
+    const history = this._stateHistory.get(state.id) || {
+      stateId: state.id,
+      entries: [],
+      maxSize: 10000,
+      retentionPolicy: 'count' as const,
+      retentionValue: 10000
+    };
+
+    history.entries.push(state);
+
+    if (history.retentionPolicy === 'count' && history.entries.length > history.maxSize) {
+      history.entries.shift();
+    } else if (history.retentionPolicy === 'time') {
+      const cutoff = Date.now() - history.retentionValue;
+      history.entries = history.entries.filter(e => e.timestamp > cutoff);
+    }
+
+    this._stateHistory.set(state.id, history);
+  }
+
+  getStateHistory(stateId: string, limit?: number): TwinState[] {
+    const history = this._stateHistory.get(stateId);
+    if (!history) return [];
+    if (limit) return history.entries.slice(-limit);
+    return [...history.entries];
+  }
+
+  getStateAtTime(stateId: string, timestamp: number): TwinState | undefined {
+    const history = this._stateHistory.get(stateId);
+    if (!history) return undefined;
+    return history.entries.find(e => e.timestamp >= timestamp);
+  }
+
+  interpolateState(stateId: string, timestamp: number): TwinState | null {
+    const history = this._stateHistory.get(stateId);
+    if (!history || history.entries.length < 2) return null;
+
+    const sorted = [...history.entries].sort((a, b) => a.timestamp - b.timestamp);
+    let before = sorted[0];
+    let after = sorted[sorted.length - 1];
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (sorted[i].timestamp <= timestamp && sorted[i + 1].timestamp >= timestamp) {
+        before = sorted[i];
+        after = sorted[i + 1];
+        break;
+      }
+    }
+
+    const t = (timestamp - before.timestamp) / (after.timestamp - before.timestamp);
+    const interpolatedValues = new Map<string, number | string | boolean | number[]>();
+
+    for (const [key, beforeVal] of before.values) {
+      const afterVal = after.values.get(key);
+      if (typeof beforeVal === 'number' && typeof afterVal === 'number') {
+        interpolatedValues.set(key, beforeVal + t * (afterVal - beforeVal));
+      } else {
+        interpolatedValues.set(key, t > 0.5 ? afterVal : beforeVal);
+      }
+    }
+
+    return {
+      id: stateId,
       timestamp,
-      state: { ...state },
-      confidence: 0.95,
-      source,
+      values: interpolatedValues,
+      quality: Math.min(before.quality, after.quality),
+      source: 'interpolation',
+      version: Math.max(before.version, after.version),
+      checksum: `${stateId}-${timestamp}`
     };
-    this._states.set(twinId, newState);
-    this._recordSyncHistory(twinId, timestamp);
-    if (existing) {
-      this._applyCompensation(twinId, timestamp - existing.timestamp);
-      const drift = this._calculateDrift(existing.state, state);
-      this._correctState(twinId, drift);
+  }
+
+  predictState(stateId: string, predictorId: string, steps: number): TwinState | null {
+    const predictor = this._predictors.get(predictorId);
+    const history = this._stateHistory.get(stateId);
+    if (!predictor || !history || history.entries.length < 2) return null;
+
+    const recent = history.entries.slice(-predictor.horizon);
+    const lastState = recent[recent.length - 1];
+    const predictedValues = new Map<string, number | string | boolean | number[]>();
+
+    for (const [key, val] of lastState.values) {
+      if (typeof val === 'number') {
+        const trend = recent.length > 1
+          ? (recent[recent.length - 1].values.get(key) as number - recent[0].values.get(key) as number) / recent.length
+          : 0;
+        predictedValues.set(key, val + trend * steps);
+      } else {
+        predictedValues.set(key, val);
+      }
     }
-    this._syncStats.totalSyncs++;
-    this._syncStats.successfulSyncs++;
+
+    return {
+      id: stateId,
+      timestamp: Date.now() + steps * predictor.updateInterval,
+      values: predictedValues,
+      quality: lastState.quality * predictor.accuracy,
+      source: `predictor-${predictorId}`,
+      version: lastState.version + 1,
+      checksum: `${stateId}-predicted-${Date.now()}`
+    };
+  }
+
+  applyCorrection(stateId: string, mechanismId: string, targetValue: number): boolean {
+    const mechanism = this._correctionMechanisms.get(mechanismId);
+    if (!mechanism || !mechanism.enabled) return false;
+
+    const history = this._stateHistory.get(stateId);
+    if (!history || history.entries.length === 0) return false;
+
+    const lastState = history.entries[history.entries.length - 1];
+    const currentValue = lastState.values.get('value') as number;
+    const error = targetValue - currentValue;
+
+    if (Math.abs(error) < mechanism.threshold) return false;
+
+    const correction = Math.max(-mechanism.maxCorrection, Math.min(mechanism.maxCorrection, error * mechanism.smoothingFactor));
+    const correctedValue = currentValue + correction;
+
+    lastState.values.set('value', correctedValue);
+    lastState.values.set('correctionApplied', correction);
+    lastState.timestamp = Date.now();
+    lastState.version++;
+
+    this._recordSyncEvent({
+      id: `correction-${Date.now()}`,
+      timestamp: Date.now(),
+      type: 'correction',
+      sourceId: mechanismId,
+      targetId: stateId,
+      data: { correction, targetValue, correctedValue },
+      latency: 0,
+      success: true
+    });
+
+    this._audit('apply-correction', `Applied correction ${correction} to state ${stateId}`);
     return true;
   }
 
-  syncState(syncId: string, state: Record<string, number>): { synced: boolean; latency: number; drift: number } {
-    const config = this._realTimeConfigs.get(syncId);
-    if (!config || config.status !== 'connected') {
-      return { synced: false, latency: 0, drift: 0 };
-    }
-    const startTime = Date.now();
-    const twinId = config.twinId;
-    const existing = this._states.get(twinId);
-    const latency = startTime - config.lastSyncTime;
-    let drift = 0;
-    if (existing) {
-      drift = this._calculateDrift(existing.state, state);
-    }
-    this.updateState(twinId, state, 'physical');
-    config.lastSyncTime = startTime;
-    config.syncCount++;
-    this._updateLatencyStats(latency);
-    return { synced: true, latency, drift };
+  startSync(): void {
+    this._isRunning = true;
+    this._recordSyncEvent({
+      id: `sync-start-${Date.now()}`,
+      timestamp: Date.now(),
+      type: 'sync-start',
+      sourceId: 'system',
+      targetId: 'all',
+      data: { interval: this._syncInterval },
+      latency: 0,
+      success: true
+    });
+    this._audit('start-sync', 'State synchronization started');
   }
 
-  predictState(predictorId: string, steps: number = 1): { predictions: Record<string, number[]>; accuracy: number } {
-    const predictor = this._statePredictors.get(predictorId);
-    if (!predictor) return { predictions: {}, accuracy: 0 };
-    const currentState = this._states.get(predictor.twinId);
-    if (!currentState) return { predictions: {}, accuracy: 0 };
-    const result: Record<string, number[]> = {};
-    for (const key of Object.keys(currentState.state)) {
-      result[key] = [];
-      let currentValue = currentState.state[key];
-      for (let i = 0; i < steps; i++) {
-        const predicted = this._predictNextValue(predictor, key, currentValue, i);
-        result[key].push(predicted);
-        currentValue = predicted;
+  stopSync(): void {
+    this._isRunning = false;
+    this._recordSyncEvent({
+      id: `sync-stop-${Date.now()}`,
+      timestamp: Date.now(),
+      type: 'sync-complete',
+      sourceId: 'system',
+      targetId: 'all',
+      data: {},
+      latency: 0,
+      success: true
+    });
+    this._audit('stop-sync', 'State synchronization stopped');
+  }
+
+  syncBatch(states: TwinState[]): { processed: number; failed: number; latencies: number[] } {
+    let processed = 0;
+    let failed = 0;
+    const latencies: number[] = [];
+
+    for (const state of states) {
+      const startTime = Date.now();
+      try {
+        this.updateState(state);
+        processed++;
+        latencies.push(Date.now() - startTime);
+      } catch {
+        failed++;
+        this._recordSyncEvent({
+          id: `sync-error-${Date.now()}`,
+          timestamp: Date.now(),
+          type: 'sync-error',
+          sourceId: state.source,
+          targetId: 'twin-core',
+          data: { stateId: state.id },
+          latency: Date.now() - startTime,
+          success: false
+        });
       }
     }
-    predictor.predictions = {};
-    for (const key of Object.keys(result)) {
-      predictor.predictions[key] = result[key][result[key].length - 1];
-    }
-    predictor.lastPredictionTime = Date.now();
-    return { predictions: result, accuracy: predictor.accuracy };
+
+    return { processed, failed, latencies };
   }
 
-  private _predictNextValue(
-    predictor: StatePredictor,
-    variable: string,
-    currentValue: number,
-    step: number
-  ): number {
-    switch (predictor.algorithm) {
-      case 'linear_extrapolation':
-        const trend = predictor.modelParameters[`${variable}_trend`] ?? 0;
-        return currentValue + trend * (step + 1);
-      case 'kalman_filter':
-        const processNoise = predictor.modelParameters.processNoise ?? 0.01;
-        const noise = (Math.random() - 0.5) * processNoise;
-        return currentValue + noise;
-      case 'polynomial':
-        const a = predictor.modelParameters[`${variable}_a`] ?? 0;
-        const b = predictor.modelParameters[`${variable}_b`] ?? 0;
-        const c = predictor.modelParameters[`${variable}_c`] ?? currentValue;
-        const t = step + 1;
-        return a * t * t + b * t + c;
-      default:
-        return currentValue;
+  private _recordSyncEvent(event: SyncEvent): void {
+    this._syncEvents.push(event);
+    if (this._syncEvents.length > 10000) {
+      this._syncEvents.shift();
     }
   }
 
-  applyCorrection(correctionId: string, measuredState: Record<string, number>): { corrected: boolean; correctionAmount: number } {
-    const mechanism = this._correctionMechanisms.get(correctionId);
-    if (!mechanism) return { corrected: false, correctionAmount: 0 };
-    const currentState = this._states.get(mechanism.twinId);
-    if (!currentState) return { corrected: false, correctionAmount: 0 };
-    const drift = this._calculateDrift(currentState.state, measuredState);
-    if (Math.abs(drift) < mechanism.threshold) {
-      return { corrected: false, correctionAmount: 0 };
-    }
-    const correction = this._computeCorrection(mechanism, drift);
-    const correctedState: Record<string, number> = {};
-    for (const key of Object.keys(currentState.state)) {
-      const measured = measuredState[key] ?? currentState.state[key];
-      const diff = measured - currentState.state[key];
-      correctedState[key] = currentState.state[key] + diff * correction;
-    }
-    this.updateState(mechanism.twinId, correctedState, 'fused');
-    mechanism.lastCorrection = correction;
-    mechanism.correctionCount++;
-    return { corrected: true, correctionAmount: correction };
-  }
-
-  private _computeCorrection(mechanism: CorrectionMechanism, drift: number): number {
-    const absDrift = Math.abs(drift);
-    let correction = 0;
-    switch (mechanism.method) {
-      case 'proportional':
-        correction = mechanism.correctionGain * absDrift;
-        break;
-      case 'pid':
-        mechanism.integralTerm += absDrift;
-        const derivative = absDrift - mechanism.lastCorrection;
-        correction = mechanism.correctionGain * absDrift + 0.01 * mechanism.integralTerm + 0.1 * derivative;
-        break;
-      case 'adaptive':
-        const baseGain = mechanism.correctionGain;
-        const adaptiveGain = baseGain * (1 + absDrift * 10);
-        correction = Math.min(adaptiveGain * absDrift, mechanism.maxCorrection);
-        break;
-      case 'optimization':
-        correction = Math.min(absDrift, mechanism.maxCorrection);
-        break;
-    }
-    return Math.min(correction, mechanism.maxCorrection);
-  }
-
-  measureLatency(compensationId: string): {
-    measured: number;
-    smoothed: number;
-    jitter: number;
-  } {
-    const compensation = this._latencyCompensations.get(compensationId);
-    if (!compensation) return { measured: 0, smoothed: 0, jitter: 0 };
-    const measured = Math.random() * 50 + 10;
-    const alpha = 0.2;
-    const previousSmoothed = compensation.smoothedLatency;
-    const smoothed = alpha * measured + (1 - alpha) * previousSmoothed;
-    const jitter = Math.abs(measured - previousSmoothed);
-    compensation.measuredLatency = measured;
-    compensation.smoothedLatency = smoothed;
-    compensation.jitter = jitter;
-    compensation.lastCompensatedTime = Date.now();
-    return { measured, smoothed, jitter };
-  }
-
-  getState(twinId: string): TwinState | null {
-    return this._states.get(twinId) ?? null;
-  }
-
-  getSyncHistory(twinId: string, limit?: number): { time: number; latency: number; drift: number }[] {
-    const history = this._syncHistory.get(twinId) ?? [];
-    if (limit === undefined) return [...history];
-    return history.slice(-limit);
-  }
-
-  getPolicyNames(): string[] {
-    return Array.from(this._syncPolicies.keys());
-  }
-
-  getSyncPolicy(name: string): {
-    mode: 'push' | 'pull' | 'hybrid';
-    priority: number;
-    consistency: 'strong' | 'eventual' | 'weak';
-  } | null {
-    return this._syncPolicies.get(name) ?? null;
-  }
-
-  private _calculateDrift(stateA: Record<string, number>, stateB: Record<string, number>): number {
-    const keysA = Object.keys(stateA);
-    const keysB = Object.keys(stateB);
-    const allKeys = new Set([...keysA, ...keysB]);
-    if (allKeys.size === 0) return 0;
-    let totalDiff = 0;
-    let count = 0;
-    for (const key of allKeys) {
-      const valA = stateA[key] ?? 0;
-      const valB = stateB[key] ?? 0;
-      const maxVal = Math.max(Math.abs(valA), Math.abs(valB), 1);
-      totalDiff += Math.abs(valA - valB) / maxVal;
-      count++;
-    }
-    return count > 0 ? totalDiff / count : 0;
-  }
-
-  private _applyCompensation(twinId: string, latency: number): void {
-    for (const compensation of this._latencyCompensations.values()) {
-      if (compensation.twinId === twinId) {
-        compensation.measuredLatency = latency;
-        const alpha = 0.1;
-        compensation.smoothedLatency = alpha * latency + (1 - alpha) * compensation.smoothedLatency;
-        compensation.jitter = Math.abs(latency - compensation.smoothedLatency);
-        compensation.lastCompensatedTime = Date.now();
-        break;
-      }
+  private _notifySubscribers(state: TwinState): void {
+    const listeners = this._stateSubscriptions.get(state.id) || [];
+    for (const listener of listeners) {
+      listener(state);
     }
   }
 
-  private _correctState(twinId: string, drift: number): void {
-    for (const mechanism of this._correctionMechanisms.values()) {
-      if (mechanism.twinId === twinId && Math.abs(drift) > mechanism.threshold) {
-        mechanism.lastCorrection = drift * mechanism.correctionGain;
-        mechanism.correctionCount++;
-        break;
-      }
+  subscribeToState(stateId: string, listener: (state: TwinState) => void): void {
+    const listeners = this._stateSubscriptions.get(stateId) || [];
+    listeners.push(listener);
+    this._stateSubscriptions.set(stateId, listeners);
+  }
+
+  unsubscribeFromState(stateId: string, listener: (state: TwinState) => void): void {
+    const listeners = this._stateSubscriptions.get(stateId) || [];
+    const idx = listeners.indexOf(listener);
+    if (idx >= 0) {
+      listeners.splice(idx, 1);
+      this._stateSubscriptions.set(stateId, listeners);
     }
   }
 
-  private _recordSyncHistory(twinId: string, time: number): void {
-    if (!this._syncHistory.has(twinId)) {
-      this._syncHistory.set(twinId, []);
-    }
-    const history = this._syncHistory.get(twinId)!;
-    history.push({ time, latency: 0, drift: 0 });
-    if (history.length > 1000) {
-      history.shift();
-    }
-  }
+  computeSyncHealth(sourceId: string): SyncHealth {
+    const events = this._syncEvents.filter(e => e.sourceId === sourceId);
+    const recentEvents = events.filter(e => Date.now() - e.timestamp < 60000);
+    const successful = recentEvents.filter(e => e.success);
 
-  private _updateLatencyStats(latency: number): void {
-    const total = this._syncStats.totalSyncs;
-    this._syncStats.avgLatency = (this._syncStats.avgLatency * (total - 1) + latency) / total;
-    this._syncStats.maxLatency = Math.max(this._syncStats.maxLatency, latency);
-    this._syncStats.minLatency = Math.min(this._syncStats.minLatency, latency);
-  }
+    const avgLatency = recentEvents.length > 0
+      ? recentEvents.reduce((sum, e) => sum + e.latency, 0) / recentEvents.length
+      : 0;
 
-  toPacket(): DataPacket<StateSynchronizationResult> {
-    const result: StateSynchronizationResult = {
-      realTimeConfigs: Array.from(this._realTimeConfigs.values()),
-      latencyCompensations: Array.from(this._latencyCompensations.values()),
-      statePredictors: Array.from(this._statePredictors.values()),
-      correctionMechanisms: Array.from(this._correctionMechanisms.values()),
-      syncStatus: {
-        syncedTwins: this.syncedTwinCount,
-        avgLatency: this._syncStats.avgLatency,
-        syncAccuracy: this.syncAccuracy,
-        drift: this._syncStats.avgDrift,
-      },
-      overallStatus:
-        this.syncedTwinCount === 0
-          ? 'out_of_sync'
-          : this.syncAccuracy > 0.95
-          ? 'synced'
-          : this.syncAccuracy > 0.8
-          ? 'syncing'
-          : 'degraded',
+    const successRate = recentEvents.length > 0
+      ? successful.length / recentEvents.length
+      : 0;
+
+    let status: 'healthy' | 'degraded' | 'critical' | 'offline' = 'healthy';
+    if (successRate < 0.5) status = 'offline';
+    else if (successRate < 0.8) status = 'critical';
+    else if (avgLatency > 500 || successRate < 0.95) status = 'degraded';
+
+    const health: SyncHealth = {
+      sourceId,
+      lastSyncTime: recentEvents.length > 0 ? recentEvents[recentEvents.length - 1].timestamp : 0,
+      averageLatency: avgLatency,
+      syncSuccessRate: successRate,
+      driftRate: this._driftCompensation.get(sourceId) || 0,
+      status
     };
-    this._lastResult = result;
+
+    this._healthMetrics.set(sourceId, health);
+    return health;
+  }
+
+  compensateLatency(state: TwinState): TwinState {
+    if (!this._latencyCompensation.enabled) return state;
+
+    const compensated = { ...state };
+    compensated.values = new Map(state.values);
+
+    if (this._latencyCompensation.compensationMethod === 'extrapolation') {
+      const history = this._stateHistory.get(state.id);
+      if (history && history.entries.length >= 2) {
+        const recent = history.entries.slice(-2);
+        const dt = recent[1].timestamp - recent[0].timestamp;
+        for (const [key, val] of recent[1].values) {
+          if (typeof val === 'number') {
+            const prev = recent[0].values.get(key) as number;
+            const trend = dt > 0 ? (val - prev) / dt : 0;
+            compensated.values.set(key, val + trend * this._latencyCompensation.estimatedLatency);
+          }
+        }
+      }
+    }
+
+    return compensated;
+  }
+
+  detectConflict(stateA: TwinState, stateB: TwinState): boolean {
+    if (stateA.id !== stateB.id) return false;
+    if (stateA.timestamp === stateB.timestamp) {
+      for (const [key, valA] of stateA.values) {
+        const valB = stateB.values.get(key);
+        if (valA !== valB) return true;
+      }
+    }
+    return false;
+  }
+
+  resolveConflict(stateA: TwinState, stateB: TwinState): TwinState {
+    switch (this._conflictResolution) {
+      case 'latest':
+        return stateA.timestamp > stateB.timestamp ? stateA : stateB;
+      case 'priority':
+        return stateA.quality > stateB.quality ? stateA : stateB;
+      case 'merge': {
+        const merged = { ...stateA };
+        merged.values = new Map(stateA.values);
+        for (const [key, val] of stateB.values) {
+          if (!merged.values.has(key)) {
+            merged.values.set(key, val);
+          }
+        }
+        return merged;
+      }
+      default:
+        return stateA;
+    }
+  }
+
+  acquireSyncLock(resourceId: string): boolean {
+    if (this._syncLock.get(resourceId)) return false;
+    this._syncLock.set(resourceId, true);
+    return true;
+  }
+
+  releaseSyncLock(resourceId: string): void {
+    this._syncLock.set(resourceId, false);
+  }
+
+  estimateDrift(sourceId: string, referenceTime: number): number {
+    const history = this._stateHistory.get(sourceId);
+    if (!history || history.entries.length < 2) return 0;
+
+    const recent = history.entries.slice(-10);
+    let totalDrift = 0;
+    for (let i = 1; i < recent.length; i++) {
+      totalDrift += recent[i].timestamp - recent[i - 1].timestamp - this._syncInterval;
+    }
+    const avgDrift = totalDrift / Math.max(recent.length - 1, 1);
+    this._driftCompensation.set(sourceId, avgDrift);
+    return avgDrift;
+  }
+
+  flushBuffer(): TwinState[] {
+    const flushed = [...this._buffer];
+    this._buffer = [];
+    return flushed;
+  }
+
+  clearHistory(stateId?: string): void {
+    if (stateId) {
+      this._stateHistory.delete(stateId);
+    } else {
+      this._stateHistory.clear();
+    }
+  }
+
+  exportHistory(stateId: string): string {
+    const history = this._stateHistory.get(stateId);
+    return history ? JSON.stringify(history.entries, null, 2) : '';
+  }
+
+  getAuditTrail(): { timestamp: number; action: string; details: string }[] {
+    return [...this._auditTrail];
+  }
+
+  private _audit(action: string, details: string): void {
+    this._auditTrail.push({ timestamp: Date.now(), action, details });
+    if (this._auditTrail.length > 10000) {
+      this._auditTrail.shift();
+    }
+  }
+
+  getSyncStatistics(): Record<string, number> {
+    return {
+      totalEvents: this._syncEvents.length,
+      successfulEvents: this._syncEvents.filter(e => e.success).length,
+      failedEvents: this._syncEvents.filter(e => !e.success).length,
+      averageLatency: this._syncEvents.length > 0
+        ? this._syncEvents.reduce((sum, e) => sum + e.latency, 0) / this._syncEvents.length
+        : 0,
+      totalStates: this._stateHistory.size,
+      totalHistoryEntries: Array.from(this._stateHistory.values()).reduce((sum, h) => sum + h.entries.length, 0),
+      bufferSize: this._buffer.length,
+      activePredictors: this._predictors.size,
+      activeCorrections: Array.from(this._correctionMechanisms.values()).filter(m => m.enabled).length
+    };
+  }
+
+  toPacket(): DataPacket<TwinState> {
+    const result = this._currentState || {
+      id: '',
+      timestamp: Date.now(),
+      values: new Map(),
+      quality: 0,
+      source: '',
+      version: 0,
+      checksum: ''
+    };
     this._counter++;
     return {
       id: `state-sync-${Date.now()}-${this._counter}`,
       payload: result,
       metadata: {
         createdAt: Date.now(),
-        route: ['digital_twin', 'state_synchronization'],
+        route: ['digital-twin', 'state-synchronization'],
         priority: 1,
-        phase: 'synchronization',
-      },
+        phase: 'synchronization'
+      }
     };
   }
 
   reset(): void {
-    this._states.clear();
-    this._realTimeConfigs.clear();
-    this._latencyCompensations.clear();
-    this._statePredictors.clear();
-    this._correctionMechanisms.clear();
-    this._counter = 0;
-    this._lastResult = null;
-    this._syncHistory.clear();
-    this._connectionPool.clear();
-    this._syncStats = {
-      totalSyncs: 0,
-      successfulSyncs: 0,
-      failedSyncs: 0,
-      avgLatency: 0,
-      maxLatency: 0,
-      minLatency: Infinity,
-      avgDrift: 0,
+    this._currentState = null;
+    this._stateHistory.clear();
+    this._syncConfigs.clear();
+    this._latencyCompensation = {
+      enabled: true,
+      estimatedLatency: 0,
+      compensationMethod: 'extrapolation',
+      bufferDepth: 10,
+      maxCompensatedLatency: 500,
+      confidenceThreshold: 0.8
     };
+    this._predictors.clear();
+    this._correctionMechanisms.clear();
+    this._syncEvents = [];
+    this._lastSyncTime = 0;
+    this._counter = 0;
+    this._syncInterval = 1000;
+    this._isRunning = false;
+    this._buffer = [];
+    this._maxBufferSize = 1000;
+    this._timeSyncConfig = {
+      protocol: 'ntp',
+      pollingInterval: 64,
+      accuracyThreshold: 10,
+      timezone: 'UTC',
+      daylightSaving: false
+    };
+    this._healthMetrics.clear();
+    this._stateSubscriptions.clear();
+    this._syncLock.clear();
+    this._driftCompensation.clear();
+    this._batchSize = 50;
+    this._conflictResolution = 'latest';
+    this._auditTrail = [];
+    this._initDefaultPredictors();
+    this._initDefaultCorrectionMechanisms();
   }
 }

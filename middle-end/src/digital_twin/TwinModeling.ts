@@ -1,541 +1,834 @@
 import { DataPacket } from '../shared/types';
 
-export interface GeometricModel {
+export interface GeometryModel {
   id: string;
-  type: 'cad' | 'mesh' | 'point_cloud' | 'parametric';
-  vertices: number;
-  faces: number;
-  precision: number;
-  format: string;
+  type: 'mesh' | 'parametric' | 'volumetric' | 'point-cloud' | 'surface' | 'solid';
+  vertices: number[][];
+  faces: number[][];
+  normals: number[][];
+  uvs: number[][];
   boundingBox: { min: number[]; max: number[] };
-  levelOfDetail: number;
+  lodLevels: number;
+  metadata: Record<string, unknown>;
 }
 
-export interface PhysicalModel {
+export interface BehaviorModel {
   id: string;
-  domain: 'mechanical' | 'thermal' | 'fluid' | 'electrical' | 'chemical';
-  equations: string[];
-  parameters: Record<string, number>;
-  boundaryConditions: Record<string, unknown>;
-  materialProperties: Record<string, number>;
-  solverConfig: { method: string; tolerance: number; maxIterations: number };
-}
-
-export interface BehavioralModel {
-  id: string;
-  paradigm: 'state_machine' | 'petri_net' | 'activity_diagram' | 'rule_based';
+  type: 'finite-state' | 'agent-based' | 'system-dynamics' | 'discrete-event' | 'continuous' | 'hybrid';
   states: string[];
-  transitions: { from: string; to: string; condition: string; action: string }[];
+  transitions: { from: string; to: string; condition: string; probability: number }[];
+  parameters: Record<string, number>;
   initialState: string;
-  currentState: string;
-  rules: { condition: string; action: string; priority: number }[];
+  timeStep: number;
+  metadata: Record<string, unknown>;
 }
 
-export interface MultiDomainModel {
-  id: string;
-  domains: string[];
-  couplings: { domainA: string; domainB: string; interface: string; variables: string[] }[];
-  integratedSolvers: string[];
-  coSimulationStrategy: string;
-  timeStep: number;
+export interface SimulationParameter {
+  name: string;
+  value: number | string | boolean | number[];
+  unit: string;
+  min: number;
+  max: number;
+  step: number;
+  description: string;
+  category: string;
+  isConstant: boolean;
 }
 
 export interface TwinModelingResult {
-  geometricModels: GeometricModel[];
-  physicalModels: PhysicalModel[];
-  behavioralModels: BehavioralModel[];
-  multiDomainModels: MultiDomainModel[];
-  totalModels: number;
-  modelQuality: number;
-  validationStatus: 'pending' | 'validated' | 'failed';
+  geometryModels: GeometryModel[];
+  behaviorModels: BehaviorModel[];
+  parameters: SimulationParameter[];
+  timestamp: number;
+  version: string;
+  validationStatus: 'valid' | 'invalid' | 'warning';
+  errors: string[];
+  warnings: string[];
+  performanceMetrics: Record<string, number>;
+}
+
+export interface ModelConstraint {
+  id: string;
+  type: 'geometric' | 'physical' | 'logical' | 'temporal' | 'spatial';
+  description: string;
+  expression: string;
+  priority: number;
+  isHard: boolean;
+}
+
+export interface ModelValidationRule {
+  id: string;
+  name: string;
+  check: (model: GeometryModel | BehaviorModel) => boolean;
+  errorMessage: string;
+  severity: 'error' | 'warning' | 'info';
+}
+
+export interface ModelVersion {
+  version: string;
+  createdAt: number;
+  author: string;
+  changelog: string;
+  parentVersion: string | null;
+  checksum: string;
+}
+
+export interface ModelTemplate {
+  id: string;
+  name: string;
+  category: string;
+  geometryTemplate: Partial<GeometryModel>;
+  behaviorTemplate: Partial<BehaviorModel>;
+  defaultParameters: SimulationParameter[];
+  tags: string[];
 }
 
 export class TwinModeling {
-  private _geometricModels: Map<string, GeometricModel> = new Map();
-  private _physicalModels: Map<string, PhysicalModel> = new Map();
-  private _behavioralModels: Map<string, BehavioralModel> = new Map();
-  private _multiDomainModels: Map<string, MultiDomainModel> = new Map();
-  private _counter: number = 0;
-  private _modelRegistry: Map<string, { type: string; createdAt: number; lastModified: number }> = new Map();
-  private _validationQueue: string[] = [];
+  private _geometryModels: Map<string, GeometryModel> = new Map();
+  private _behaviorModels: Map<string, BehaviorModel> = new Map();
+  private _parameters: Map<string, SimulationParameter> = new Map();
+  private _constraints: Map<string, ModelConstraint> = new Map();
+  private _validationRules: ModelValidationRule[] = [];
+  private _modelVersions: Map<string, ModelVersion[]> = new Map();
+  private _templates: Map<string, ModelTemplate> = new Map();
   private _lastResult: TwinModelingResult | null = null;
-  private _modelTemplates: Map<string, Record<string, unknown>> = new Map();
-  private _materialLibrary: Map<string, Record<string, number>> = new Map();
-  private _meshQualityMetrics: {
-    aspectRatio: number;
-    skewness: number;
-    orthogonality: number;
-    smoothness: number;
-  } = {
-    aspectRatio: 0,
-    skewness: 0,
-    orthogonality: 0,
-    smoothness: 0,
-  };
+  private _counter: number = 0;
+  private _version: string = '1.0.0';
+  private _undoStack: { action: string; data: unknown }[] = [];
+  private _redoStack: { action: string; data: unknown }[] = [];
+  private _autoValidate: boolean = true;
+  private _unitSystem: string = 'SI';
+  private _snapTolerance: number = 0.001;
+  private _maxUndoSteps: number = 50;
+  private _parameterPresets: Map<string, Map<string, SimulationParameter[]>> = new Map();
+  private _modelRelationships: Map<string, string[]> = new Map();
+  private _performanceLog: { timestamp: number; operation: string; duration: number }[] = [];
+  private _changeListeners: ((event: string, modelId: string) => void)[] = [];
 
   constructor() {
-    this._initMaterialLibrary();
-    this._initModelTemplates();
+    this._initDefaultValidationRules();
+    this._initDefaultTemplates();
   }
 
-  private _initMaterialLibrary(): void {
-    const materials = [
-      { name: 'steel', properties: { density: 7850, youngsModulus: 200e9, poissonRatio: 0.3, thermalConductivity: 50, specificHeat: 450 } },
-      { name: 'aluminum', properties: { density: 2700, youngsModulus: 70e9, poissonRatio: 0.33, thermalConductivity: 205, specificHeat: 900 } },
-      { name: 'copper', properties: { density: 8960, youngsModulus: 110e9, poissonRatio: 0.34, thermalConductivity: 401, specificHeat: 385 } },
-      { name: 'concrete', properties: { density: 2400, youngsModulus: 30e9, poissonRatio: 0.2, thermalConductivity: 1.5, specificHeat: 880 } },
-      { name: 'glass', properties: { density: 2500, youngsModulus: 70e9, poissonRatio: 0.22, thermalConductivity: 1.0, specificHeat: 840 } },
-      { name: 'rubber', properties: { density: 1100, youngsModulus: 0.01e9, poissonRatio: 0.49, thermalConductivity: 0.15, specificHeat: 2000 } },
-      { name: 'plastic', properties: { density: 1050, youngsModulus: 2.5e9, poissonRatio: 0.35, thermalConductivity: 0.2, specificHeat: 1500 } },
-      { name: 'titanium', properties: { density: 4506, youngsModulus: 116e9, poissonRatio: 0.32, thermalConductivity: 21.9, specificHeat: 520 } },
-    ];
-    materials.forEach(m => this._materialLibrary.set(m.name, m.properties as Record<string, number>));
-  }
-
-  private _initModelTemplates(): void {
-    const templates = [
-      {
-        name: 'cantilever_beam',
-        template: {
-          type: 'mechanical',
-          geometry: { shape: 'beam', length: 1.0, width: 0.1, height: 0.05 },
-          boundaryConditions: { fixed: { face: 'end1' }, load: { face: 'end2', force: 1000 } },
-          material: 'steel',
-        },
+  private _initDefaultValidationRules(): void {
+    this._validationRules.push({
+      id: 'geo-non-empty',
+      name: 'Geometry Non-Empty',
+      check: (model) => {
+        if (model.type && ['mesh', 'point-cloud', 'surface', 'solid'].includes(model.type as string)) {
+          const geo = model as GeometryModel;
+          return geo.vertices.length > 0;
+        }
+        return true;
       },
-      {
-        name: 'heat_exchanger',
-        template: {
-          type: 'thermal',
-          geometry: { shape: 'cylinder', radius: 0.5, length: 2.0 },
-          boundaryConditions: { inlet: { temperature: 350 }, outlet: { temperature: 300 } },
-          material: 'copper',
-        },
+      errorMessage: 'Geometry model must have at least one vertex',
+      severity: 'error'
+    });
+
+    this._validationRules.push({
+      id: 'geo-valid-faces',
+      name: 'Valid Face Indices',
+      check: (model) => {
+        if (model.type === 'mesh') {
+          const geo = model as GeometryModel;
+          const vertexCount = geo.vertices.length;
+          return geo.faces.every(face => face.every(idx => idx >= 0 && idx < vertexCount));
+        }
+        return true;
       },
-      {
-        name: 'pipe_flow',
-        template: {
-          type: 'fluid',
-          geometry: { shape: 'pipe', diameter: 0.1, length: 10.0 },
-          boundaryConditions: { inlet: { pressure: 100000, velocity: 1.0 }, outlet: { pressure: 50000 } },
-          fluid: 'water',
-        },
+      errorMessage: 'Face indices must reference valid vertices',
+      severity: 'error'
+    });
+
+    this._validationRules.push({
+      id: 'beh-initial-state',
+      name: 'Initial State Defined',
+      check: (model) => {
+        if (model.type && ['finite-state', 'hybrid'].includes(model.type as string)) {
+          const beh = model as BehaviorModel;
+          return beh.states.includes(beh.initialState);
+        }
+        return true;
       },
-      {
-        name: 'electric_motor',
-        template: {
-          type: 'electrical',
-          parameters: { voltage: 220, current: 10, frequency: 50, efficiency: 0.85 },
-          cooling: 'air',
-        },
+      errorMessage: 'Initial state must be defined in states list',
+      severity: 'error'
+    });
+
+    this._validationRules.push({
+      id: 'beh-positive-timestep',
+      name: 'Positive Time Step',
+      check: (model) => {
+        if (model.type && ['continuous', 'system-dynamics', 'hybrid'].includes(model.type as string)) {
+          const beh = model as BehaviorModel;
+          return beh.timeStep > 0;
+        }
+        return true;
       },
-    ];
-    templates.forEach(t => this._modelTemplates.set(t.name, t.template as Record<string, unknown>));
-  }
+      errorMessage: 'Time step must be positive',
+      severity: 'error'
+    });
 
-  get geometricModels(): GeometricModel[] {
-    return Array.from(this._geometricModels.values());
-  }
-
-  get physicalModels(): PhysicalModel[] {
-    return Array.from(this._physicalModels.values());
-  }
-
-  get behavioralModels(): BehavioralModel[] {
-    return Array.from(this._behavioralModels.values());
-  }
-
-  get multiDomainModels(): MultiDomainModel[] {
-    return Array.from(this._multiDomainModels.values());
-  }
-
-  get totalModels(): number {
-    return this._geometricModels.size + this._physicalModels.size + this._behavioralModels.size + this._multiDomainModels.size;
-  }
-
-  get modelRegistry(): Map<string, { type: string; createdAt: number; lastModified: number }> {
-    return new Map(this._modelRegistry);
-  }
-
-  get meshQualityMetrics(): { aspectRatio: number; skewness: number; orthogonality: number; smoothness: number } {
-    return { ...this._meshQualityMetrics };
-  }
-
-  createGeometricModel(
-    type: 'cad' | 'mesh' | 'point_cloud' | 'parametric',
-    params: {
-      vertices?: number;
-      faces?: number;
-      precision?: number;
-      format?: string;
-      boundingBox?: { min: number[]; max: number[] };
-      levelOfDetail?: number;
-    } = {}
-  ): GeometricModel {
-    const id = `geo-${Date.now()}-${this._counter++}`;
-    const model: GeometricModel = {
-      id,
-      type,
-      vertices: params.vertices ?? 0,
-      faces: params.faces ?? 0,
-      precision: params.precision ?? 0.001,
-      format: params.format ?? 'stl',
-      boundingBox: params.boundingBox ?? { min: [0, 0, 0], max: [1, 1, 1] },
-      levelOfDetail: params.levelOfDetail ?? 1,
-    };
-    this._geometricModels.set(id, model);
-    this._modelRegistry.set(id, { type: 'geometric', createdAt: Date.now(), lastModified: Date.now() });
-    this._updateMeshQualityMetrics();
-    return model;
-  }
-
-  createPhysicalModel(
-    domain: 'mechanical' | 'thermal' | 'fluid' | 'electrical' | 'chemical',
-    params: {
-      equations?: string[];
-      parameters?: Record<string, number>;
-      boundaryConditions?: Record<string, unknown>;
-      materialProperties?: Record<string, number>;
-      solverConfig?: { method: string; tolerance: number; maxIterations: number };
-    } = {}
-  ): PhysicalModel {
-    const id = `phys-${Date.now()}-${this._counter++}`;
-    const model: PhysicalModel = {
-      id,
-      domain,
-      equations: params.equations ?? [],
-      parameters: params.parameters ?? {},
-      boundaryConditions: params.boundaryConditions ?? {},
-      materialProperties: params.materialProperties ?? this._materialLibrary.get('steel') ?? {},
-      solverConfig: params.solverConfig ?? { method: 'finite_element', tolerance: 1e-6, maxIterations: 1000 },
-    };
-    this._physicalModels.set(id, model);
-    this._modelRegistry.set(id, { type: 'physical', createdAt: Date.now(), lastModified: Date.now() });
-    return model;
-  }
-
-  createBehavioralModel(
-    paradigm: 'state_machine' | 'petri_net' | 'activity_diagram' | 'rule_based',
-    params: {
-      states?: string[];
-      transitions?: { from: string; to: string; condition: string; action: string }[];
-      initialState?: string;
-      rules?: { condition: string; action: string; priority: number }[];
-    } = {}
-  ): BehavioralModel {
-    const id = `behav-${Date.now()}-${this._counter++}`;
-    const states = params.states ?? ['idle', 'running', 'stopped', 'error'];
-    const initialState = params.initialState ?? states[0];
-    const model: BehavioralModel = {
-      id,
-      paradigm,
-      states,
-      transitions: params.transitions ?? [],
-      initialState,
-      currentState: initialState,
-      rules: params.rules ?? [],
-    };
-    this._behavioralModels.set(id, model);
-    this._modelRegistry.set(id, { type: 'behavioral', createdAt: Date.now(), lastModified: Date.now() });
-    return model;
-  }
-
-  createMultiDomainModel(
-    domains: string[],
-    params: {
-      couplings?: { domainA: string; domainB: string; interface: string; variables: string[] }[];
-      integratedSolvers?: string[];
-      coSimulationStrategy?: string;
-      timeStep?: number;
-    } = {}
-  ): MultiDomainModel {
-    const id = `multi-${Date.now()}-${this._counter++}`;
-    const model: MultiDomainModel = {
-      id,
-      domains,
-      couplings: params.couplings ?? [],
-      integratedSolvers: params.integratedSolvers ?? [],
-      coSimulationStrategy: params.coSimulationStrategy ?? 'jacobi',
-      timeStep: params.timeStep ?? 0.001,
-    };
-    this._multiDomainModels.set(id, model);
-    this._modelRegistry.set(id, { type: 'multiDomain', createdAt: Date.now(), lastModified: Date.now() });
-    return model;
-  }
-
-  generateParametricGeometry(
-    baseShape: string,
-    parameters: Record<string, number>
-  ): GeometricModel {
-    const vertices = Math.floor(parameters.resolution ?? 100) * Math.floor(parameters.resolution ?? 100);
-    const faces = vertices * 2;
-    const boundingBox = {
-      min: [0, 0, 0],
-      max: [parameters.length ?? 1, parameters.width ?? 1, parameters.height ?? 1],
-    };
-    return this.createGeometricModel('parametric', {
-      vertices,
-      faces,
-      precision: parameters.precision ?? 0.001,
-      format: 'parametric',
-      boundingBox,
-      levelOfDetail: parameters.lod ?? 1,
+    this._validationRules.push({
+      id: 'geo-bounding-box',
+      name: 'Bounding Box Valid',
+      check: (model) => {
+        if (model.type && ['mesh', 'point-cloud', 'surface', 'solid', 'volumetric'].includes(model.type as string)) {
+          const geo = model as GeometryModel;
+          return geo.boundingBox.min.length === 3 && geo.boundingBox.max.length === 3;
+        }
+        return true;
+      },
+      errorMessage: 'Bounding box must have 3D min and max arrays',
+      severity: 'warning'
     });
   }
 
-  refineMesh(modelId: string, targetResolution: number): GeometricModel | null {
-    const model = this._geometricModels.get(modelId);
-    if (!model) return null;
-    const refined: GeometricModel = {
-      ...model,
-      vertices: model.vertices * targetResolution,
-      faces: model.faces * targetResolution,
-      levelOfDetail: model.levelOfDetail + 1,
-    };
-    this._geometricModels.set(modelId, refined);
-    this._updateModelRegistry(modelId);
-    this._updateMeshQualityMetrics();
-    return refined;
+  private _initDefaultTemplates(): void {
+    this._templates.set('cube-mesh', {
+      id: 'cube-mesh',
+      name: 'Cube Mesh',
+      category: 'basic-geometry',
+      geometryTemplate: {
+        type: 'mesh',
+        vertices: [],
+        faces: [],
+        normals: [],
+        uvs: [],
+        boundingBox: { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] },
+        lodLevels: 3,
+        metadata: {}
+      },
+      behaviorTemplate: {},
+      defaultParameters: [
+        { name: 'width', value: 1, unit: 'm', min: 0.001, max: 1000, step: 0.001, description: 'Cube width', category: 'dimension', isConstant: false },
+        { name: 'height', value: 1, unit: 'm', min: 0.001, max: 1000, step: 0.001, description: 'Cube height', category: 'dimension', isConstant: false },
+        { name: 'depth', value: 1, unit: 'm', min: 0.001, max: 1000, step: 0.001, description: 'Cube depth', category: 'dimension', isConstant: false }
+      ],
+      tags: ['geometry', 'primitive', 'cube']
+    });
+
+    this._templates.set('fsm-behavior', {
+      id: 'fsm-behavior',
+      name: 'Finite State Machine',
+      category: 'behavior',
+      geometryTemplate: {},
+      behaviorTemplate: {
+        type: 'finite-state',
+        states: ['idle', 'active', 'error'],
+        transitions: [
+          { from: 'idle', to: 'active', condition: 'startSignal', probability: 1.0 },
+          { from: 'active', to: 'idle', condition: 'stopSignal', probability: 1.0 },
+          { from: 'active', to: 'error', condition: 'faultDetected', probability: 0.01 }
+        ],
+        parameters: {},
+        initialState: 'idle',
+        timeStep: 1,
+        metadata: {}
+      },
+      defaultParameters: [
+        { name: 'transitionDelay', value: 0, unit: 's', min: 0, max: 3600, step: 0.1, description: 'State transition delay', category: 'timing', isConstant: false }
+      ],
+      tags: ['behavior', 'fsm', 'control']
+    });
+
+    this._templates.set('particle-system', {
+      id: 'particle-system',
+      name: 'Particle System',
+      category: 'effects',
+      geometryTemplate: {
+        type: 'point-cloud',
+        vertices: [],
+        faces: [],
+        normals: [],
+        uvs: [],
+        boundingBox: { min: [0, 0, 0], max: [10, 10, 10] },
+        lodLevels: 1,
+        metadata: { maxParticles: 10000 }
+      },
+      behaviorTemplate: {
+        type: 'continuous',
+        states: ['emitting', 'paused', 'stopped'],
+        transitions: [],
+        parameters: { gravity: -9.81, drag: 0.1 },
+        initialState: 'emitting',
+        timeStep: 0.016,
+        metadata: {}
+      },
+      defaultParameters: [
+        { name: 'emissionRate', value: 100, unit: 'particles/s', min: 0, max: 100000, step: 1, description: 'Particles emitted per second', category: 'emission', isConstant: false },
+        { name: 'lifetime', value: 2, unit: 's', min: 0.01, max: 60, step: 0.01, description: 'Particle lifetime', category: 'emission', isConstant: false },
+        { name: 'velocity', value: [0, 5, 0], unit: 'm/s', min: -100, max: 100, step: 0.1, description: 'Initial velocity', category: 'dynamics', isConstant: false }
+      ],
+      tags: ['particles', 'effects', 'simulation']
+    });
   }
 
-  simplifyMesh(modelId: string, reductionRatio: number): GeometricModel | null {
-    const model = this._geometricModels.get(modelId);
-    if (!model || reductionRatio <= 0 || reductionRatio >= 1) return null;
-    const simplified: GeometricModel = {
-      ...model,
-      vertices: Math.floor(model.vertices * (1 - reductionRatio)),
-      faces: Math.floor(model.faces * (1 - reductionRatio)),
-      levelOfDetail: Math.max(1, model.levelOfDetail - 1),
-    };
-    this._geometricModels.set(modelId, simplified);
-    this._updateModelRegistry(modelId);
-    this._updateMeshQualityMetrics();
-    return simplified;
+  get geometryModels(): Map<string, GeometryModel> {
+    return new Map(this._geometryModels);
   }
 
-  addPhysicalEquation(modelId: string, equation: string): boolean {
-    const model = this._physicalModels.get(modelId);
+  get behaviorModels(): Map<string, BehaviorModel> {
+    return new Map(this._behaviorModels);
+  }
+
+  get parameters(): Map<string, SimulationParameter> {
+    return new Map(this._parameters);
+  }
+
+  get constraints(): Map<string, ModelConstraint> {
+    return new Map(this._constraints);
+  }
+
+  get templates(): Map<string, ModelTemplate> {
+    return new Map(this._templates);
+  }
+
+  get lastResult(): TwinModelingResult | null {
+    return this._lastResult;
+  }
+
+  get version(): string {
+    return this._version;
+  }
+
+  get autoValidate(): boolean {
+    return this._autoValidate;
+  }
+
+  get unitSystem(): string {
+    return this._unitSystem;
+  }
+
+  get modelCount(): number {
+    return this._geometryModels.size + this._behaviorModels.size;
+  }
+
+  get parameterCount(): number {
+    return this._parameters.size;
+  }
+
+  get constraintCount(): number {
+    return this._constraints.size;
+  }
+
+  get undoStackSize(): number {
+    return this._undoStack.length;
+  }
+
+  setAutoValidate(value: boolean): void {
+    this._autoValidate = value;
+  }
+
+  setUnitSystem(system: string): void {
+    this._unitSystem = system;
+  }
+
+  setSnapTolerance(tolerance: number): void {
+    this._snapTolerance = tolerance;
+  }
+
+  addGeometryModel(model: GeometryModel): void {
+    this._pushUndo('add-geometry', { id: model.id, model });
+    this._geometryModels.set(model.id, model);
+    this._addVersion(model.id, `Added geometry model ${model.id}`);
+    if (this._autoValidate) {
+      this.validateModel(model);
+    }
+    this._notifyListeners('geometry-added', model.id);
+  }
+
+  addBehaviorModel(model: BehaviorModel): void {
+    this._pushUndo('add-behavior', { id: model.id, model });
+    this._behaviorModels.set(model.id, model);
+    this._addVersion(model.id, `Added behavior model ${model.id}`);
+    if (this._autoValidate) {
+      this.validateModel(model);
+    }
+    this._notifyListeners('behavior-added', model.id);
+  }
+
+  removeGeometryModel(id: string): boolean {
+    const model = this._geometryModels.get(id);
     if (!model) return false;
-    model.equations.push(equation);
-    this._updateModelRegistry(modelId);
+    this._pushUndo('remove-geometry', { id, model });
+    this._geometryModels.delete(id);
+    this._modelRelationships.delete(id);
+    this._notifyListeners('geometry-removed', id);
     return true;
   }
 
-  setPhysicalParameter(modelId: string, name: string, value: number): boolean {
-    const model = this._physicalModels.get(modelId);
+  removeBehaviorModel(id: string): boolean {
+    const model = this._behaviorModels.get(id);
     if (!model) return false;
-    model.parameters[name] = value;
-    this._updateModelRegistry(modelId);
+    this._pushUndo('remove-behavior', { id, model });
+    this._behaviorModels.delete(id);
+    this._modelRelationships.delete(id);
+    this._notifyListeners('behavior-removed', id);
     return true;
   }
 
-  setMaterial(modelId: string, materialName: string): boolean {
-    const model = this._physicalModels.get(modelId);
-    const material = this._materialLibrary.get(materialName);
-    if (!model || !material) return false;
-    model.materialProperties = { ...material };
-    this._updateModelRegistry(modelId);
-    return true;
-  }
-
-  addBehavioralState(modelId: string, state: string): boolean {
-    const model = this._behavioralModels.get(modelId);
-    if (!model || model.states.includes(state)) return false;
-    model.states.push(state);
-    this._updateModelRegistry(modelId);
-    return true;
-  }
-
-  addStateTransition(
-    modelId: string,
-    from: string,
-    to: string,
-    condition: string,
-    action: string
-  ): boolean {
-    const model = this._behavioralModels.get(modelId);
-    if (!model || !model.states.includes(from) || !model.states.includes(to)) return false;
-    model.transitions.push({ from, to, condition, action });
-    this._updateModelRegistry(modelId);
-    return true;
-  }
-
-  addBehaviorRule(
-    modelId: string,
-    condition: string,
-    action: string,
-    priority: number = 0
-  ): boolean {
-    const model = this._behavioralModels.get(modelId);
+  updateGeometryModel(id: string, updates: Partial<GeometryModel>): boolean {
+    const model = this._geometryModels.get(id);
     if (!model) return false;
-    model.rules.push({ condition, action, priority });
-    model.rules.sort((a, b) => b.priority - a.priority);
-    this._updateModelRegistry(modelId);
+    this._pushUndo('update-geometry', { id, oldModel: { ...model } });
+    const updated = { ...model, ...updates, id } as GeometryModel;
+    this._geometryModels.set(id, updated);
+    this._addVersion(id, `Updated geometry model ${id}`);
+    if (this._autoValidate) {
+      this.validateModel(updated);
+    }
+    this._notifyListeners('geometry-updated', id);
     return true;
   }
 
-  addDomainCoupling(
-    modelId: string,
-    domainA: string,
-    domainB: string,
-    interface_: string,
-    variables: string[]
-  ): boolean {
-    const model = this._multiDomainModels.get(modelId);
-    if (!model || !model.domains.includes(domainA) || !model.domains.includes(domainB)) return false;
-    model.couplings.push({ domainA, domainB, interface: interface_, variables });
-    this._updateModelRegistry(modelId);
+  updateBehaviorModel(id: string, updates: Partial<BehaviorModel>): boolean {
+    const model = this._behaviorModels.get(id);
+    if (!model) return false;
+    this._pushUndo('update-behavior', { id, oldModel: { ...model } });
+    const updated = { ...model, ...updates, id } as BehaviorModel;
+    this._behaviorModels.set(id, updated);
+    this._addVersion(id, `Updated behavior model ${id}`);
+    if (this._autoValidate) {
+      this.validateModel(updated);
+    }
+    this._notifyListeners('behavior-updated', id);
     return true;
   }
 
-  validateModel(modelId: string): { valid: boolean; errors: string[]; warnings: string[] } {
+  addParameter(parameter: SimulationParameter): void {
+    this._parameters.set(parameter.name, parameter);
+  }
+
+  removeParameter(name: string): boolean {
+    return this._parameters.delete(name);
+  }
+
+  updateParameter(name: string, updates: Partial<SimulationParameter>): boolean {
+    const param = this._parameters.get(name);
+    if (!param) return false;
+    this._parameters.set(name, { ...param, ...updates, name });
+    return true;
+  }
+
+  addConstraint(constraint: ModelConstraint): void {
+    this._constraints.set(constraint.id, constraint);
+  }
+
+  removeConstraint(id: string): boolean {
+    return this._constraints.delete(id);
+  }
+
+  validateModel(model: GeometryModel | BehaviorModel): { valid: boolean; errors: string[]; warnings: string[] } {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    if (this._geometricModels.has(modelId)) {
-      const model = this._geometricModels.get(modelId)!;
-      if (model.vertices === 0) warnings.push('Geometric model has no vertices');
-      if (model.faces === 0) warnings.push('Geometric model has no faces');
-      if (model.precision <= 0) errors.push('Precision must be positive');
-      if (model.boundingBox.min.length !== 3 || model.boundingBox.max.length !== 3) {
-        errors.push('Bounding box must have 3 dimensions');
+    for (const rule of this._validationRules) {
+      const passed = rule.check(model);
+      if (!passed) {
+        if (rule.severity === 'error') {
+          errors.push(rule.errorMessage);
+        } else if (rule.severity === 'warning') {
+          warnings.push(rule.errorMessage);
+        }
       }
-    } else if (this._physicalModels.has(modelId)) {
-      const model = this._physicalModels.get(modelId)!;
-      if (model.equations.length === 0) warnings.push('No equations defined');
-      if (Object.keys(model.parameters).length === 0) warnings.push('No parameters defined');
-      if (model.solverConfig.tolerance <= 0) errors.push('Solver tolerance must be positive');
-      if (model.solverConfig.maxIterations <= 0) errors.push('Max iterations must be positive');
-    } else if (this._behavioralModels.has(modelId)) {
-      const model = this._behavioralModels.get(modelId)!;
-      if (model.states.length === 0) errors.push('No states defined');
-      if (!model.states.includes(model.initialState)) errors.push('Initial state not in state list');
-      if (!model.states.includes(model.currentState)) errors.push('Current state not in state list');
-      for (const t of model.transitions) {
-        if (!model.states.includes(t.from)) errors.push(`Transition from invalid state: ${t.from}`);
-        if (!model.states.includes(t.to)) errors.push(`Transition to invalid state: ${t.to}`);
-      }
-    } else if (this._multiDomainModels.has(modelId)) {
-      const model = this._multiDomainModels.get(modelId)!;
-      if (model.domains.length < 2) warnings.push('Multi-domain model should have at least 2 domains');
-      if (model.timeStep <= 0) errors.push('Time step must be positive');
-    } else {
-      errors.push(`Model not found: ${modelId}`);
     }
 
-    const valid = errors.length === 0;
-    return { valid, errors, warnings };
+    return { valid: errors.length === 0, errors, warnings };
   }
 
-  queueValidation(modelId: string): boolean {
-    if (!this._modelRegistry.has(modelId)) return false;
-    if (!this._validationQueue.includes(modelId)) {
-      this._validationQueue.push(modelId);
+  validateAll(): { valid: boolean; errors: string[]; warnings: string[] } {
+    const allErrors: string[] = [];
+    const allWarnings: string[] = [];
+    let valid = true;
+
+    for (const model of this._geometryModels.values()) {
+      const result = this.validateModel(model);
+      if (!result.valid) valid = false;
+      allErrors.push(...result.errors.map(e => `[Geometry ${model.id}] ${e}`));
+      allWarnings.push(...result.warnings.map(w => `[Geometry ${model.id}] ${w}`));
     }
+
+    for (const model of this._behaviorModels.values()) {
+      const result = this.validateModel(model);
+      if (!result.valid) valid = false;
+      allErrors.push(...result.errors.map(e => `[Behavior ${model.id}] ${e}`));
+      allWarnings.push(...result.warnings.map(w => `[Behavior ${model.id}] ${w}`));
+    }
+
+    return { valid, errors: allErrors, warnings: allWarnings };
+  }
+
+  addValidationRule(rule: ModelValidationRule): void {
+    this._validationRules.push(rule);
+  }
+
+  removeValidationRule(id: string): boolean {
+    const idx = this._validationRules.findIndex(r => r.id === id);
+    if (idx >= 0) {
+      this._validationRules.splice(idx, 1);
+      return true;
+    }
+    return false;
+  }
+
+  setModelRelationship(sourceId: string, targetIds: string[]): void {
+    this._modelRelationships.set(sourceId, [...targetIds]);
+  }
+
+  getModelRelationships(sourceId: string): string[] {
+    return this._modelRelationships.get(sourceId) || [];
+  }
+
+  computeBoundingBox(modelId: string): { min: number[]; max: number[] } | null {
+    const model = this._geometryModels.get(modelId);
+    if (!model) return null;
+    if (model.vertices.length === 0) return { min: [0, 0, 0], max: [0, 0, 0] };
+
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+
+    for (const vertex of model.vertices) {
+      for (let i = 0; i < 3; i++) {
+        if (vertex[i] < min[i]) min[i] = vertex[i];
+        if (vertex[i] > max[i]) max[i] = vertex[i];
+      }
+    }
+
+    return { min, max };
+  }
+
+  computeModelVolume(modelId: string): number {
+    const model = this._geometryModels.get(modelId);
+    if (!model || model.type !== 'mesh') return 0;
+
+    let volume = 0;
+    for (const face of model.faces) {
+      if (face.length >= 3) {
+        const v0 = model.vertices[face[0]];
+        const v1 = model.vertices[face[1]];
+        const v2 = model.vertices[face[2]];
+        if (v0 && v1 && v2) {
+          const cross = [
+            v1[1] * v2[2] - v1[2] * v2[1],
+            v1[2] * v2[0] - v1[0] * v2[2],
+            v1[0] * v2[1] - v1[1] * v2[0]
+          ];
+          volume += Math.abs(v0[0] * cross[0] + v0[1] * cross[1] + v0[2] * cross[2]) / 6;
+        }
+      }
+    }
+    return volume;
+  }
+
+  generateFromTemplate(templateId: string, overrides?: Partial<ModelTemplate>): { geometry?: GeometryModel; behavior?: BehaviorModel } | null {
+    const template = this._templates.get(templateId);
+    if (!template) return null;
+
+    const result: { geometry?: GeometryModel; behavior?: BehaviorModel } = {};
+    const id = `${templateId}-${Date.now()}`;
+
+    if (template.geometryTemplate.type) {
+      result.geometry = {
+        ...template.geometryTemplate,
+        id,
+        metadata: { ...template.geometryTemplate.metadata, templateId }
+      } as GeometryModel;
+    }
+
+    if (template.behaviorTemplate.type) {
+      result.behavior = {
+        ...template.behaviorTemplate,
+        id,
+        metadata: { ...template.behaviorTemplate.metadata, templateId }
+      } as BehaviorModel;
+    }
+
+    if (overrides?.defaultParameters) {
+      for (const param of overrides.defaultParameters) {
+        this.addParameter(param);
+      }
+    } else {
+      for (const param of template.defaultParameters) {
+        this.addParameter({ ...param });
+      }
+    }
+
+    return result;
+  }
+
+  addTemplate(template: ModelTemplate): void {
+    this._templates.set(template.id, template);
+  }
+
+  removeTemplate(id: string): boolean {
+    return this._templates.delete(id);
+  }
+
+  cloneModel(modelId: string, newId: string): GeometryModel | BehaviorModel | null {
+    const geo = this._geometryModels.get(modelId);
+    if (geo) {
+      const cloned = { ...geo, id: newId, metadata: { ...geo.metadata, clonedFrom: modelId } };
+      this.addGeometryModel(cloned);
+      return cloned;
+    }
+
+    const beh = this._behaviorModels.get(modelId);
+    if (beh) {
+      const cloned = { ...beh, id: newId, metadata: { ...beh.metadata, clonedFrom: modelId } };
+      this.addBehaviorModel(cloned);
+      return cloned;
+    }
+
+    return null;
+  }
+
+  mergeModels(sourceIds: string[], targetId: string): GeometryModel | null {
+    const geometries = sourceIds.map(id => this._geometryModels.get(id)).filter(Boolean) as GeometryModel[];
+    if (geometries.length === 0) return null;
+
+    const merged: GeometryModel = {
+      id: targetId,
+      type: 'mesh',
+      vertices: [],
+      faces: [],
+      normals: [],
+      uvs: [],
+      boundingBox: { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] },
+      lodLevels: Math.max(...geometries.map(g => g.lodLevels)),
+      metadata: { mergedFrom: sourceIds }
+    };
+
+    let vertexOffset = 0;
+    for (const geo of geometries) {
+      merged.vertices.push(...geo.vertices);
+      merged.faces.push(...geo.faces.map(face => face.map(idx => idx + vertexOffset)));
+      merged.normals.push(...geo.normals);
+      merged.uvs.push(...geo.uvs);
+      vertexOffset += geo.vertices.length;
+
+      for (let i = 0; i < 3; i++) {
+        if (geo.boundingBox.min[i] < merged.boundingBox.min[i]) merged.boundingBox.min[i] = geo.boundingBox.min[i];
+        if (geo.boundingBox.max[i] > merged.boundingBox.max[i]) merged.boundingBox.max[i] = geo.boundingBox.max[i];
+      }
+    }
+
+    this.addGeometryModel(merged);
+    return merged;
+  }
+
+  exportModel(modelId: string): string {
+    const geo = this._geometryModels.get(modelId);
+    if (geo) return JSON.stringify(geo, null, 2);
+    const beh = this._behaviorModels.get(modelId);
+    if (beh) return JSON.stringify(beh, null, 2);
+    return '';
+  }
+
+  importModel(json: string): GeometryModel | BehaviorModel | null {
+    try {
+      const data = JSON.parse(json);
+      if (data.vertices) {
+        this.addGeometryModel(data as GeometryModel);
+        return data as GeometryModel;
+      } else if (data.states) {
+        this.addBehaviorModel(data as BehaviorModel);
+        return data as BehaviorModel;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  undo(): boolean {
+    if (this._undoStack.length === 0) return false;
+    const action = this._undoStack.pop()!;
+    this._redoStack.push(action);
+
+    switch (action.action) {
+      case 'add-geometry':
+        this._geometryModels.delete((action.data as { id: string }).id);
+        break;
+      case 'add-behavior':
+        this._behaviorModels.delete((action.data as { id: string }).id);
+        break;
+      case 'remove-geometry':
+        this._geometryModels.set((action.data as { id: string }).id, (action.data as { model: GeometryModel }).model);
+        break;
+      case 'remove-behavior':
+        this._behaviorModels.set((action.data as { id: string }).id, (action.data as { model: BehaviorModel }).model);
+        break;
+    }
+
     return true;
   }
 
-  processValidationQueue(): { validated: number; passed: number; failed: number } {
-    let passed = 0;
-    let failed = 0;
-    const toProcess = [...this._validationQueue];
-    this._validationQueue = [];
+  redo(): boolean {
+    if (this._redoStack.length === 0) return false;
+    const action = this._redoStack.pop()!;
+    this._undoStack.push(action);
+    return true;
+  }
 
-    for (const modelId of toProcess) {
-      const result = this.validateModel(modelId);
-      if (result.valid) passed++;
-      else failed++;
+  private _pushUndo(action: string, data: unknown): void {
+    this._undoStack.push({ action, data });
+    if (this._undoStack.length > this._maxUndoSteps) {
+      this._undoStack.shift();
     }
-
-    return { validated: toProcess.length, passed, failed };
+    this._redoStack = [];
   }
 
-  getTemplateNames(): string[] {
-    return Array.from(this._modelTemplates.keys());
+  private _addVersion(modelId: string, changelog: string): void {
+    const versions = this._modelVersions.get(modelId) || [];
+    versions.push({
+      version: `${this._version}.${versions.length}`,
+      createdAt: Date.now(),
+      author: 'system',
+      changelog,
+      parentVersion: versions.length > 0 ? versions[versions.length - 1].version : null,
+      checksum: `${modelId}-${Date.now()}`
+    });
+    this._modelVersions.set(modelId, versions);
   }
 
-  getMaterialNames(): string[] {
-    return Array.from(this._materialLibrary.keys());
+  getModelVersions(modelId: string): ModelVersion[] {
+    return this._modelVersions.get(modelId) || [];
   }
 
-  getModelTemplate(name: string): Record<string, unknown> | null {
-    return this._modelTemplates.get(name) ?? null;
+  addChangeListener(listener: (event: string, modelId: string) => void): void {
+    this._changeListeners.push(listener);
   }
 
-  getMaterialProperties(materialName: string): Record<string, number> | null {
-    return this._materialLibrary.get(materialName) ?? null;
+  removeChangeListener(listener: (event: string, modelId: string) => void): void {
+    const idx = this._changeListeners.indexOf(listener);
+    if (idx >= 0) this._changeListeners.splice(idx, 1);
   }
 
-  private _updateModelRegistry(modelId: string): void {
-    const entry = this._modelRegistry.get(modelId);
-    if (entry) {
-      entry.lastModified = Date.now();
+  private _notifyListeners(event: string, modelId: string): void {
+    for (const listener of this._changeListeners) {
+      listener(event, modelId);
     }
   }
 
-  private _updateMeshQualityMetrics(): void {
-    const models = Array.from(this._geometricModels.values());
-    if (models.length === 0) {
-      this._meshQualityMetrics = { aspectRatio: 0, skewness: 0, orthogonality: 0, smoothness: 0 };
-      return;
+  logPerformance(operation: string, duration: number): void {
+    this._performanceLog.push({ timestamp: Date.now(), operation, duration });
+    if (this._performanceLog.length > 1000) {
+      this._performanceLog.shift();
     }
-    let totalAR = 0;
-    let totalSkew = 0;
-    let totalOrth = 0;
-    let totalSmooth = 0;
-    for (const model of models) {
-      const quality = model.levelOfDetail * 0.15 + 0.7;
-      totalAR += quality;
-      totalSkew += quality + 0.05;
-      totalOrth += quality - 0.05;
-      totalSmooth += quality + 0.02;
+  }
+
+  getPerformanceLog(): { timestamp: number; operation: string; duration: number }[] {
+    return [...this._performanceLog];
+  }
+
+  getAveragePerformance(operation: string): number {
+    const entries = this._performanceLog.filter(p => p.operation === operation);
+    if (entries.length === 0) return 0;
+    return entries.reduce((sum, p) => sum + p.duration, 0) / entries.length;
+  }
+
+  saveParameterPreset(name: string, params: SimulationParameter[]): void {
+    const presetMap = new Map<string, SimulationParameter[]>();
+    for (const param of params) {
+      presetMap.set(param.name, [{ ...param }]);
     }
-    this._meshQualityMetrics = {
-      aspectRatio: Math.min(1, totalAR / models.length),
-      skewness: Math.min(1, totalSkew / models.length),
-      orthogonality: Math.min(1, totalOrth / models.length),
-      smoothness: Math.min(1, totalSmooth / models.length),
+    this._parameterPresets.set(name, presetMap);
+  }
+
+  loadParameterPreset(name: string): SimulationParameter[] | null {
+    const preset = this._parameterPresets.get(name);
+    if (!preset) return null;
+    const result: SimulationParameter[] = [];
+    for (const params of preset.values()) {
+      result.push(...params);
+    }
+    return result;
+  }
+
+  removeParameterPreset(name: string): boolean {
+    return this._parameterPresets.delete(name);
+  }
+
+  getParameterPresetNames(): string[] {
+    return Array.from(this._parameterPresets.keys());
+  }
+
+  process(): TwinModelingResult {
+    const startTime = Date.now();
+    const validation = this.validateAll();
+
+    const result: TwinModelingResult = {
+      geometryModels: Array.from(this._geometryModels.values()),
+      behaviorModels: Array.from(this._behaviorModels.values()),
+      parameters: Array.from(this._parameters.values()),
+      timestamp: Date.now(),
+      version: this._version,
+      validationStatus: validation.valid ? 'valid' : 'invalid',
+      errors: validation.errors,
+      warnings: validation.warnings,
+      performanceMetrics: {
+        geometryCount: this._geometryModels.size,
+        behaviorCount: this._behaviorModels.size,
+        parameterCount: this._parameters.size,
+        constraintCount: this._constraints.size,
+        processingTime: Date.now() - startTime,
+        totalVertices: Array.from(this._geometryModels.values()).reduce((sum, g) => sum + g.vertices.length, 0),
+        totalFaces: Array.from(this._geometryModels.values()).reduce((sum, g) => sum + g.faces.length, 0)
+      }
     };
+
+    this._lastResult = result;
+    this._counter++;
+    this.logPerformance('process', result.performanceMetrics.processingTime as number);
+    return result;
   }
 
   toPacket(): DataPacket<TwinModelingResult> {
-    const result: TwinModelingResult = {
-      geometricModels: Array.from(this._geometricModels.values()),
-      physicalModels: Array.from(this._physicalModels.values()),
-      behavioralModels: Array.from(this._behavioralModels.values()),
-      multiDomainModels: Array.from(this._multiDomainModels.values()),
-      totalModels: this.totalModels,
-      modelQuality: (this._meshQualityMetrics.aspectRatio + this._meshQualityMetrics.orthogonality) / 2,
-      validationStatus: this._validationQueue.length === 0 ? 'validated' : 'pending',
+    const result = this._lastResult || {
+      geometryModels: [],
+      behaviorModels: [],
+      parameters: [],
+      timestamp: Date.now(),
+      version: this._version,
+      validationStatus: 'valid',
+      errors: [],
+      warnings: [],
+      performanceMetrics: {}
     };
-    this._lastResult = result;
     this._counter++;
     return {
       id: `twin-modeling-${Date.now()}-${this._counter}`,
       payload: result,
       metadata: {
         createdAt: Date.now(),
-        route: ['digital_twin', 'twin_modeling'],
+        route: ['digital-twin', 'twin-modeling'],
         priority: 1,
-        phase: 'modeling',
-      },
+        phase: 'modeling'
+      }
     };
   }
 
   reset(): void {
-    this._geometricModels.clear();
-    this._physicalModels.clear();
-    this._behavioralModels.clear();
-    this._multiDomainModels.clear();
-    this._counter = 0;
-    this._modelRegistry.clear();
-    this._validationQueue = [];
+    this._geometryModels.clear();
+    this._behaviorModels.clear();
+    this._parameters.clear();
+    this._constraints.clear();
+    this._validationRules = [];
+    this._modelVersions.clear();
+    this._templates.clear();
     this._lastResult = null;
-    this._meshQualityMetrics = {
-      aspectRatio: 0,
-      skewness: 0,
-      orthogonality: 0,
-      smoothness: 0,
-    };
+    this._counter = 0;
+    this._version = '1.0.0';
+    this._undoStack = [];
+    this._redoStack = [];
+    this._autoValidate = true;
+    this._unitSystem = 'SI';
+    this._snapTolerance = 0.001;
+    this._parameterPresets.clear();
+    this._modelRelationships.clear();
+    this._performanceLog = [];
+    this._changeListeners = [];
+    this._initDefaultValidationRules();
+    this._initDefaultTemplates();
   }
 }

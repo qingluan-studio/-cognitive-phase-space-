@@ -646,6 +646,140 @@ export class IOSubsystem {
     return { success: true, bytes: buffer.length, device, operation, latency };
   }
 
+  public ioStatsReport(): {
+    totalRequests: number;
+    reads: number;
+    writes: number;
+    bytesRead: number;
+    bytesWritten: number;
+    avgLatency: number;
+    maxLatency: number;
+    minLatency: number;
+    p99Latency: number;
+    throughputMBps: number;
+  } {
+    const latencies = this._ioStats.latency.slice().sort((a, b) => a - b);
+    const total = this._ioStats.reads + this._ioStats.writes;
+    const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0;
+    const p99Idx = Math.floor(latencies.length * 0.99);
+    const totalBytes = this._ioStats.bytesRead + this._ioStats.bytesWritten;
+    return {
+      totalRequests: total,
+      reads: this._ioStats.reads,
+      writes: this._ioStats.writes,
+      bytesRead: this._ioStats.bytesRead,
+      bytesWritten: this._ioStats.bytesWritten,
+      avgLatency,
+      maxLatency: latencies.length > 0 ? latencies[latencies.length - 1] : 0,
+      minLatency: latencies.length > 0 ? latencies[0] : 0,
+      p99Latency: latencies.length > 0 ? latencies[p99Idx] ?? 0 : 0,
+      throughputMBps: Math.round(totalBytes / 1024 / 1024),
+    };
+  }
+
+  public driverHealthReport(): { device: string; driver: string; healthy: boolean; issues: string[] }[] {
+    const report: { device: string; driver: string; healthy: boolean; issues: string[] }[] = [];
+    for (const [device, driver] of this._drivers.entries()) {
+      const issues: string[] = [];
+      if (driver.status === 'error') issues.push('driver in error state');
+      if (driver.status === 'disabled') issues.push('driver disabled');
+      report.push({
+        device,
+        driver: driver.name,
+        healthy: issues.length === 0,
+        issues,
+      });
+    }
+    return report;
+  }
+
+  public cacheStatistics(): { hits: number; misses: number; hitRate: number; size: number; maxSize: number; evictions: number } {
+    const total = this._cache.hits + this._cache.misses;
+    return {
+      hits: this._cache.hits,
+      misses: this._cache.misses,
+      hitRate: total > 0 ? Math.round((this._cache.hits / total) * 10000) / 100 : 0,
+      size: this._cache.blocks.size,
+      maxSize: this._cache.maxSize,
+      evictions: 0,
+    };
+  }
+
+  public flushCache(): { blocksFlushed: number; dirtyBlocks: number } {
+    const blocks = this._cache.blocks.size;
+    let dirtyBlocks = 0;
+    for (const block of this._cache.blocks.values()) {
+      if (block.dirty) dirtyBlocks++;
+    }
+    this._cache.blocks.clear();
+    this._recordHistory(`flushCache() -> ${blocks} blocks, ${dirtyBlocks} dirty`);
+    return { blocksFlushed: blocks, dirtyBlocks };
+  }
+
+  public resizeCache(newSize: number): { oldSize: number; newSize: number; blocksEvicted: number } {
+    const oldSize = this._cache.maxSize;
+    this._cache.maxSize = newSize;
+    let evicted = 0;
+    while (this._cache.blocks.size > newSize) {
+      this._manageCacheSize();
+      evicted++;
+    }
+    this._recordHistory(`resizeCache(${newSize}) -> evicted ${evicted} blocks`);
+    return { oldSize, newSize, blocksEvicted: evicted };
+  }
+
+  public listDMATransfers(): { channel: number; status: string; source: string; destination: string; size: number; progress: number }[] {
+    return Array.from(this._dmaChannels.entries()).map(([channel, dma]) => ({
+      channel,
+      status: dma.status,
+      source: dma.source,
+      destination: dma.destination,
+      size: dma.size,
+      progress: dma.progress,
+    }));
+  }
+
+  public interruptStatistics(): { totalInterrupts: number; byDevice: Record<string, number>; enabledCount: number; pendingCount: number } {
+    const byDevice: Record<string, number> = {};
+    let total = 0;
+    let enabled = 0;
+    let pending = 0;
+    for (const irq of this._interrupts.values()) {
+      byDevice[irq.device] = (byDevice[irq.device] ?? 0) + 1;
+      total++;
+      if (irq.enabled) enabled++;
+      if (irq.pending) pending++;
+    }
+    return {
+      totalInterrupts: total,
+      byDevice,
+      enabledCount: enabled,
+      pendingCount: pending,
+    };
+  }
+
+  public raidStatus(): { configId: string; level: string; disks: number; healthy: boolean; status: string }[] {
+    return Array.from(this._raidConfigurations.entries()).map(([id, raid]) => ({
+      configId: id,
+      level: raid.level,
+      disks: raid.disks.length,
+      healthy: raid.status === 'optimal',
+      status: raid.status,
+    }));
+  }
+
+  public storagePoolStatus(): { poolId: string; name: string; totalCapacity: number; usedCapacity: number; freeCapacity: number; utilization: number; status: string }[] {
+    return Array.from(this._storagePools.entries()).map(([id, pool]) => ({
+      poolId: id,
+      name: pool.name,
+      totalCapacity: pool.totalCapacity,
+      usedCapacity: pool.usedCapacity,
+      freeCapacity: pool.totalCapacity - pool.usedCapacity,
+      utilization: pool.totalCapacity > 0 ? Math.round((pool.usedCapacity / pool.totalCapacity) * 100) : 0,
+      status: pool.status,
+    }));
+  }
+
   public toPacket(): DataPacket<{
     requests: number;
     drivers: number;

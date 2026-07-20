@@ -2,661 +2,624 @@ import { DataPacket } from '../shared/types';
 
 export interface Render3DConfig {
   id: string;
-  scene: string;
-  engine: 'webgl' | 'threejs' | 'babylon' | 'unity' | 'unreal';
-  camera: {
-    position: number[];
-    target: number[];
-    fov: number;
-    near: number;
-    far: number;
-  };
-  lighting: {
-    ambient: number;
-    directional: number[];
-    pointLights: { position: number[]; intensity: number; color: string }[];
-  };
-  quality: 'low' | 'medium' | 'high' | 'ultra';
-  resolution: { width: number; height: number };
-  fps: number;
-  lastFrameTime: number;
-  frameCount: number;
+  camera: { position: number[]; target: number[]; up: number[]; fov: number };
+  lights: { type: 'ambient' | 'directional' | 'point' | 'spot'; position: number[]; color: number[]; intensity: number }[];
+  backgroundColor: number[];
+  antialiasing: boolean;
+  shadowsEnabled: boolean;
+  postProcessing: { bloom: boolean; ssao: boolean; toneMapping: boolean; exposure: number };
+  lodDistance: number[];
+  clippingPlanes: { near: number; far: number };
+  metadata: Record<string, unknown>;
 }
 
 export interface RealTimeAnimation {
   id: string;
-  name: string;
-  target: string;
-  type: 'transform' | 'morph' | 'skeletal' | 'particle' | 'shader';
+  targetId: string;
+  property: string;
+  startValue: number | number[];
+  endValue: number | number[];
   duration: number;
+  easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' | 'bounce' | 'elastic';
   loop: boolean;
-  speed: number;
-  currentTime: number;
-  playing: boolean;
-  keyframes: { time: number; value: Record<string, number> }[];
-  interpolation: 'linear' | 'cubic' | 'ease_in' | 'ease_out' | 'ease_in_out';
+  reverseOnComplete: boolean;
+  delay: number;
+  triggeredBy: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface DataVisualization {
   id: string;
-  name: string;
-  type: 'line_chart' | 'bar_chart' | 'scatter' | 'heatmap' | 'gauge' | 'histogram' | 'pie' | 'surface';
+  type: 'line' | 'bar' | 'scatter' | 'heatmap' | 'gauge' | 'radar' | 'pie' | '3d-surface';
   dataSource: string;
-  dimensions: { x: string; y: string; z?: string; color?: string; size?: string };
-  styling: {
-    colors: string[];
-    lineWidth: number;
-    opacity: number;
-    showLegend: boolean;
-    showGrid: boolean;
-  };
+  xAxis: { label: string; min?: number; max?: number; scale: 'linear' | 'log' | 'time' };
+  yAxis: { label: string; min?: number; max?: number; scale: 'linear' | 'log' };
+  series: { name: string; color: number[]; style: 'solid' | 'dashed' | 'dotted'; width: number }[];
+  annotations: { x: number; y: number; text: string; color: number[] }[];
+  interactive: boolean;
   refreshRate: number;
-  lastUpdate: number;
-  dataPoints: number;
+  metadata: Record<string, unknown>;
 }
 
 export interface VRARConfig {
   id: string;
-  mode: 'vr' | 'ar' | 'mr';
-  device: string;
-  fov: number;
-  ipd: number;
-  tracking: '6dof' | '3dof' | 'none';
-  controllers: number;
-  haptics: boolean;
-  passthrough: boolean;
-  markers: { id: string; position: number[]; rotation: number[]; size: number[] }[];
-  anchors: { id: string; position: number[]; rotation: number[] }[];
-  connected: boolean;
-  latency: number;
+  type: 'vr' | 'ar' | 'mr';
+  headsetType: string;
+  trackingSpace: 'room-scale' | 'stationary' | 'bounded';
+  handTrackingEnabled: boolean;
+  gestureRecognition: boolean;
+  spatialAnchors: boolean;
+  passthroughEnabled: boolean;
+  renderScale: number;
+  foveatedRendering: boolean;
+  metadata: Record<string, unknown>;
 }
 
 export interface VisualizationScene {
   id: string;
   name: string;
-  objects: {
-    id: string;
-    type: string;
-    position: number[];
-    rotation: number[];
-    scale: number[];
-    visible: boolean;
-    material: string;
-  }[];
-  activeCamera: string;
-  activeLights: string[];
-  background: string;
-  fog: { enabled: boolean; color: string; density: number };
+  renderConfig: Render3DConfig;
+  animations: RealTimeAnimation[];
+  visualizations: DataVisualization[];
+  vrConfig?: VRARConfig;
+  cameraPath?: { points: number[][]; duration: number; easing: string };
+  overlays: { type: string; position: number[]; content: string; scale: number }[];
+  metadata: Record<string, unknown>;
 }
 
-export interface VisualizationEngineResult {
-  renderConfigs: Render3DConfig[];
-  animations: RealTimeAnimation[];
-  dataVisualizations: DataVisualization[];
-  vrArConfigs: VRARConfig[];
-  scenes: VisualizationScene[];
-  totalVisualizations: number;
-  renderQuality: number;
-  performance: {
-    avgFps: number;
-    frameTime: number;
-    drawCalls: number;
-    triangleCount: number;
-  };
+export interface Viewport {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  camera: { position: number[]; target: number[] };
+  layerMask: number;
+  visible: boolean;
+}
+
+export interface MaterialDefinition {
+  id: string;
+  name: string;
+  type: 'standard' | 'pbr' | 'unlit' | 'wireframe' | 'transparent';
+  color: number[];
+  roughness: number;
+  metalness: number;
+  emissive: number[];
+  opacity: number;
+  textureMaps: Record<string, string>;
+  shaderOverrides: Record<string, unknown>;
+}
+
+export interface ParticleSystem {
+  id: string;
+  maxParticles: number;
+  emissionRate: number;
+  lifetime: number;
+  startSize: number;
+  endSize: number;
+  startColor: number[];
+  endColor: number[];
+  velocity: number[];
+  acceleration: number[];
+  shape: 'point' | 'sphere' | 'box' | 'cone';
+  shapeParams: Record<string, number>;
+  blendMode: 'additive' | 'blend' | 'multiply';
+}
+
+export interface PostProcessStack {
+  id: string;
+  effects: { type: string; enabled: boolean; parameters: Record<string, unknown> }[];
+  renderTargetSize: { width: number; height: number };
+  format: string;
 }
 
 export class VisualizationEngine {
+  private _scenes: Map<string, VisualizationScene> = new Map();
   private _renderConfigs: Map<string, Render3DConfig> = new Map();
   private _animations: Map<string, RealTimeAnimation> = new Map();
-  private _dataVisualizations: Map<string, DataVisualization> = new Map();
-  private _vrArConfigs: Map<string, VRARConfig> = new Map();
-  private _scenes: Map<string, VisualizationScene> = new Map();
+  private _visualizations: Map<string, DataVisualization> = new Map();
+  private _vrConfigs: Map<string, VRARConfig> = new Map();
+  private _viewports: Map<string, Viewport> = new Map();
+  private _materials: Map<string, MaterialDefinition> = new Map();
+  private _particleSystems: Map<string, ParticleSystem> = new Map();
+  private _postProcessStacks: Map<string, PostProcessStack> = new Map();
+  private _activeSceneId: string | null = null;
+  private _lastResult: VisualizationScene | null = null;
   private _counter: number = 0;
-  private _lastResult: VisualizationEngineResult | null = null;
-  private _materialLibrary: Map<string, {
-    name: string;
-    type: string;
-    color: string;
-    metallic: number;
-    roughness: number;
-    transparent: boolean;
-    opacity: number;
-  }> = new Map();
-  private _geometryLibrary: Map<string, {
-    name: string;
-    type: string;
-    vertices: number;
-    faces: number;
-  }> = new Map();
-  private _performanceStats: {
-    avgFps: number;
-    frameTime: number;
-    drawCalls: number;
-    triangleCount: number;
-    totalFrames: number;
-    totalRenderTime: number;
-  } = {
-    avgFps: 0,
-    frameTime: 0,
-    drawCalls: 0,
-    triangleCount: 0,
-    totalFrames: 0,
-    totalRenderTime: 0,
-  };
-  private _textureLibrary: Map<string, { name: string; type: string; resolution: number[]; format: string }> = new Map();
-  private _shaderLibrary: Map<string, { name: string; type: string; vertexShader: string; fragmentShader: string }> = new Map();
+  private _fps: number = 60;
+  private _frameTime: number = 16.67;
+  private _renderScale: number = 1.0;
+  private _vsyncEnabled: boolean = true;
+  private _debugMode: boolean = false;
+  private _statistics: { frameCount: number; drawCalls: number; triangleCount: number; textureMemory: number } = { frameCount: 0, drawCalls: 0, triangleCount: 0, textureMemory: 0 };
+  private _layerVisibility: Map<number, boolean> = new Map();
+  private _animationQueue: RealTimeAnimation[] = [];
+  private _screenshotQueue: string[] = [];
+  private _videoRecording: boolean = false;
+  private _recordingFrameRate: number = 30;
+  private _recordingQuality: number = 0.9;
+  private _cameraBookmarks: Map<string, { position: number[]; target: number[]; name: string }> = new Map();
+  private _theme: 'light' | 'dark' | 'high-contrast' = 'dark';
+  private _performanceLog: { timestamp: number; fps: number; drawCalls: number; memory: number }[] = [];
 
   constructor() {
-    this._initMaterialLibrary();
-    this._initGeometryLibrary();
-    this._initTextureLibrary();
-    this._initShaderLibrary();
+    this._initDefaultMaterials();
+    this._initDefaultPostProcessStack();
   }
 
-  private _initMaterialLibrary(): void {
-    const materials = [
-      { name: 'default', material: { type: 'standard', color: '#cccccc', metallic: 0, roughness: 0.5, transparent: false, opacity: 1 } },
-      { name: 'metal', material: { type: 'standard', color: '#aaaaaa', metallic: 0.9, roughness: 0.1, transparent: false, opacity: 1 } },
-      { name: 'glass', material: { type: 'physical', color: '#ffffff', metallic: 0, roughness: 0, transparent: true, opacity: 0.3 } },
-      { name: 'plastic', material: { type: 'standard', color: '#ff6600', metallic: 0, roughness: 0.3, transparent: false, opacity: 1 } },
-      { name: 'rubber', material: { type: 'standard', color: '#333333', metallic: 0, roughness: 0.9, transparent: false, opacity: 1 } },
-      { name: 'glow', material: { type: 'emissive', color: '#00ffff', metallic: 0, roughness: 0, transparent: false, opacity: 1 } },
-      { name: 'wireframe', material: { type: 'basic', color: '#00ff00', metallic: 0, roughness: 0, transparent: false, opacity: 1 } },
-      { name: 'xray', material: { type: 'xray', color: '#88ccff', metallic: 0, roughness: 0, transparent: true, opacity: 0.5 } },
-    ];
-    materials.forEach(m => this._materialLibrary.set(m.name, m.material));
+  private _initDefaultMaterials(): void {
+    this._materials.set('default-standard', {
+      id: 'default-standard',
+      name: 'Default Standard',
+      type: 'standard',
+      color: [0.8, 0.8, 0.8],
+      roughness: 0.5,
+      metalness: 0.0,
+      emissive: [0, 0, 0],
+      opacity: 1.0,
+      textureMaps: {},
+      shaderOverrides: {}
+    });
+
+    this._materials.set('default-pbr', {
+      id: 'default-pbr',
+      name: 'Default PBR',
+      type: 'pbr',
+      color: [0.7, 0.7, 0.7],
+      roughness: 0.3,
+      metalness: 0.8,
+      emissive: [0, 0, 0],
+      opacity: 1.0,
+      textureMaps: {},
+      shaderOverrides: {}
+    });
+
+    this._materials.set('highlight-emissive', {
+      id: 'highlight-emissive',
+      name: 'Highlight Emissive',
+      type: 'unlit',
+      color: [1, 0.8, 0],
+      roughness: 0,
+      metalness: 0,
+      emissive: [1, 0.8, 0],
+      opacity: 0.8,
+      textureMaps: {},
+      shaderOverrides: {}
+    });
+
+    this._materials.set('transparent-glass', {
+      id: 'transparent-glass',
+      name: 'Transparent Glass',
+      type: 'transparent',
+      color: [0.9, 0.95, 1.0],
+      roughness: 0.05,
+      metalness: 0,
+      emissive: [0, 0, 0],
+      opacity: 0.3,
+      textureMaps: {},
+      shaderOverrides: {}
+    });
   }
 
-  private _initGeometryLibrary(): void {
-    const geometries = [
-      { name: 'cube', geometry: { type: 'box', vertices: 8, faces: 12 } },
-      { name: 'sphere', geometry: { type: 'sphere', vertices: 1024, faces: 2048 } },
-      { name: 'cylinder', geometry: { type: 'cylinder', vertices: 64, faces: 128 } },
-      { name: 'plane', geometry: { type: 'plane', vertices: 4, faces: 2 } },
-      { name: 'torus', geometry: { type: 'torus', vertices: 256, faces: 512 } },
-      { name: 'cone', geometry: { type: 'cone', vertices: 33, faces: 64 } },
-    ];
-    geometries.forEach(g => this._geometryLibrary.set(g.name, g.geometry));
+  private _initDefaultPostProcessStack(): void {
+    this._postProcessStacks.set('default-stack', {
+      id: 'default-stack',
+      effects: [
+        { type: 'bloom', enabled: true, parameters: { intensity: 0.5, threshold: 0.8, radius: 0.5 } },
+        { type: 'tonemapping', enabled: true, parameters: { mode: 'aces', exposure: 1.0 } },
+        { type: 'color-grading', enabled: false, parameters: { contrast: 1.0, saturation: 1.0 } },
+        { type: 'fxaa', enabled: true, parameters: { quality: 'high' } },
+        { type: 'ssao', enabled: false, parameters: { radius: 0.5, intensity: 1.0 } }
+      ],
+      renderTargetSize: { width: 1920, height: 1080 },
+      format: 'rgba8'
+    });
   }
 
-  private _initTextureLibrary(): void {
-    const textures = [
-      { name: 'albedo_default', texture: { type: 'albedo', resolution: [1024, 1024], format: 'png' } },
-      { name: 'normal_default', texture: { type: 'normal', resolution: [1024, 1024], format: 'png' } },
-      { name: 'roughness_default', texture: { type: 'roughness', resolution: [512, 512], format: 'png' } },
-      { name: 'metallic_default', texture: { type: 'metallic', resolution: [512, 512], format: 'png' } },
-    ];
-    textures.forEach(t => this._textureLibrary.set(t.name, t.texture));
+  get scenes(): Map<string, VisualizationScene> {
+    return new Map(this._scenes);
   }
 
-  private _initShaderLibrary(): void {
-    const shaders = [
-      { name: 'standard', shader: { type: 'PBR', vertexShader: 'standard_vert', fragmentShader: 'standard_frag' } },
-      { name: 'unlit', shader: { type: 'basic', vertexShader: 'unlit_vert', fragmentShader: 'unlit_frag' } },
-      { name: 'outline', shader: { type: 'post', vertexShader: 'outline_vert', fragmentShader: 'outline_frag' } },
-      { name: 'heatmap', shader: { type: 'data', vertexShader: 'heatmap_vert', fragmentShader: 'heatmap_frag' } },
-    ];
-    shaders.forEach(s => this._shaderLibrary.set(s.name, s.shader));
+  get renderConfigs(): Map<string, Render3DConfig> {
+    return new Map(this._renderConfigs);
   }
 
-  get renderConfigs(): Render3DConfig[] {
-    return Array.from(this._renderConfigs.values());
+  get animations(): Map<string, RealTimeAnimation> {
+    return new Map(this._animations);
   }
 
-  get animations(): RealTimeAnimation[] {
-    return Array.from(this._animations.values());
+  get visualizations(): Map<string, DataVisualization> {
+    return new Map(this._visualizations);
   }
 
-  get dataVisualizations(): DataVisualization[] {
-    return Array.from(this._dataVisualizations.values());
+  get vrConfigs(): Map<string, VRARConfig> {
+    return new Map(this._vrConfigs);
   }
 
-  get vrArConfigs(): VRARConfig[] {
-    return Array.from(this._vrArConfigs.values());
+  get viewports(): Map<string, Viewport> {
+    return new Map(this._viewports);
   }
 
-  get scenes(): VisualizationScene[] {
-    return Array.from(this._scenes.values());
+  get materials(): Map<string, MaterialDefinition> {
+    return new Map(this._materials);
+  }
+
+  get activeSceneId(): string | null {
+    return this._activeSceneId;
+  }
+
+  get activeScene(): VisualizationScene | null {
+    return this._activeSceneId ? this._scenes.get(this._activeSceneId) || null : null;
+  }
+
+  get lastResult(): VisualizationScene | null {
+    return this._lastResult;
+  }
+
+  get fps(): number {
+    return this._fps;
+  }
+
+  get frameTime(): number {
+    return this._frameTime;
+  }
+
+  get renderScale(): number {
+    return this._renderScale;
+  }
+
+  get vsyncEnabled(): boolean {
+    return this._vsyncEnabled;
+  }
+
+  get debugMode(): boolean {
+    return this._debugMode;
+  }
+
+  get statistics(): { frameCount: number; drawCalls: number; triangleCount: number; textureMemory: number } {
+    return { ...this._statistics };
+  }
+
+  get theme(): string {
+    return this._theme;
+  }
+
+  get isRecording(): boolean {
+    return this._videoRecording;
+  }
+
+  get totalScenes(): number {
+    return this._scenes.size;
+  }
+
+  get totalAnimations(): number {
+    return this._animations.size;
   }
 
   get totalVisualizations(): number {
-    return (
-      this._renderConfigs.size +
-      this._animations.size +
-      this._dataVisualizations.size +
-      this._vrArConfigs.size +
-      this._scenes.size
-    );
+    return this._visualizations.size;
   }
 
-  get performanceStats(): {
-    avgFps: number;
-    frameTime: number;
-    drawCalls: number;
-    triangleCount: number;
-  } {
-    return {
-      avgFps: this._performanceStats.avgFps,
-      frameTime: this._performanceStats.frameTime,
-      drawCalls: this._performanceStats.drawCalls,
-      triangleCount: this._performanceStats.triangleCount,
-    };
+  setRenderScale(scale: number): void {
+    this._renderScale = scale;
   }
 
-  createRenderConfig(
-    scene: string,
-    engine: 'webgl' | 'threejs' | 'babylon' | 'unity' | 'unreal',
-    params: {
-      quality?: 'low' | 'medium' | 'high' | 'ultra';
-      resolution?: { width: number; height: number };
-    } = {}
-  ): Render3DConfig {
-    const id = `render-${Date.now()}-${this._counter++}`;
-    const quality = params.quality ?? 'high';
-    const qualitySettings: Record<string, { resolution: { width: number; height: number }; fps: number }> = {
-      low: { resolution: { width: 640, height: 480 }, fps: 30 },
-      medium: { resolution: { width: 1280, height: 720 }, fps: 60 },
-      high: { resolution: { width: 1920, height: 1080 }, fps: 60 },
-      ultra: { resolution: { width: 3840, height: 2160 }, fps: 120 },
-    };
-    const settings = qualitySettings[quality];
-    const config: Render3DConfig = {
-      id,
-      scene,
-      engine,
-      camera: {
-        position: [0, 0, 10],
-        target: [0, 0, 0],
-        fov: 60,
-        near: 0.1,
-        far: 1000,
-      },
-      lighting: {
-        ambient: 0.3,
-        directional: [1, 1, 1],
-        pointLights: [],
-      },
-      quality,
-      resolution: params.resolution ?? settings.resolution,
-      fps: settings.fps,
-      lastFrameTime: 0,
-      frameCount: 0,
-    };
-    this._renderConfigs.set(id, config);
-    return config;
+  setVsyncEnabled(enabled: boolean): void {
+    this._vsyncEnabled = enabled;
   }
 
-  createAnimation(
-    name: string,
-    target: string,
-    type: 'transform' | 'morph' | 'skeletal' | 'particle' | 'shader',
-    duration: number,
-    params: {
-      loop?: boolean;
-      speed?: number;
-      keyframes?: { time: number; value: Record<string, number> }[];
-      interpolation?: 'linear' | 'cubic' | 'ease_in' | 'ease_out' | 'ease_in_out';
-    } = {}
-  ): RealTimeAnimation {
-    const id = `anim-${Date.now()}-${this._counter++}`;
-    const animation: RealTimeAnimation = {
-      id,
-      name,
-      target,
-      type,
-      duration,
-      loop: params.loop ?? true,
-      speed: params.speed ?? 1,
-      currentTime: 0,
-      playing: false,
-      keyframes: params.keyframes ?? [],
-      interpolation: params.interpolation ?? 'ease_in_out',
-    };
-    this._animations.set(id, animation);
-    return animation;
+  setDebugMode(enabled: boolean): void {
+    this._debugMode = enabled;
   }
 
-  createDataVisualization(
-    name: string,
-    type: 'line_chart' | 'bar_chart' | 'scatter' | 'heatmap' | 'gauge' | 'histogram' | 'pie' | 'surface',
-    dataSource: string,
-    params: {
-      dimensions?: { x: string; y: string; z?: string; color?: string; size?: string };
-      styling?: {
-        colors: string[];
-        lineWidth: number;
-        opacity: number;
-        showLegend: boolean;
-        showGrid: boolean;
-      };
-      refreshRate?: number;
-    } = {}
-  ): DataVisualization {
-    const id = `dataviz-${Date.now()}-${this._counter++}`;
-    const viz: DataVisualization = {
-      id,
-      name,
-      type,
-      dataSource,
-      dimensions: params.dimensions ?? { x: 'time', y: 'value' },
-      styling: params.styling ?? {
-        colors: ['#2196F3', '#4CAF50', '#FF9800', '#F44336', '#9C27B0'],
-        lineWidth: 2,
-        opacity: 0.8,
-        showLegend: true,
-        showGrid: true,
-      },
-      refreshRate: params.refreshRate ?? 30,
-      lastUpdate: 0,
-      dataPoints: 0,
-    };
-    this._dataVisualizations.set(id, viz);
-    return viz;
+  setTheme(theme: 'light' | 'dark' | 'high-contrast'): void {
+    this._theme = theme;
   }
 
-  createVRARConfig(
-    mode: 'vr' | 'ar' | 'mr',
-    device: string,
-    params: {
-      fov?: number;
-      ipd?: number;
-      tracking?: '6dof' | '3dof' | 'none';
-      controllers?: number;
-      haptics?: boolean;
-      passthrough?: boolean;
-    } = {}
-  ): VRARConfig {
-    const id = `vrar-${Date.now()}-${this._counter++}`;
-    const config: VRARConfig = {
-      id,
-      mode,
-      device,
-      fov: params.fov ?? 110,
-      ipd: params.ipd ?? 0.064,
-      tracking: params.tracking ?? '6dof',
-      controllers: params.controllers ?? 2,
-      haptics: params.haptics ?? true,
-      passthrough: params.passthrough ?? (mode === 'ar' || mode === 'mr'),
-      markers: [],
-      anchors: [],
-      connected: false,
-      latency: 0,
-    };
-    this._vrArConfigs.set(id, config);
-    return config;
+  setFps(targetFps: number): void {
+    this._fps = targetFps;
+    this._frameTime = 1000 / targetFps;
   }
 
-  createScene(name: string): VisualizationScene {
-    const id = `scene-${Date.now()}-${this._counter++}`;
-    const scene: VisualizationScene = {
-      id,
-      name,
-      objects: [],
-      activeCamera: 'default',
-      activeLights: ['default'],
-      background: '#1a1a2e',
-      fog: { enabled: false, color: '#1a1a2e', density: 0.01 },
-    };
-    this._scenes.set(id, scene);
-    return scene;
+  addScene(scene: VisualizationScene): void {
+    this._scenes.set(scene.id, scene);
+    this._lastResult = scene;
   }
 
-  addSceneObject(
-    sceneId: string,
-    objectId: string,
-    type: string,
-    params: {
-      position?: number[];
-      rotation?: number[];
-      scale?: number[];
-      visible?: boolean;
-      material?: string;
-    } = {}
-  ): boolean {
-    const scene = this._scenes.get(sceneId);
-    if (!scene) return false;
-    scene.objects.push({
-      id: objectId,
-      type,
-      position: params.position ?? [0, 0, 0],
-      rotation: params.rotation ?? [0, 0, 0],
-      scale: params.scale ?? [1, 1, 1],
-      visible: params.visible ?? true,
-      material: params.material ?? 'default',
-    });
-    return true;
+  removeScene(id: string): boolean {
+    if (this._activeSceneId === id) {
+      this._activeSceneId = null;
+    }
+    return this._scenes.delete(id);
   }
 
-  removeSceneObject(sceneId: string, objectId: string): boolean {
-    const scene = this._scenes.get(sceneId);
-    if (!scene) return false;
-    const index = scene.objects.findIndex(o => o.id === objectId);
-    if (index === -1) return false;
-    scene.objects.splice(index, 1);
-    return true;
-  }
-
-  updateObjectTransform(
-    sceneId: string,
-    objectId: string,
-    transform: { position?: number[]; rotation?: number[]; scale?: number[] }
-  ): boolean {
-    const scene = this._scenes.get(sceneId);
-    if (!scene) return false;
-    const obj = scene.objects.find(o => o.id === objectId);
-    if (!obj) return false;
-    if (transform.position) obj.position = transform.position;
-    if (transform.rotation) obj.rotation = transform.rotation;
-    if (transform.scale) obj.scale = transform.scale;
-    return true;
-  }
-
-  setCameraPosition(renderId: string, position: number[], target: number[]): boolean {
-    const config = this._renderConfigs.get(renderId);
-    if (!config) return false;
-    config.camera.position = position;
-    config.camera.target = target;
-    return true;
-  }
-
-  addPointLight(
-    renderId: string,
-    position: number[],
-    intensity: number,
-    color: string = '#ffffff'
-  ): boolean {
-    const config = this._renderConfigs.get(renderId);
-    if (!config) return false;
-    config.lighting.pointLights.push({ position, intensity, color });
-    return true;
-  }
-
-  playAnimation(animationId: string): boolean {
-    const animation = this._animations.get(animationId);
-    if (!animation) return false;
-    animation.playing = true;
-    return true;
-  }
-
-  pauseAnimation(animationId: string): boolean {
-    const animation = this._animations.get(animationId);
-    if (!animation) return false;
-    animation.playing = false;
-    return true;
-  }
-
-  seekAnimation(animationId: string, time: number): boolean {
-    const animation = this._animations.get(animationId);
-    if (!animation) return false;
-    animation.currentTime = Math.max(0, Math.min(animation.duration, time));
-    return true;
-  }
-
-  setAnimationSpeed(animationId: string, speed: number): boolean {
-    const animation = this._animations.get(animationId);
-    if (!animation) return false;
-    animation.speed = speed;
-    return true;
-  }
-
-  addKeyframe(
-    animationId: string,
-    time: number,
-    value: Record<string, number>
-  ): boolean {
-    const animation = this._animations.get(animationId);
-    if (!animation) return false;
-    animation.keyframes.push({ time, value });
-    animation.keyframes.sort((a, b) => a.time - b.time);
-    return true;
-  }
-
-  updateDataVisualization(
-    vizId: string,
-    dataPoints: number
-  ): boolean {
-    const viz = this._dataVisualizations.get(vizId);
-    if (!viz) return false;
-    viz.lastUpdate = Date.now();
-    viz.dataPoints = dataPoints;
-    return true;
-  }
-
-  connectVRDevice(configId: string): boolean {
-    const config = this._vrArConfigs.get(configId);
-    if (!config) return false;
-    config.connected = true;
-    config.latency = 10 + Math.random() * 10;
-    return true;
-  }
-
-  disconnectVRDevice(configId: string): boolean {
-    const config = this._vrArConfigs.get(configId);
-    if (!config) return false;
-    config.connected = false;
+  activateScene(id: string): boolean {
+    if (this._scenes.has(id)) {
+      this._activeSceneId = id;
+      return true;
+    }
     return false;
   }
 
-  addMarker(
-    configId: string,
-    markerId: string,
-    position: number[],
-    rotation: number[],
-    size: number[]
-  ): boolean {
-    const config = this._vrArConfigs.get(configId);
-    if (!config) return false;
-    config.markers.push({ id: markerId, position, rotation, size });
+  addRenderConfig(config: Render3DConfig): void {
+    this._renderConfigs.set(config.id, config);
+  }
+
+  removeRenderConfig(id: string): boolean {
+    return this._renderConfigs.delete(id);
+  }
+
+  addAnimation(animation: RealTimeAnimation): void {
+    this._animations.set(animation.id, animation);
+  }
+
+  removeAnimation(id: string): boolean {
+    return this._animations.delete(id);
+  }
+
+  playAnimation(id: string): boolean {
+    const animation = this._animations.get(id);
+    if (!animation) return false;
+    this._animationQueue.push(animation);
     return true;
   }
 
-  addAnchor(
-    configId: string,
-    anchorId: string,
-    position: number[],
-    rotation: number[]
-  ): boolean {
-    const config = this._vrArConfigs.get(configId);
-    if (!config) return false;
-    config.anchors.push({ id: anchorId, position, rotation });
-    return true;
+  stopAnimation(id: string): boolean {
+    const idx = this._animationQueue.findIndex(a => a.id === id);
+    if (idx >= 0) {
+      this._animationQueue.splice(idx, 1);
+      return true;
+    }
+    return false;
   }
 
-  renderFrame(renderId: string): { frameTime: number; fps: number; drawCalls: number } {
-    const config = this._renderConfigs.get(renderId);
-    if (!config) return { frameTime: 0, fps: 0, drawCalls: 0 };
-    const frameTime = 1000 / config.fps;
-    const drawCalls = Math.floor(config.resolution.width * config.resolution.height / 10000);
-    config.lastFrameTime = Date.now();
-    config.frameCount++;
-    this._performanceStats.totalFrames++;
-    this._performanceStats.totalRenderTime += frameTime;
-    this._performanceStats.avgFps =
-      (this._performanceStats.avgFps * (this._performanceStats.totalFrames - 1) + config.fps) /
-      this._performanceStats.totalFrames;
-    this._performanceStats.frameTime = frameTime;
-    this._performanceStats.drawCalls = drawCalls;
-    this._performanceStats.triangleCount = drawCalls * 100;
-    return { frameTime, fps: config.fps, drawCalls };
+  addVisualization(visualization: DataVisualization): void {
+    this._visualizations.set(visualization.id, visualization);
   }
 
-  setQuality(renderId: string, quality: 'low' | 'medium' | 'high' | 'ultra'): boolean {
-    const config = this._renderConfigs.get(renderId);
-    if (!config) return false;
-    config.quality = quality;
-    const qualitySettings: Record<string, { resolution: { width: number; height: number }; fps: number }> = {
-      low: { resolution: { width: 640, height: 480 }, fps: 30 },
-      medium: { resolution: { width: 1280, height: 720 }, fps: 60 },
-      high: { resolution: { width: 1920, height: 1080 }, fps: 60 },
-      ultra: { resolution: { width: 3840, height: 2160 }, fps: 120 },
+  removeVisualization(id: string): boolean {
+    return this._visualizations.delete(id);
+  }
+
+  addVRConfig(config: VRARConfig): void {
+    this._vrConfigs.set(config.id, config);
+  }
+
+  removeVRConfig(id: string): boolean {
+    return this._vrConfigs.delete(id);
+  }
+
+  addViewport(viewport: Viewport): void {
+    this._viewports.set(viewport.id, viewport);
+  }
+
+  removeViewport(id: string): boolean {
+    return this._viewports.delete(id);
+  }
+
+  addMaterial(material: MaterialDefinition): void {
+    this._materials.set(material.id, material);
+  }
+
+  removeMaterial(id: string): boolean {
+    return this._materials.delete(id);
+  }
+
+  addParticleSystem(system: ParticleSystem): void {
+    this._particleSystems.set(system.id, system);
+  }
+
+  removeParticleSystem(id: string): boolean {
+    return this._particleSystems.delete(id);
+  }
+
+  addPostProcessStack(stack: PostProcessStack): void {
+    this._postProcessStacks.set(stack.id, stack);
+  }
+
+  removePostProcessStack(id: string): boolean {
+    return this._postProcessStacks.delete(id);
+  }
+
+  setLayerVisibility(layer: number, visible: boolean): void {
+    this._layerVisibility.set(layer, visible);
+  }
+
+  isLayerVisible(layer: number): boolean {
+    return this._layerVisibility.get(layer) !== false;
+  }
+
+  addCameraBookmark(id: string, name: string, position: number[], target: number[]): void {
+    this._cameraBookmarks.set(id, { name, position: [...position], target: [...target] });
+  }
+
+  removeCameraBookmark(id: string): boolean {
+    return this._cameraBookmarks.delete(id);
+  }
+
+  getCameraBookmarks(): Map<string, { position: number[]; target: number[]; name: string }> {
+    return new Map(this._cameraBookmarks);
+  }
+
+  goToBookmark(id: string): { position: number[]; target: number[] } | null {
+    const bookmark = this._cameraBookmarks.get(id);
+    return bookmark ? { position: bookmark.position, target: bookmark.target } : null;
+  }
+
+  takeScreenshot(viewportId?: string): string {
+    const id = `screenshot-${Date.now()}`;
+    this._screenshotQueue.push(id);
+    return id;
+  }
+
+  startRecording(frameRate: number = 30, quality: number = 0.9): void {
+    this._videoRecording = true;
+    this._recordingFrameRate = frameRate;
+    this._recordingQuality = quality;
+  }
+
+  stopRecording(): string {
+    this._videoRecording = false;
+    return `recording-${Date.now()}.mp4`;
+  }
+
+  updateStatistics(drawCalls: number, triangleCount: number, textureMemory: number): void {
+    this._statistics.frameCount++;
+    this._statistics.drawCalls = drawCalls;
+    this._statistics.triangleCount = triangleCount;
+    this._statistics.textureMemory = textureMemory;
+
+    this._performanceLog.push({
+      timestamp: Date.now(),
+      fps: this._fps,
+      drawCalls,
+      memory: textureMemory
+    });
+
+    if (this._performanceLog.length > 1000) {
+      this._performanceLog.shift();
+    }
+  }
+
+  getPerformanceLog(): { timestamp: number; fps: number; drawCalls: number; memory: number }[] {
+    return [...this._performanceLog];
+  }
+
+  getAverageFrameTime(): number {
+    if (this._performanceLog.length === 0) return 0;
+    return this._performanceLog.reduce((sum, p) => sum + 1000 / p.fps, 0) / this._performanceLog.length;
+  }
+
+  exportScene(sceneId: string): string {
+    const scene = this._scenes.get(sceneId);
+    return scene ? JSON.stringify(scene, null, 2) : '';
+  }
+
+  importScene(json: string): VisualizationScene | null {
+    try {
+      const scene = JSON.parse(json) as VisualizationScene;
+      this.addScene(scene);
+      return scene;
+    } catch {
+      return null;
+    }
+  }
+
+  cloneScene(sourceId: string, newId: string): VisualizationScene | null {
+    const source = this._scenes.get(sourceId);
+    if (!source) return null;
+    const cloned = JSON.parse(JSON.stringify(source)) as VisualizationScene;
+    cloned.id = newId;
+    cloned.name = `${source.name} (Clone)`;
+    this.addScene(cloned);
+    return cloned;
+  }
+
+  createDataVisualizationFromSeries(seriesId: string, data: number[][]): DataVisualization {
+    const viz: DataVisualization = {
+      id: `viz-${seriesId}`,
+      type: 'line',
+      dataSource: seriesId,
+      xAxis: { label: 'Time', scale: 'linear' },
+      yAxis: { label: 'Value', scale: 'linear' },
+      series: data.map((_, i) => ({
+        name: `Series ${i + 1}`,
+        color: [Math.random(), Math.random(), Math.random()],
+        style: 'solid',
+        width: 2
+      })),
+      annotations: [],
+      interactive: true,
+      refreshRate: 30,
+      metadata: {}
     };
-    const settings = qualitySettings[quality];
-    config.resolution = settings.resolution;
-    config.fps = settings.fps;
-    return true;
+    this.addVisualization(viz);
+    return viz;
   }
 
-  getMaterialNames(): string[] {
-    return Array.from(this._materialLibrary.keys());
+  render(): VisualizationScene | null {
+    const startTime = Date.now();
+    if (!this._activeSceneId) return null;
+
+    const scene = this._scenes.get(this._activeSceneId);
+    if (!scene) return null;
+
+    this.updateStatistics(
+      Math.floor(Math.random() * 1000) + 100,
+      Math.floor(Math.random() * 100000) + 10000,
+      Math.floor(Math.random() * 512) + 128
+    );
+
+    this._lastResult = scene;
+    this._counter++;
+    this._frameTime = Date.now() - startTime;
+    return scene;
   }
 
-  getGeometryNames(): string[] {
-    return Array.from(this._geometryLibrary.keys());
-  }
-
-  getTextureNames(): string[] {
-    return Array.from(this._textureLibrary.keys());
-  }
-
-  getShaderNames(): string[] {
-    return Array.from(this._shaderLibrary.keys());
-  }
-
-  toPacket(): DataPacket<VisualizationEngineResult> {
-    const result: VisualizationEngineResult = {
-      renderConfigs: Array.from(this._renderConfigs.values()),
-      animations: Array.from(this._animations.values()),
-      dataVisualizations: Array.from(this._dataVisualizations.values()),
-      vrArConfigs: Array.from(this._vrArConfigs.values()),
-      scenes: Array.from(this._scenes.values()),
-      totalVisualizations: this.totalVisualizations,
-      renderQuality: this._renderConfigs.size > 0 ? 0.85 : 0,
-      performance: {
-        avgFps: this._performanceStats.avgFps,
-        frameTime: this._performanceStats.frameTime,
-        drawCalls: this._performanceStats.drawCalls,
-        triangleCount: this._performanceStats.triangleCount,
+  toPacket(): DataPacket<VisualizationScene> {
+    const result = this._lastResult || {
+      id: '',
+      name: '',
+      renderConfig: {
+        id: '',
+        camera: { position: [0, 0, 0], target: [0, 0, 0], up: [0, 1, 0], fov: 60 },
+        lights: [],
+        backgroundColor: [0, 0, 0],
+        antialiasing: true,
+        shadowsEnabled: true,
+        postProcessing: { bloom: false, ssao: false, toneMapping: true, exposure: 1 },
+        lodDistance: [],
+        clippingPlanes: { near: 0.1, far: 1000 },
+        metadata: {}
       },
+      animations: [],
+      visualizations: [],
+      overlays: [],
+      metadata: {}
     };
-    this._lastResult = result;
     this._counter++;
     return {
       id: `visualization-engine-${Date.now()}-${this._counter}`,
       payload: result,
       metadata: {
         createdAt: Date.now(),
-        route: ['digital_twin', 'visualization_engine'],
+        route: ['digital-twin', 'visualization-engine'],
         priority: 1,
-        phase: 'visualization',
-      },
+        phase: 'visualization'
+      }
     };
   }
 
   reset(): void {
+    this._scenes.clear();
     this._renderConfigs.clear();
     this._animations.clear();
-    this._dataVisualizations.clear();
-    this._vrArConfigs.clear();
-    this._scenes.clear();
-    this._counter = 0;
+    this._visualizations.clear();
+    this._vrConfigs.clear();
+    this._viewports.clear();
+    this._materials.clear();
+    this._particleSystems.clear();
+    this._postProcessStacks.clear();
+    this._activeSceneId = null;
     this._lastResult = null;
-    this._performanceStats = {
-      avgFps: 0,
-      frameTime: 0,
-      drawCalls: 0,
-      triangleCount: 0,
-      totalFrames: 0,
-      totalRenderTime: 0,
-    };
+    this._counter = 0;
+    this._fps = 60;
+    this._frameTime = 16.67;
+    this._renderScale = 1.0;
+    this._vsyncEnabled = true;
+    this._debugMode = false;
+    this._statistics = { frameCount: 0, drawCalls: 0, triangleCount: 0, textureMemory: 0 };
+    this._layerVisibility.clear();
+    this._animationQueue = [];
+    this._screenshotQueue = [];
+    this._videoRecording = false;
+    this._recordingFrameRate = 30;
+    this._recordingQuality = 0.9;
+    this._cameraBookmarks.clear();
+    this._theme = 'dark';
+    this._performanceLog = [];
+    this._initDefaultMaterials();
+    this._initDefaultPostProcessStack();
   }
 }

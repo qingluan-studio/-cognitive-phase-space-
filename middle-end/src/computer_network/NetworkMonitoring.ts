@@ -669,6 +669,131 @@ export class NetworkMonitoring {
     return Math.round(differences.reduce((a, b) => a + b, 0) / differences.length);
   }
 
+  public alertSummary(): {
+    total: number;
+    bySeverity: Record<string, number>;
+    byType: Record<string, number>;
+    recentCount: number;
+    acknowledged: number;
+  } {
+    const bySeverity: Record<string, number> = {};
+    const byType: Record<string, number> = {};
+    const now = Date.now();
+    const recentCutoff = now - 24 * 60 * 60 * 1000;
+    let recentCount = 0;
+    for (const alert of this._alerts.values()) {
+      bySeverity[alert.severity] = (bySeverity[alert.severity] ?? 0) + 1;
+      byType[alert.type] = (byType[alert.type] ?? 0) + 1;
+      if (alert.timestamp >= recentCutoff) recentCount++;
+    }
+    return {
+      total: this._alerts.size,
+      bySeverity,
+      byType,
+      recentCount,
+      acknowledged: 0,
+    };
+  }
+
+  public deviceHealthReport(): {
+    total: number;
+    up: number;
+    down: number;
+    degraded: number;
+    byType: Record<string, { total: number; up: number; down: number; degraded: number }>;
+  } {
+    const byType: Record<string, { total: number; up: number; down: number; degraded: number }> = {};
+    let up = 0;
+    let down = 0;
+    let degraded = 0;
+    for (const node of this._topologyNodes.values()) {
+      const stats = byType[node.type] ?? { total: 0, up: 0, down: 0, degraded: 0 };
+      stats.total++;
+      if (node.status === 'up') { stats.up++; up++; }
+      else if (node.status === 'down') { stats.down++; down++; }
+      else { stats.degraded++; degraded++; }
+      byType[node.type] = stats;
+    }
+    return { total: this._topologyNodes.size, up, down, degraded, byType };
+  }
+
+  public bandwidthUtilizationReport(): { linkId: string; source: string; target: string; utilization: number; saturated: boolean }[] {
+    return Array.from(this._topologyLinks.values()).map(link => ({
+      linkId: link.id,
+      source: link.source,
+      target: link.target,
+      utilization: link.utilization,
+      saturated: link.utilization > 0.85,
+    }));
+  }
+
+  public topTalkers(limit: number = 10): { srcIp: string; dstIp: string; bytes: number; packets: number }[] {
+    const aggregated = new Map<string, { srcIp: string; dstIp: string; bytes: number; packets: number }>();
+    for (const flow of this._flowCache.values()) {
+      const key = `${flow.srcIp}-${flow.dstIp}`;
+      const existing = aggregated.get(key);
+      if (existing) {
+        existing.bytes += flow.bytes;
+        existing.packets += flow.packets;
+      } else {
+        aggregated.set(key, { srcIp: flow.srcIp, dstIp: flow.dstIp, bytes: flow.bytes, packets: flow.packets });
+      }
+    }
+    return Array.from(aggregated.values()).sort((a, b) => b.bytes - a.bytes).slice(0, limit);
+  }
+
+  public metricTimeSeries(metric: keyof NetworkMetrics, window: number = 60): { interface: string; value: number }[] {
+    return Array.from(this._metrics.entries())
+      .filter(([iface, m]) => m[metric] !== undefined)
+      .map(([iface, m]) => ({ interface: iface, value: m[metric] }))
+      .slice(-window);
+  }
+
+  public averageMetric(metric: keyof NetworkMetrics): number {
+    const values = Array.from(this._metrics.values()).map(m => m[metric]).filter((v): v is number => typeof v === 'number');
+    if (values.length === 0) return 0;
+    return values.reduce((a, b) => a + b, 0) / values.length;
+  }
+
+  public exportMetrics(format: 'json' | 'csv' | 'prometheus'): string {
+    const entries = Array.from(this._metrics.entries());
+    if (format === 'csv') {
+      const header = 'interface,bandwidth,latency,packetLoss,jitter';
+      const rows = entries.map(([iface, m]) => `${iface},${m.bandwidth},${m.latency},${m.packetLoss},${m.jitter}`);
+      return [header, ...rows].join('\n');
+    }
+    if (format === 'prometheus') {
+      const lines: string[] = [];
+      for (const [iface, m] of entries) {
+        lines.push(`network_bandwidth{interface="${iface}"} ${m.bandwidth}`);
+        lines.push(`network_latency{interface="${iface}"} ${m.latency}`);
+        lines.push(`network_packet_loss{interface="${iface}"} ${m.packetLoss}`);
+        lines.push(`network_jitter{interface="${iface}"} ${m.jitter}`);
+      }
+      return lines.join('\n');
+    }
+    return JSON.stringify(Object.fromEntries(entries), null, 2);
+  }
+
+  public acknowledgeAlert(alertId: string, user: string): boolean {
+    const alert = this._alerts.get(alertId);
+    if (!alert) return false;
+    this._alerts.set(alertId, { ...alert, message: `[ACK:${user}] ${alert.message}` });
+    this._recordHistory(`Alert ${alertId} acknowledged by ${user}`);
+    return true;
+  }
+
+  public clearResolvedAlerts(): number {
+    const before = this._alerts.size;
+    const now = Date.now();
+    for (const [id, alert] of this._alerts.entries()) {
+      if (now - alert.timestamp > 7 * 24 * 60 * 60 * 1000) {
+        this._alerts.delete(id);
+      }
+    }
+    return before - this._alerts.size;
+  }
+
   public toPacket(): DataPacket<{
     metrics: number;
     devices: number;

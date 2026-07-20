@@ -662,6 +662,248 @@ export class PositivePsychology {
     };
   }
 
+  ryffPsychologicalWellbeing(scores: { autonomy: number; environmentalMastery: number; personalGrowth: number; positiveRelations: number; purposeInLife: number; selfAcceptance: number }): { dimensions: typeof scores; total: number; profile: string; interpretation: string } {
+    const total = (scores.autonomy + scores.environmentalMastery + scores.personalGrowth + scores.positiveRelations + scores.purposeInLife + scores.selfAcceptance) / 6;
+    const maxDimension = Object.entries(scores).reduce((a, b) => b[1] > a[1] ? b : a);
+    const minDimension = Object.entries(scores).reduce((a, b) => b[1] < a[1] ? b : a);
+    const profile = `high-${maxDimension[0]}-low-${minDimension[0]}`;
+    const interpretation = total > 0.7 ? 'high-psychological-wellbeing' : total > 0.5 ? 'moderate-wellbeing' : 'low-wellbeing';
+    return {
+      dimensions: scores,
+      total: Number(total.toFixed(2)),
+      profile,
+      interpretation,
+    };
+  }
+
+  hedonicTreadmill(baseline: number, lifeEvent: number, _event: 'positive' | 'negative'): { baseline: number; immediate: number; sixMonths: number; oneYear: number; adaptation: number } {
+    const immediate = baseline + lifeEvent;
+    const sixMonths = baseline + lifeEvent * 0.4;
+    const oneYear = baseline + lifeEvent * 0.1;
+    const adaptation = Number(((oneYear - baseline) / Math.max(0.01, lifeEvent)).toFixed(2));
+    return {
+      baseline: Number(baseline.toFixed(2)),
+      immediate: Number(immediate.toFixed(2)),
+      sixMonths: Number(sixMonths.toFixed(2)),
+      oneYear: Number(oneYear.toFixed(2)),
+      adaptation,
+    };
+  }
+
+  broadenAndBuild(emotions: { type: PositiveEmotion['type']; intensity: number }[]): { broadening: number; building: number; resources: string[]; cognitiveExpansion: number } {
+    const positiveCount = emotions.length;
+    const avgIntensity = positiveCount > 0 ? emotions.reduce((sum, e) => sum + e.intensity, 0) / positiveCount : 0;
+    const broadening = Number((positiveCount / 10 * 0.5 + avgIntensity * 0.5).toFixed(2));
+    const building = Number((broadening * 0.7).toFixed(2));
+    const resources: string[] = [];
+    if (avgIntensity > 0.6) resources.push('social-connections');
+    if (avgIntensity > 0.5) resources.push('cognitive-skills');
+    if (avgIntensity > 0.7) resources.push('physical-health');
+    if (positiveCount > 5) resources.push('resilience');
+    return {
+      broadening,
+      building,
+      resources,
+      cognitiveExpansion: Number((broadening * 0.6).toFixed(2)),
+    };
+  }
+
+  aweExperience(trigger: 'nature' | 'art' | 'moral' | 'intellectual' | 'spiritual', intensity: number): { trigger: string; intensity: number; selfDiminishment: number; vastness: number; accommodation: number; outcomes: string[] } {
+    const triggerMap: Record<string, { vastness: number; accommodation: number; outcomes: string[] }> = {
+      nature: { vastness: 0.9, accommodation: 0.7, outcomes: ['humility', 'connectedness', 'wellbeing'] },
+      art: { vastness: 0.8, accommodation: 0.8, outcomes: ['inspiration', 'openness', 'creativity'] },
+      moral: { vastness: 0.7, accommodation: 0.6, outcomes: ['moral-elevation', 'prosocial-behavior', 'meaning'] },
+      intellectual: { vastness: 0.7, accommodation: 0.9, outcomes: ['cognitive-growth', 'curiosity', 'perspective'] },
+      spiritual: { vastness: 0.95, accommodation: 0.7, outcomes: ['transcendence', 'meaning', 'connectedness'] },
+    };
+    const t = triggerMap[trigger];
+    return {
+      trigger,
+      intensity: Number(intensity.toFixed(2)),
+      selfDiminishment: Number((t.vastness * intensity).toFixed(2)),
+      vastness: t.vastness,
+      accommodation: t.accommodation,
+      outcomes: t.outcomes,
+    };
+  }
+
+  wisdomAssessment(reflective: number, affective: number, cognitive: number): { reflective: number; affective: number; cognitive: number; total: number; level: 'low' | 'moderate' | 'high' } {
+    const total = (reflective + affective + cognitive) / 3;
+    const level = total > 0.7 ? 'high' : total > 0.4 ? 'moderate' : 'low';
+    return {
+      reflective: Number(reflective.toFixed(2)),
+      affective: Number(affective.toFixed(2)),
+      cognitive: Number(cognitive.toFixed(2)),
+      total: Number(total.toFixed(2)),
+      level,
+    };
+  }
+
+  courageAssessment(fear: number, action: number, moralReasoning: number): { physical: number; moral: number; psychological: number; total: number; type: string } {
+    const physical = action > fear ? 0.7 : 0.3;
+    const moral = Number((moralReasoning * action).toFixed(2));
+    const psychological = Number((action * (1 - fear) * 0.5 + action * 0.5).toFixed(2));
+    const total = Number(((physical + moral + psychological) / 3).toFixed(2));
+    const type = moral > 0.7 ? 'moral-courage' : physical > 0.7 ? 'physical-courage' : 'psychological-courage';
+    return { physical: Number(physical.toFixed(2)), moral, psychological, total, type };
+  }
+
+  compassionTraining(duration: number, frequency: number): { selfCompassion: number; compassionForOthers: number; components: string[]; expectedGains: { wellbeing: number; empathy: number; connection: number } } {
+    const dose = duration * frequency;
+    return {
+      selfCompassion: Number((Math.min(1, dose / 600 * 0.5)).toFixed(2)),
+      compassionForOthers: Number((Math.min(1, dose / 500 * 0.6)).toFixed(2)),
+      components: ['loving-kindness-meditation', 'compassion-meditation', 'self-compassion-practice', 'tonglen'],
+      expectedGains: {
+        wellbeing: Number((dose / 600 * 0.4).toFixed(2)),
+        empathy: Number((dose / 500 * 0.5).toFixed(2)),
+        connection: Number((dose / 700 * 0.35).toFixed(2)),
+      },
+    };
+  }
+
+  mentalToughness(control: number, commitment: number, challenge: number, confidence: number): { control: number; commitment: number; challenge: number; confidence: number; total: number; category: string } {
+    const total = (control + commitment + challenge + confidence) / 4;
+    const category = total > 0.75 ? 'elite-mental-toughness' : total > 0.5 ? 'good-mental-toughness' : 'developing-toughness';
+    return {
+      control: Number(control.toFixed(2)),
+      commitment: Number(commitment.toFixed(2)),
+      challenge: Number(challenge.toFixed(2)),
+      confidence: Number(confidence.toFixed(2)),
+      total: Number(total.toFixed(2)),
+      category,
+    };
+  }
+
+  gritScale(consistency: number, perseverance: number): { consistency: number; perseverance: number; total: number; level: string; predictors: string[] } {
+    const total = (consistency + perseverance) / 2;
+    const level = total > 0.8 ? 'very-gritty' : total > 0.6 ? 'gritty' : total > 0.4 ? 'moderate' : 'less-gritty';
+    const predictors = total > 0.7 ? ['long-term-goal-completion', 'academic-achievement', 'career-success'] : ['improvement-needed'];
+    return {
+      consistency: Number(consistency.toFixed(2)),
+      perseverance: Number(perseverance.toFixed(2)),
+      total: Number(total.toFixed(2)),
+      level,
+      predictors,
+    };
+  }
+
+  subjectiveHappinessScale(items: { comparedToPeers: number; generalHappiness: number; isHappy: number; isUnhappy: number }): { score: number; interpretation: string; comparison: 'above-average' | 'average' | 'below-average' } {
+    const isUnhappyReverse = 8 - items.isUnhappy;
+    const score = (items.comparedToPeers + items.generalHappiness + items.isHappy + isUnhappyReverse) / 4;
+    const interpretation = score > 5.5 ? 'very-happy' : score > 4 ? 'moderately-happy' : 'less-happy';
+    const comparison = score > 5 ? 'above-average' : score > 4 ? 'average' : 'below-average';
+    return {
+      score: Number(score.toFixed(2)),
+      interpretation,
+      comparison,
+    };
+  }
+
+  lifeSatisfactionScale(items: number[]): { total: number; average: number; interpretation: string; percentile: number } {
+    const total = items.reduce((sum, i) => sum + i, 0);
+    const average = total / items.length;
+    const interpretation = average > 5 ? 'highly-satisfied' : average > 3.5 ? 'satisfied' : average > 2 ? 'slightly-satisfied' : 'dissatisfied';
+    const percentile = Number((average / 7 * 100).toFixed(0));
+    return {
+      total: Number(total.toFixed(2)),
+      average: Number(average.toFixed(2)),
+      interpretation,
+      percentile,
+    };
+  }
+
+  qualityOfLife(physical: number, psychological: number, social: number, environmental: number): { domains: { physical: number; psychological: number; social: number; environmental: number }; total: number; interpretation: string } {
+    const total = (physical + psychological + social + environmental) / 4;
+    const interpretation = total > 0.75 ? 'excellent-QoL' : total > 0.5 ? 'good-QoL' : total > 0.25 ? 'poor-QoL' : 'very-poor-QoL';
+    return {
+      domains: { physical: Number(physical.toFixed(2)), psychological: Number(psychological.toFixed(2)), social: Number(social.toFixed(2)), environmental: Number(environmental.toFixed(2)) },
+      total: Number(total.toFixed(2)),
+      interpretation,
+    };
+  }
+
+  positiveInterventionRecommendation(profile: { wellbeing: number; depression: number; anxiety: number }): { primary: string; secondary: string; expectedBenefit: number; duration: string } {
+    let primary = 'gratitude-journal';
+    if (profile.depression > 0.6) primary = 'behavioral-activation';
+    else if (profile.anxiety > 0.6) primary = 'mindfulness-meditation';
+    else if (profile.wellbeing < 0.4) primary = 'strengths-use';
+    let secondary = 'savoring';
+    if (profile.wellbeing > 0.7) secondary = 'meaning-oriented-intervention';
+    const expectedBenefit = Number((0.4 - profile.depression * 0.2 - profile.anxiety * 0.1).toFixed(2));
+    return { primary, secondary, expectedBenefit, duration: '4-8-weeks' };
+  }
+
+  characterStrengthsIntervention(signatureStrength: string, context: string, frequency: number): { strength: string; context: string; technique: string; expectedOutcome: number; adherence: number } {
+    const techniqueMap: Record<string, string> = {
+      'work': 'strengths-use-in-tasks',
+      'personal': 'strengths-journaling',
+      'relationships': 'strengths-conversation',
+    };
+    const technique = techniqueMap[context] ?? 'strengths-practice';
+    const expectedOutcome = Number((Math.min(0.6, frequency / 7 * 0.5)).toFixed(2));
+    return {
+      strength: signatureStrength,
+      context,
+      technique,
+      expectedOutcome,
+      adherence: Number((frequency / 7 * 0.85).toFixed(2)),
+    };
+  }
+
+  permaWorkshop(participants: number, sessions: number): { participants: number; sessions: number; curriculum: string[]; permaDomains: string[]; expectedOutcomes: string[]; effectivenessEstimate: number } {
+    return {
+      participants,
+      sessions,
+      curriculum: ['introduction-to-PERMA', 'positive-emotion-practices', 'engagement-activities', 'relationships-building', 'meaning-exploration', 'accomplishment-goal-setting', 'integration-review'],
+      permaDomains: ['P', 'E', 'R', 'M', 'A'],
+      expectedOutcomes: ['increased-wellbeing', 'strengths-awareness', 'better-relationships', 'sense-of-meaning', 'goal-pursuit'],
+      effectivenessEstimate: Number((0.3 + sessions * 0.05).toFixed(2)),
+    };
+  }
+
+  flourishingDiagnostic(perma: Perma, socialSupport: number, engagement: number): { flourishingScore: number; languishing: number; components: Record<string, number>; recommendation: string } {
+    const flourishingScore = Number((perma.total * 0.4 + socialSupport * 0.2 + engagement * 0.4).toFixed(2));
+    const languishing = Number((1 - flourishingScore).toFixed(2));
+    const recommendation = flourishingScore > 0.7 ? 'maintain-practices' : flourishingScore > 0.4 ? 'enhance-PERMA-domains' : 'comprehensive-intervention';
+    return {
+      flourishingScore,
+      languishing,
+      components: {
+        positiveEmotion: perma.positiveEmotion,
+        engagement,
+        relationships: perma.relationships,
+        meaning: perma.meaning,
+        accomplishment: perma.accomplishment,
+        socialSupport: Number(socialSupport.toFixed(2)),
+      },
+      recommendation,
+    };
+  }
+
+  positivePsychotherapyOutcome(baselineWellbeing: number, sessions: number, adherence: number): { expectedGain: number; expectedEndpoint: number; effectSize: number; confidence: number } {
+    const dose = sessions * adherence;
+    const expectedGain = Number((Math.min(0.4, dose / 20 * 0.4)).toFixed(2));
+    const expectedEndpoint = Number((baselineWellbeing + expectedGain).toFixed(2));
+    const effectSize = Number((expectedGain / 0.15).toFixed(2));
+    const confidence = Number((Math.min(0.95, 0.5 + adherence * 0.4 + sessions / 30 * 0.05).toFixed(2)));
+    return { expectedGain, expectedEndpoint, effectSize, confidence };
+  }
+
+  savoringInventory(items: { anticipating: number; presentMoment: number; reminiscing: number }): { total: number; strongestStrategy: string; weakestStrategy: string; recommendation: string } {
+    const total = (items.anticipating + items.presentMoment + items.reminiscing) / 3;
+    const strategies = Object.entries(items) as [string, number][];
+    const strongest = strategies.reduce((a, b) => b[1] > a[1] ? b : a)[0];
+    const weakest = strategies.reduce((a, b) => b[1] < a[1] ? b : a)[0];
+    const recommendation = `enhance-${weakest}-savoring`;
+    return {
+      total: Number(total.toFixed(2)),
+      strongestStrategy: strongest,
+      weakestStrategy: weakest,
+      recommendation,
+    };
+  }
+
   private _seedStrengths(): void {
     const strengths: Strength[] = [
       { name: 'creativity', category: 'wisdom', description: 'thinking of novel ways', score: 0, signatureStrength: false, applications: ['innovation', 'problem-solving', 'art'] },

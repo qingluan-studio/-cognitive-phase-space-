@@ -665,6 +665,209 @@ export class ServerlessArch {
     };
   }
 
+  circuitBreaker(funcName: string, options: {
+    failureThreshold: number;
+    resetTimeout: number;
+    halfOpenRequests: number;
+  }): { function: string; state: 'closed' | 'open' | 'half_open'; failures: number; trips: number } {
+    const failures = Math.floor(Math.random() * options.failureThreshold);
+    const state = failures >= options.failureThreshold ? 'open' : 'closed';
+    return {
+      function: funcName,
+      state,
+      failures,
+      trips: state === 'open' ? 1 : 0,
+    };
+  }
+
+  retryWithBackoff(funcName: string, event: Record<string, unknown>, options: {
+    maxRetries: number;
+    initialDelay: number;
+    maxDelay: number;
+    backoffMultiplier: number;
+  }): { attempts: number; succeeded: boolean; totalDelay: number; finalError?: string } {
+    const attempts = Math.floor(Math.random() * (options.maxRetries + 1)) + 1;
+    const succeeded = Math.random() > 0.2;
+    let totalDelay = 0;
+    let currentDelay = options.initialDelay;
+    for (let i = 0; i < Math.min(attempts, options.maxRetries); i++) {
+      totalDelay += currentDelay;
+      currentDelay = Math.min(currentDelay * options.backoffMultiplier, options.maxDelay);
+    }
+    return {
+      attempts,
+      succeeded,
+      totalDelay,
+      finalError: succeeded ? undefined : 'Max retries exceeded',
+    };
+  }
+
+  deadLetterQueue(funcName: string, failedEvents: Record<string, unknown>[], options: {
+    maxRetries: number;
+    queueArn: string;
+  }): { function: string; queued: number; queueArn: string; retentionDays: number } {
+    return {
+      function: funcName,
+      queued: failedEvents.length,
+      queueArn: options.queueArn,
+      retentionDays: 14,
+    };
+  }
+
+  idempotencyKey(funcName: string, payload: Record<string, unknown>): { function: string; key: string; ttl: number; cached: boolean } {
+    const key = `idem-${funcName}-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    return {
+      function: funcName,
+      key,
+      ttl: 3600,
+      cached: Math.random() > 0.7,
+    };
+  }
+
+  warmupFunctions(functions: string[], concurrency: number): { warmed: number; concurrency: number; estimatedCost: number; estimatedColdStartReduction: number } {
+    let estimatedCost = 0;
+    for (const fn of functions) {
+      const func = this._functions.get(fn);
+      if (func) {
+        const hourlyRate = (func.memory / 1024) * 0.0000021;
+        estimatedCost += concurrency * hourlyRate * 24;
+      }
+    }
+    return {
+      warmed: functions.length,
+      concurrency,
+      estimatedCost: Math.round(estimatedCost * 100) / 100,
+      estimatedColdStartReduction: 95,
+    };
+  }
+
+  functionInsights(functions: string[]): {
+    functions: { name: string; invocations: number; errors: number; duration: number; cost: number; optimization: string }[];
+    totalCost: number;
+    totalInvocations: number;
+    recommendations: string[];
+  } {
+    const insights = functions.map(name => {
+      const fn = this._functions.get(name);
+      const invocations = Math.floor(Math.random() * 50000) + 1000;
+      const errors = Math.floor(invocations * (Math.random() * 0.05));
+      const duration = Math.floor(Math.random() * 200) + 50;
+      const cost = fn ? (invocations * (fn.memory / 1024) * (duration / 1000) * 0.0000166667) : 0;
+      let optimization = 'none';
+      if (errors / invocations > 0.01) optimization = 'fix_errors';
+      else if (duration > 500) optimization = 'reduce_duration';
+      else if (fn && fn.memory > 512) optimization = 'reduce_memory';
+      return { name, invocations, errors, duration, cost: Math.round(cost * 100) / 100, optimization };
+    });
+    const totalCost = insights.reduce((sum, i) => sum + i.cost, 0);
+    const totalInvocations = insights.reduce((sum, i) => sum + i.invocations, 0);
+    const recommendations = insights
+      .filter(i => i.optimization !== 'none')
+      .map(i => `${i.name}: ${i.optimization}`);
+    return {
+      functions: insights,
+      totalCost: Math.round(totalCost * 100) / 100,
+      totalInvocations,
+      recommendations,
+    };
+  }
+
+  blueGreenDeployment(funcName: string, versions: { blue: string; green: string }, options: {
+    trafficShift: number;
+    validationPeriod: number;
+    rollbackOnError: boolean;
+  }): { function: string; strategy: string; activeVersion: string; trafficSplit: { blue: number; green: number }; status: string } {
+    const greenTraffic = options.trafficShift;
+    const blueTraffic = 100 - greenTraffic;
+    return {
+      function: funcName,
+      strategy: 'blue_green',
+      activeVersion: greenTraffic >= 100 ? versions.green : versions.blue,
+      trafficSplit: { blue: blueTraffic, green: greenTraffic },
+      status: greenTraffic >= 100 ? 'completed' : 'in_progress',
+    };
+  }
+
+  canaryDeployment(funcName: string, versions: { stable: string; canary: string }, stages: number[]): {
+    function: string;
+    stages: { stage: number; canaryPercent: number; duration: number; healthy: boolean }[];
+    promoted: boolean;
+  } {
+    const stageResults = stages.map((percent, idx) => ({
+      stage: idx + 1,
+      canaryPercent: percent,
+      duration: 5 * (idx + 1),
+      healthy: Math.random() > 0.1,
+    }));
+    return {
+      function: funcName,
+      stages: stageResults,
+      promoted: stageResults.every(s => s.healthy),
+    };
+  }
+
+  eventSourceMapping(funcName: string, source: string, options: {
+    batchSize: number;
+    parallelization: number;
+    startingPosition: 'LATEST' | 'TRIM_HORIZON' | 'AT_TIMESTAMP';
+    maximumBatchingWindow: number;
+    retryAttempts: number;
+  }): { function: string; source: string; mappingId: string; state: string; config: typeof options } {
+    const mappingId = `esm-${++this._counter}`;
+    this.addTrigger(funcName, 'event_source_mapping', {
+      source,
+      rule: mappingId,
+      batchSize: options.batchSize,
+      startingPosition: options.startingPosition,
+    });
+    return {
+      function: funcName,
+      source,
+      mappingId,
+      state: 'CREATED',
+      config: options,
+    };
+  }
+
+  destinationConfig(funcName: string, destinations: {
+    onSuccess?: string;
+    onFailure?: string;
+  }): { function: string; onSuccess?: string; onFailure?: string; configured: boolean } {
+    return {
+      function: funcName,
+      onSuccess: destinations.onSuccess,
+      onFailure: destinations.onFailure,
+      configured: true,
+    };
+  }
+
+  functionUrl(funcName: string, options: {
+    authType: 'NONE' | 'AWS_IAM';
+    cors?: { allowOrigins: string[]; allowMethods: string[]; allowHeaders: string[]; exposeHeaders: string[]; maxAgeSeconds: number };
+  }): { function: string; url: string; authType: string; cors: boolean } {
+    const url = `https://${funcName}.lambda-url.us-east-1.on.aws/`;
+    return {
+      function: funcName,
+      url,
+      authType: options.authType,
+      cors: !!options.cors,
+    };
+  }
+
+  snapStartOptimization(funcName: string, runtime: string): { function: string; runtime: string; enabled: boolean; coldStartMs: number; warmStartMs: number; improvement: number } {
+    const enabled = runtime === 'java11' || runtime === 'java17';
+    const coldStartMs = enabled ? 200 : 1500;
+    const warmStartMs = enabled ? 50 : 100;
+    return {
+      function: funcName,
+      runtime,
+      enabled,
+      coldStartMs,
+      warmStartMs,
+      improvement: enabled ? Math.round((1 - coldStartMs / 1500) * 100) : 0,
+    };
+  }
+
   toPacket(): DataPacket<{
     functions: Map<string, ServerlessFunction>;
     events: EventSource[];

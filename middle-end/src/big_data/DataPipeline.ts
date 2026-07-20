@@ -707,6 +707,145 @@ export class DataPipeline {
     return limited;
   }
 
+  pipelineSummary(): {
+    total: number;
+    byStatus: Record<string, number>;
+    healthy: number;
+    failing: number;
+    avgDuration: number;
+    avgRunCount: number;
+  } {
+    const byStatus: Record<string, number> = {};
+    let healthy = 0;
+    let failing = 0;
+    let totalDuration = 0;
+    let totalRuns = 0;
+    for (const p of this._pipelines.values()) {
+      byStatus[p.status] = (byStatus[p.status] ?? 0) + 1;
+      if (p.status === 'running' || p.status === 'completed') healthy++;
+      if (p.status === 'failed' || p.status === 'error') failing++;
+      totalDuration += p.lastDuration;
+      totalRuns += p.runCount;
+    }
+    const count = this._pipelines.size;
+    return {
+      total: count,
+      byStatus,
+      healthy,
+      failing,
+      avgDuration: count > 0 ? Math.round(totalDuration / count) : 0,
+      avgRunCount: count > 0 ? Math.round(totalRuns / count) : 0,
+    };
+  }
+
+  eventStatistics(): { total: number; byType: Record<string, number>; recentCount: number } {
+    const byType: Record<string, number> = {};
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    let recentCount = 0;
+    for (const e of this._events) {
+      byType[e.eventType] = (byType[e.eventType] ?? 0) + 1;
+      if (e.timestamp >= cutoff) recentCount++;
+    }
+    return { total: this._events.length, byType, recentCount };
+  }
+
+  exportPipelineConfig(pipelineId: string, format: 'json' | 'yaml' | 'csv'): string | null {
+    const pipeline = this._pipelines.get(pipelineId);
+    if (!pipeline) return null;
+    const stages = this._stages.get(pipelineId) ?? [];
+    if (format === 'yaml') {
+      const lines: string[] = [];
+      lines.push(`pipeline:`);
+      lines.push(`  id: ${pipeline.id}`);
+      lines.push(`  source: ${pipeline.source}`);
+      lines.push(`  sink: ${pipeline.sink}`);
+      lines.push(`  status: ${pipeline.status}`);
+      lines.push(`  schedule: ${pipeline.schedule ?? 'manual'}`);
+      lines.push(`  stages:`);
+      for (const s of stages) {
+        lines.push(`    - name: ${s.name}`);
+        lines.push(`      status: ${s.status}`);
+        lines.push(`      duration: ${s.duration}`);
+      }
+      return lines.join('\n');
+    }
+    if (format === 'csv') {
+      const header = 'stageName,status,duration,retries';
+      const rows = stages.map(s => `${s.name},${s.status},${s.duration},${s.retries}`);
+      return [header, ...rows].join('\n');
+    }
+    return JSON.stringify({ pipeline, stages }, null, 2);
+  }
+
+  searchPipelines(query: { source?: string; sink?: string; status?: string }): Pipeline[] {
+    return Array.from(this._pipelines.values()).filter(p => {
+      if (query.source && !p.source.includes(query.source)) return false;
+      if (query.sink && !p.sink.includes(query.sink)) return false;
+      if (query.status && p.status !== query.status) return false;
+      return true;
+    });
+  }
+
+  batchRunPipelines(pipelineIds: string[]): { triggered: number; failed: number; results: { id: string; status: string }[] } {
+    const results: { id: string; status: string }[] = [];
+    let triggered = 0;
+    let failed = 0;
+    pipelineIds.forEach(id => {
+      const p = this._pipelines.get(id);
+      if (p) {
+        this._pipelines.set(id, { ...p, status: 'running', lastRunAt: Date.now(), runCount: p.runCount + 1 });
+        triggered++;
+        results.push({ id, status: 'triggered' });
+      } else {
+        failed++;
+        results.push({ id, status: 'not_found' });
+      }
+    });
+    this._recordHistory(`batchRunPipelines(${pipelineIds.length}) -> ${triggered}/${failed}`);
+    return { triggered, failed, results };
+  }
+
+  healthCheck(): { healthy: boolean; pipelinesDown: string[]; pipelinesDegraded: string[]; recentFailures: number } {
+    const down: string[] = [];
+    const degraded: string[] = [];
+    let recentFailures = 0;
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    for (const [id, p] of this._pipelines.entries()) {
+      if (p.status === 'failed' || p.status === 'error') down.push(id);
+      else if (p.status === 'paused' || p.status === 'idle') degraded.push(id);
+    }
+    for (const e of this._events) {
+      if (e.timestamp >= cutoff && (e.eventType === 'failure' || e.eventType === 'timeout')) recentFailures++;
+    }
+    return { healthy: down.length === 0, pipelinesDown: down, pipelinesDegraded: degraded, recentFailures };
+  }
+
+  aggregateMetrics(pipelineId: string): { avgThroughput: number; maxDuration: number; totalRecordsRead: number; totalRecordsWritten: number; avgErrorRate: number } | null {
+    const metrics = this._metrics.get(pipelineId);
+    if (!metrics || metrics.length === 0) return null;
+    const avgThroughput = metrics.reduce((s, m) => s + m.throughput, 0) / metrics.length;
+    const maxDuration = Math.max(...metrics.map(m => m.duration));
+    const totalRecordsRead = metrics.reduce((s, m) => s + m.recordsRead, 0);
+    const totalRecordsWritten = metrics.reduce((s, m) => s + m.recordsWritten, 0);
+    const avgErrorRate = metrics.reduce((s, m) => s + m.errorRate, 0) / metrics.length;
+    return {
+      avgThroughput: Math.round(avgThroughput),
+      maxDuration,
+      totalRecordsRead,
+      totalRecordsWritten,
+      avgErrorRate,
+    };
+  }
+
+  cleanupOldEvents(maxAgeDays: number = 30): number {
+    const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+    const before = this._events.length;
+    this._events = this._events.filter(e => e.timestamp >= cutoff);
+    const removed = before - this._events.length;
+    this._recordHistory(`cleanupOldEvents(${maxAgeDays} days) -> ${removed} removed`);
+    return removed;
+  }
+
   toPacket(): DataPacket<{
     pipelines: Map<string, Pipeline>;
     stages: Map<string, PipelineStage[]>;

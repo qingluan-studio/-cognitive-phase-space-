@@ -576,6 +576,463 @@ export class ClinicalPsychology {
     for (const t of tools) this._assessmentTools.set(t.name, t);
   }
 
+  /** Compute a clinical severity score. */
+  clinicalSeverity(symptoms: { name: string; severity: number; frequency: number }[]): number {
+    if (symptoms.length === 0) return 0;
+    const weighted = symptoms.reduce((s, sym) => s + sym.severity * sym.frequency, 0);
+    return Number(Math.min(100, weighted / symptoms.length).toFixed(2));
+  }
+
+  /** Determine the level of care needed based on severity. */
+  levelOfCare(severityScore: number, suicideRisk: number, functioningImpairment: number): 'outpatient' | 'intensive-outpatient' | 'partial-hospitalization' | 'inpatient' | 'emergency' {
+    if (suicideRisk > 0.7 || severityScore > 90) return 'emergency';
+    if (severityScore > 70 || functioningImpairment > 0.7) return 'inpatient';
+    if (severityScore > 50 || functioningImpairment > 0.5) return 'partial-hospitalization';
+    if (severityScore > 30) return 'intensive-outpatient';
+    return 'outpatient';
+  }
+
+  /** Compute suicide risk assessment. */
+  suicideRiskAssessment(ideation: boolean, plan: boolean, means: boolean, intent: boolean, history: boolean, substances: boolean): { risk: number; level: 'low' | 'moderate' | 'high' | 'very-high' } {
+    let risk = 0;
+    if (ideation) risk += 0.15;
+    if (plan) risk += 0.25;
+    if (means) risk += 0.2;
+    if (intent) risk += 0.2;
+    if (history) risk += 0.15;
+    if (substances) risk += 0.1;
+    risk = Math.min(1, risk);
+    let level: 'low' | 'moderate' | 'high' | 'very-high';
+    if (risk < 0.25) level = 'low';
+    else if (risk < 0.5) level = 'moderate';
+    else if (risk < 0.75) level = 'high';
+    else level = 'very-high';
+    return { risk: Number(risk.toFixed(2)), level };
+  }
+
+  /** Compute a Global Assessment of Functioning (GAF) score. */
+  gafScore(symptomSeverity: number, functioningLevel: number): number {
+    const gaf = 100 - (symptomSeverity * 50 + (1 - functioningLevel) * 50);
+    return Math.max(1, Math.min(100, Math.round(gaf)));
+  }
+
+  /** Compute therapeutic alliance strength. */
+  therapeuticAlliance(agreement: number, empathy: number, collaboration: number): number {
+    return Number(((agreement + empathy + collaboration) / 3).toFixed(2));
+  }
+
+  /** Compute treatment adherence. */
+  treatmentAdherence(scheduledSessions: number, attendedSessions: number, medicationAdherence: number): number {
+    if (scheduledSessions === 0) return 0;
+    const sessionAdherence = attendedSessions / scheduledSessions;
+    return Number(((sessionAdherence + medicationAdherence) / 2).toFixed(2));
+  }
+
+  /** Predict treatment response. */
+  predictTreatmentResponse(diagnosis: string, severity: number, durationMonths: number, priorEpisodes: number, supportSystem: number): { response: number; remissionProbability: number } {
+    let response = 0.5;
+    response -= severity * 0.2;
+    response -= Math.min(0.2, durationMonths / 60);
+    response -= Math.min(0.15, priorEpisodes * 0.05);
+    response += supportSystem * 0.2;
+    if (diagnosis === 'depression') response += 0.1;
+    response = Math.max(0.1, Math.min(0.95, response));
+    return {
+      response: Number(response.toFixed(2)),
+      remissionProbability: Number(Math.max(0, response - 0.1).toFixed(2)),
+    };
+  }
+
+  /** Compute relapse risk. */
+  relapseRisk(severityHistory: number[], treatmentAdherence: number, stressLevel: number, supportSystem: number): number {
+    if (severityHistory.length === 0) return 0;
+    const avgSeverity = severityHistory.reduce((s, v) => s + v, 0) / severityHistory.length;
+    let risk = avgSeverity * 0.3;
+    risk += (1 - treatmentAdherence) * 0.3;
+    risk += stressLevel * 0.25;
+    risk += (1 - supportSystem) * 0.15;
+    return Number(Math.min(1, risk).toFixed(2));
+  }
+
+  /** Recommend a treatment plan. */
+  recommendTreatmentPlan(diagnosis: string, severity: number, patientPreferences: string[]): { therapy: string; medication: string; frequency: string } {
+    let therapy = 'cognitive-behavioral-therapy';
+    let medication = 'none';
+    let frequency = 'weekly';
+    if (diagnosis === 'depression' && severity > 50) {
+      therapy = 'cognitive-behavioral-therapy';
+      medication = 'ssri';
+      frequency = 'twice-weekly';
+    } else if (diagnosis === 'anxiety') {
+      therapy = 'exposure-therapy';
+      medication = severity > 50 ? 'ssri' : 'none';
+    } else if (diagnosis === 'bipolar') {
+      therapy = 'interpersonal-social-rhythm-therapy';
+      medication = 'mood-stabilizer';
+      frequency = 'twice-weekly';
+    } else if (diagnosis === 'schizophrenia') {
+      therapy = 'cognitive-behavioral-therapy-for-psychosis';
+      medication = 'antipsychotic';
+      frequency = 'weekly';
+    } else if (diagnosis === 'ptsd') {
+      therapy = 'trauma-focused-cbt';
+      medication = 'ssri';
+    }
+    if (patientPreferences.includes('mindfulness')) therapy = 'mindfulness-based-cognitive-therapy';
+    if (patientPreferences.includes('group')) frequency = 'group-weekly';
+    return { therapy, medication, frequency };
+  }
+
+  /** Compute comorbidity burden. */
+  comorbidityBurden(diagnoses: string[]): { count: number; severityMultiplier: number; treatmentComplexity: number } {
+    const count = diagnoses.length;
+    const severityMultiplier = 1 + (count - 1) * 0.2;
+    const treatmentComplexity = Math.min(1, count * 0.25);
+    return { count, severityMultiplier: Number(severityMultiplier.toFixed(2)), treatmentComplexity };
+  }
+
+  /** Compute medication efficacy. */
+  medicationEfficacy(medication: string, diagnosis: string, dose: number, weeks: number): number {
+    const efficacyMap: Record<string, Record<string, number>> = {
+      'ssri': { 'depression': 0.6, 'anxiety': 0.55, 'ptsd': 0.45, 'ocd': 0.5 },
+      'antipsychotic': { 'schizophrenia': 0.65, 'bipolar': 0.55 },
+      'mood-stabilizer': { 'bipolar': 0.6 },
+      'stimulant': { 'adhd': 0.7 },
+    };
+    const baseEfficacy = efficacyMap[medication]?.[diagnosis] ?? 0.3;
+    const doseFactor = Math.min(1, dose / 50);
+    const timeFactor = Math.min(1, weeks / 8);
+    return Number((baseEfficacy * doseFactor * timeFactor).toFixed(2));
+  }
+
+  /** Compute side-effect burden. */
+  sideEffectBurden(medication: string, dose: number, durationWeeks: number): number {
+    const sideEffectBase: Record<string, number> = {
+      'ssri': 0.3,
+      'antipsychotic': 0.5,
+      'mood-stabilizer': 0.4,
+      'stimulant': 0.35,
+      'benzodiazepine': 0.45,
+    };
+    const base = sideEffectBase[medication] ?? 0.2;
+    const doseFactor = Math.min(1.5, dose / 40);
+    const timeFactor = Math.min(1.3, durationWeeks / 12);
+    return Number(Math.min(1, base * doseFactor * timeFactor).toFixed(2));
+  }
+
+  /** Compute the pharmacokinetic profile. */
+  pharmacokineticProfile(medication: string): { halfLife: number; onsetDays: number; steadyStateDays: number } {
+    const profiles: Record<string, { halfLife: number; onsetDays: number; steadyStateDays: number }> = {
+      'fluoxetine': { halfLife: 7, onsetDays: 14, steadyStateDays: 28 },
+      'sertraline': { halfLife: 1, onsetDays: 14, steadyStateDays: 7 },
+      'escitalopram': { halfLife: 1.5, onsetDays: 14, steadyStateDays: 7 },
+      'risperidone': { halfLife: 0.75, onsetDays: 7, steadyStateDays: 5 },
+      'olanzapine': { halfLife: 1.5, onsetDays: 7, steadyStateDays: 7 },
+      'lithium': { halfLife: 1, onsetDays: 7, steadyStateDays: 5 },
+    };
+    return profiles[medication] ?? { halfLife: 1, onsetDays: 14, steadyStateDays: 7 };
+  }
+
+  /** Compute diagnostic confidence. */
+  diagnosticConfidence(symptomsPresent: number, symptomsRequired: number, durationMet: boolean, exclusionMet: boolean): number {
+    const symptomRatio = symptomsPresent / Math.max(1, symptomsRequired);
+    let confidence = symptomRatio * 0.5;
+    if (durationMet) confidence += 0.25;
+    if (exclusionMet) confidence += 0.25;
+    return Number(Math.min(1, confidence).toFixed(2));
+  }
+
+  /** Compute differential diagnosis scores. */
+  differentialDiagnosis(presentingSymptoms: string[], candidateDisorders: { name: string; symptoms: string[] }[]): { disorder: string; matchScore: number }[] {
+    return candidateDisorders.map(d => {
+      const matches = d.symptoms.filter(s => presentingSymptoms.includes(s)).length;
+      const matchScore = matches / Math.max(1, d.symptoms.length);
+      return { disorder: d.name, matchScore: Number(matchScore.toFixed(2)) };
+    }).sort((a, b) => b.matchScore - a.matchScore);
+  }
+
+  /** Compute treatment duration estimate. */
+  treatmentDurationEstimate(diagnosis: string, severity: number, chronicity: number): number {
+    const baseWeeks: Record<string, number> = {
+      'depression': 16,
+      'anxiety': 12,
+      'ptsd': 24,
+      'ocd': 20,
+      'bipolar': 52,
+      'schizophrenia': 104,
+    };
+    const base = baseWeeks[diagnosis] ?? 12;
+    const severityFactor = 1 + severity / 100;
+    const chronicityFactor = 1 + chronicity;
+    return Math.round(base * severityFactor * chronicityFactor);
+  }
+
+  /** Compute cost-effectiveness of treatment. */
+  treatmentCostEffectiveness(efficacy: number, costPerSession: number, sessionsNeeded: number, qualityOfLifeGain: number): number {
+    const totalCost = costPerSession * sessionsNeeded;
+    if (totalCost === 0) return 0;
+    return Number(((efficacy * qualityOfLifeGain) / (totalCost / 1000)).toFixed(4));
+  }
+
+  /** Generate a clinical case formulation. */
+  caseFormulation(presenting: string[], predisposing: string[], precipitating: string[], perpetuating: string[], protective: string[]): Record<string, unknown> {
+    return {
+      presentingProblem: presenting.join('; '),
+      predisposingFactors: predisposing.join('; '),
+      precipitatingFactors: precipitating.join('; '),
+      perpetuatingFactors: perpetuating.join('; '),
+      protectiveFactors: protective.join('; '),
+      formulation: `5-P formulation integrating ${predisposing.length} predisposing, ${precipitating.length} precipitating, and ${perpetuating.length} perpetuating factors.`,
+    };
+  }
+
+  /** Compute trauma exposure score. */
+  traumaExposureScore(exposures: { type: string; severity: number; ageAtExposure: number }[]): number {
+    if (exposures.length === 0) return 0;
+    const totalSeverity = exposures.reduce((s, e) => s + e.severity * (1 + (18 - Math.min(18, e.ageAtExposure)) / 18), 0);
+    return Number(Math.min(100, totalSeverity).toFixed(2));
+  }
+
+  /** Compute resilience score. */
+  resilienceScore(protectiveFactors: { factor: string; strength: number }[]): number {
+    if (protectiveFactors.length === 0) return 0;
+    return Number(Math.min(100, protectiveFactors.reduce((s, f) => s + f.strength, 0) / protectiveFactors.length * 100).toFixed(2));
+  }
+
+  /** Compute the dose-response relationship. */
+  doseResponseRelationship(sessionsAttended: number, outcomeMeasure: number[]): { optimalSessions: number; diminishingReturns: number } {
+    if (outcomeMeasure.length < 2) return { optimalSessions: 0, diminishingReturns: 0 };
+    let bestImprovement = 0;
+    let bestSession = 0;
+    for (let i = 1; i < outcomeMeasure.length; i++) {
+      const improvement = outcomeMeasure[i] - outcomeMeasure[i - 1];
+      if (improvement > bestImprovement) {
+        bestImprovement = improvement;
+        bestSession = i;
+      }
+    }
+    const diminishingReturns = bestSession < sessionsAttended ? Number(((sessionsAttended - bestSession) / sessionsAttended).toFixed(2)) : 0;
+    return { optimalSessions: bestSession, diminishingReturns };
+  }
+
+  /** Compute the working alliance inventory score. */
+  workingAllianceScore(goalAgreement: number, taskAgreement: number, bondStrength: number): number {
+    return Number(((goalAgreement + taskAgreement + bondStrength) / 3).toFixed(2));
+  }
+
+  /** Detect treatment resistance. */
+  isTreatmentResistant(trialsAttempted: number, adequateDose: boolean, adequateDuration: boolean, responseRate: number): boolean {
+    return trialsAttempted >= 2 && adequateDose && adequateDuration && responseRate < 0.3;
+  }
+
+  /** Compute the therapeutic breakthrough probability. */
+  breakthroughProbability(sessionNumber: number, alliance: number, homework: number): number {
+    const sessionFactor = Math.min(1, sessionNumber / 8);
+    return Number(((sessionFactor + alliance + homework) / 3).toFixed(2));
+  }
+
+  /** Compute psychotropic polypharmacy risk. */
+  polypharmacyRisk(medications: string[]): { risk: number; interactions: number } {
+    const risk = Math.min(1, medications.length * 0.2);
+    const interactions = medications.length > 1 ? (medications.length * (medications.length - 1)) / 2 : 0;
+    return { risk: Number(risk.toFixed(2)), interactions };
+  }
+
+  /** Compute hospitalization necessity. */
+  hospitalizationNecessity(dangerToSelf: number, dangerToOthers: number, graveDisability: number, inabilityToCare: number): { necessary: boolean; urgency: 'routine' | 'urgent' | 'emergency' } {
+    const total = Math.max(dangerToSelf, dangerToOthers, graveDisability, inabilityToCare);
+    if (dangerToSelf > 0.7 || dangerToOthers > 0.7) return { necessary: true, urgency: 'emergency' };
+    if (total > 0.5) return { necessary: true, urgency: 'urgent' };
+    if (total > 0.3) return { necessary: false, urgency: 'routine' };
+    return { necessary: false, urgency: 'routine' };
+  }
+
+  /** Compute the recovery capital. */
+  recoveryCapital(internal: number, external: number, social: number, cultural: number): number {
+    return Number(((internal + external + social + cultural) / 4).toFixed(2));
+  }
+
+  /** Generate a treatment outcome report. */
+  outcomeReport(baselineSeverity: number, currentSeverity: number, functioningBaseline: number, functioningCurrent: number): Record<string, unknown> {
+    const symptomReduction = baselineSeverity > 0 ? ((baselineSeverity - currentSeverity) / baselineSeverity) : 0;
+    const functioningImprovement = functioningCurrent - functioningBaseline;
+    return {
+      symptomReduction: Number(symptomReduction.toFixed(2)),
+      functioningImprovement: Number(functioningImprovement.toFixed(2)),
+      response: symptomReduction >= 0.5,
+      remission: currentSeverity < 20,
+      recovery: currentSeverity < 10 && functioningCurrent > 0.8,
+    };
+  }
+
+  /** Compute the stage of change (Transtheoretical Model). */
+  stageOfChange(behavior: string, intentionStrength: number, actionTaken: boolean, actionDuration: number): 'precontemplation' | 'contemplation' | 'preparation' | 'action' | 'maintenance' {
+    if (actionTaken && actionDuration > 180) return 'maintenance';
+    if (actionTaken && actionDuration > 30) return 'action';
+    if (intentionStrength > 0.7) return 'preparation';
+    if (intentionStrength > 0.3) return 'contemplation';
+    return 'precontemplation';
+  }
+
+  /** Compute the chance of sustained recovery. */
+  sustainedRecoveryProbability(abstinenceDuration: number, supportSystem: number, copingSkills: number, triggerExposure: number): number {
+    const durationFactor = Math.min(1, abstinenceDuration / 365);
+    const triggerFactor = 1 - triggerExposure;
+    return Number(((durationFactor + supportSystem + copingSkills + triggerFactor) / 4).toFixed(2));
+  }
+
+  /** Compute the trauma-informed care adherence. */
+  traumaInformedCareAdherence(practices: { practice: string; implemented: boolean }[]): number {
+    if (practices.length === 0) return 0;
+    const implemented = practices.filter(p => p.implemented).length;
+    return Number((implemented / practices.length).toFixed(2));
+  }
+
+  /** Compute the cultural competence score. */
+  culturalCompetenceScore(awareness: number, knowledge: number, skills: number, encounters: number): number {
+    const encounterFactor = Math.min(1, encounters / 100);
+    return Number(((awareness + knowledge + skills + encounterFactor) / 4).toFixed(2));
+  }
+
+  /** Generate a comprehensive clinical summary. */
+  clinicalSummary(diagnosis: string, severity: number, gaf: number, riskLevel: string, treatmentPlan: string[]): Record<string, unknown> {
+    return {
+      diagnosis,
+      severity,
+      gaf,
+      riskLevel,
+      treatmentPlan,
+      recommendedLevel: this.levelOfCare(severity, riskLevel === 'high' ? 0.6 : 0.2, 1 - gaf / 100),
+      expectedDuration: this.treatmentDurationEstimate(diagnosis, severity, 0),
+      prognosis: severity < 30 ? 'good' : severity < 60 ? 'fair' : 'guarded',
+    };
+  }
+
+  /** Compute evidence-based practice adherence. */
+  evidenceBasedAdherence(diagnosis: string, prescribedTherapy: string, prescribedMedication: string): number {
+    const evidenceMap: Record<string, { therapy: string; medication: string }> = {
+      'depression': { therapy: 'cognitive-behavioral-therapy', medication: 'ssri' },
+      'anxiety': { therapy: 'exposure-therapy', medication: 'ssri' },
+      'ptsd': { therapy: 'trauma-focused-cbt', medication: 'ssri' },
+      'ocd': { therapy: 'exposure-response-prevention', medication: 'ssri' },
+      'bipolar': { therapy: 'interpersonal-social-rhythm-therapy', medication: 'mood-stabilizer' },
+      'schizophrenia': { therapy: 'cognitive-behavioral-therapy-for-psychosis', medication: 'antipsychotic' },
+    };
+    const evidence = evidenceMap[diagnosis];
+    if (!evidence) return 0;
+    let score = 0;
+    if (prescribedTherapy === evidence.therapy) score += 0.5;
+    if (prescribedMedication === evidence.medication) score += 0.5;
+    return score;
+  }
+
+  /** Compute the therapeutic dose (sessions). */
+  therapeuticDose(diagnosis: string, severity: number): number {
+    const baseDose: Record<string, number> = {
+      'depression': 16,
+      'anxiety': 12,
+      'ptsd': 24,
+      'ocd': 20,
+    };
+    const base = baseDose[diagnosis] ?? 12;
+    return Math.round(base * (1 + severity / 100));
+  }
+
+  /** Compute the no-show probability. */
+  noShowProbability(priorNoShows: number, distance: number, transportationAccess: number, reminderSystem: boolean): number {
+    let probability = 0.1;
+    probability += priorNoShows * 0.05;
+    probability += distance / 100;
+    probability -= transportationAccess * 0.1;
+    if (reminderSystem) probability -= 0.05;
+    return Number(Math.max(0, Math.min(1, probability)).toFixed(2));
+  }
+
+  /** Compute the engagement score. */
+  engagementScore(sessionAttendance: number, homeworkCompletion: number, therapeuticAlliance: number, activeParticipation: number): number {
+    return Number(((sessionAttendance + homeworkCompletion + therapeuticAlliance + activeParticipation) / 4).toFixed(2));
+  }
+
+  /** Compute the burnout risk for clinicians. */
+  clinicianBurnoutRisk(caseload: number, hoursPerWeek: number, emotionalExhaustion: number, depersonalization: number): number {
+    const workloadFactor = Math.min(1, (caseload / 50 + hoursPerWeek / 60) / 2);
+    return Number(((workloadFactor + emotionalExhaustion + depersonalization) / 3).toFixed(2));
+  }
+
+  /** Compute the supervision effectiveness. */
+  supervisionEffectiveness(frequency: number, quality: number, supervisorExperience: number): number {
+    const frequencyScore = Math.min(1, frequency / 4);
+    return Number(((frequencyScore + quality + supervisorExperience) / 3).toFixed(2));
+  }
+
+  /** Compute the continuing education impact. */
+  continuingEducationImpact(hoursCompleted: number, relevanceScore: number, applicationScore: number): number {
+    const hoursScore = Math.min(1, hoursCompleted / 40);
+    return Number(((hoursScore + relevanceScore + applicationScore) / 3).toFixed(2));
+  }
+
+  /** Generate a treatment plan review. */
+  treatmentPlanReview(plan: { goals: string[]; interventions: string[]; progress: number[] }): Record<string, unknown> {
+    const avgProgress = plan.progress.reduce((s, p) => s + p, 0) / Math.max(1, plan.progress.length);
+    const goalsMet = plan.progress.filter(p => p >= 0.8).length;
+    return {
+      totalGoals: plan.goals.length,
+      goalsMet,
+      averageProgress: Number(avgProgress.toFixed(2)),
+      needsRevision: avgProgress < 0.3,
+      recommendedActions: avgProgress < 0.3 ? ['reassess-goals', 'modify-interventions', 'increase-frequency'] : ['continue-plan'],
+    };
+  }
+
+  /** Compute the family systems assessment. */
+  familySystemsAssessment(communication: number, boundaries: number, roles: number, adaptability: number): { health: number; patterns: string[] } {
+    const health = (communication + boundaries + roles + adaptability) / 4;
+    const patterns: string[] = [];
+    if (communication < 0.4) patterns.push('poor-communication');
+    if (boundaries < 0.4) patterns.push('enmeshment-or-disengagement');
+    if (roles < 0.4) patterns.push('rigid-roles');
+    if (adaptability < 0.4) patterns.push('inflexible');
+    return { health: Number(health.toFixed(2)), patterns };
+  }
+
+  /** Compute the group cohesion score. */
+  groupCohesionScore(memberRatings: number[], attendanceRate: number): number {
+    if (memberRatings.length === 0) return 0;
+    const avgRating = memberRatings.reduce((s, r) => s + r, 0) / memberRatings.length;
+    return Number(((avgRating + attendanceRate) / 2).toFixed(2));
+  }
+
+  /** Compute the confidentiality breach risk. */
+  confidentialityBreachRisk(recordsSystem: string, accessControls: number, staffTraining: number, auditFrequency: number): number {
+    let risk = 0.5;
+    risk -= accessControls * 0.2;
+    risk -= staffTraining * 0.15;
+    risk -= Math.min(0.15, auditFrequency / 12);
+    if (recordsSystem === 'paper') risk += 0.1;
+    return Number(Math.max(0, Math.min(1, risk)).toFixed(2));
+  }
+
+  /** Compute the informed consent comprehension. */
+  informedConsentComprehension(explained: boolean, questionsAnswered: boolean, patientRestated: boolean, capacityAssessed: boolean): number {
+    let score = 0;
+    if (explained) score += 0.25;
+    if (questionsAnswered) score += 0.25;
+    if (patientRestated) score += 0.25;
+    if (capacityAssessed) score += 0.25;
+    return score;
+  }
+
+  /** Compute the mandatory reporting requirements. */
+  mandatoryReporting(childAbuse: boolean, elderAbuse: boolean, domesticViolence: boolean, suicidalIdeation: boolean, homicidalIdeation: boolean): { reportable: boolean; type: string[] } {
+    const type: string[] = [];
+    if (childAbuse) type.push('child-abuse');
+    if (elderAbuse) type.push('elder-abuse');
+    if (domesticViolence) type.push('domestic-violence');
+    if (suicidalIdeation) type.push('danger-to-self');
+    if (homicidalIdeation) type.push('danger-to-others');
+    return { reportable: type.length > 0, type };
+  }
+
   toPacket(): DataPacket<{
     disorders: number;
     assessments: Assessment[];

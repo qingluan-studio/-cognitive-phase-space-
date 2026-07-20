@@ -2,656 +2,694 @@ import { DataPacket } from '../shared/types';
 
 export interface DataLineageNode {
   id: string;
+  type: 'source' | 'transformation' | 'sink' | 'merge' | 'split' | 'validation' | 'annotation';
   name: string;
-  type: 'source' | 'transform' | 'sink' | 'model' | 'report';
-  system: string;
+  description: string;
+  metadata: Record<string, unknown>;
   timestamp: number;
-  attributes: Record<string, unknown>;
-  inputs: string[];
-  outputs: string[];
+  owner: string;
+  tags: string[];
+  checksum: string;
 }
 
 export interface LineageEdge {
   id: string;
-  from: string;
-  to: string;
-  type: 'data_flow' | 'dependency' | 'reference' | 'derived_from';
+  sourceId: string;
+  targetId: string;
+  type: 'data-flow' | 'dependency' | 'reference' | 'derived-from' | 'transformed-into';
+  properties: Record<string, unknown>;
   timestamp: number;
-  dataFormat: string;
-  volume: number;
-  quality: number;
+  confidence: number;
 }
 
 export interface CrossSystemLink {
   id: string;
-  systemA: string;
-  systemB: string;
-  entityType: string;
-  entityIdA: string;
-  entityIdB: string;
-  correlationConfidence: number;
-  lastSync: number;
-  syncDirection: 'a_to_b' | 'b_to_a' | 'bidirectional';
-  mappingRules: Record<string, string>;
+  sourceSystem: string;
+  targetSystem: string;
+  sourceEntity: string;
+  targetEntity: string;
+  linkType: 'sync' | 'reference' | 'import' | 'export' | 'mirror';
+  lastSyncTime: number;
+  syncFrequency: number;
+  status: 'active' | 'inactive' | 'error' | 'pending';
+  metadata: Record<string, unknown>;
 }
 
 export interface TraceRecord {
   id: string;
   traceId: string;
-  entityId: string;
-  eventType: string;
   timestamp: number;
-  system: string;
-  actor: string;
-  action: string;
-  beforeState: Record<string, unknown>;
-  afterState: Record<string, unknown>;
+  operation: string;
+  inputIds: string[];
+  outputIds: string[];
+  duration: number;
+  status: 'success' | 'failure' | 'partial';
+  errorMessage?: string;
   metadata: Record<string, unknown>;
 }
 
 export interface ImpactAnalysisResult {
   targetId: string;
-  upstreamNodes: { id: string; name: string; distance: number; impactScore: number }[];
-  downstreamNodes: { id: string; name: string; distance: number; impactScore: number }[];
-  affectedSystems: string[];
-  riskLevel: 'low' | 'medium' | 'high' | 'critical';
-  estimatedImpact: number;
+  impactedNodes: DataLineageNode[];
+  impactedEdges: LineageEdge[];
+  depth: number;
+  upstreamCount: number;
+  downstreamCount: number;
+  riskScore: number;
+  recommendations: string[];
 }
 
-export interface DigitalThreadResult {
-  lineageNodes: DataLineageNode[];
-  lineageEdges: LineageEdge[];
-  crossSystemLinks: CrossSystemLink[];
-  traceRecords: TraceRecord[];
-  impactAnalyses: ImpactAnalysisResult[];
-  totalNodes: number;
-  totalEdges: number;
-  tracedEntities: number;
-  threadCoverage: number;
+export interface LineageQuery {
+  nodeId?: string;
+  nodeType?: string;
+  timeRange?: { start: number; end: number };
+  tags?: string[];
+  owner?: string;
+  maxDepth?: number;
+  direction: 'upstream' | 'downstream' | 'both';
+}
+
+export interface DataQualityMetric {
+  nodeId: string;
+  completeness: number;
+  accuracy: number;
+  consistency: number;
+  timeliness: number;
+  validity: number;
+  uniqueness: number;
+  overallScore: number;
+  lastAssessed: number;
+}
+
+export interface ProvenanceRecord {
+  id: string;
+  entityId: string;
+  agent: string;
+  activity: string;
+  generatedAt: number;
+  usedEntities: string[];
+  derivedFrom: string[];
+  attributes: Record<string, unknown>;
 }
 
 export class DigitalThread {
-  private _lineageNodes: Map<string, DataLineageNode> = new Map();
-  private _lineageEdges: Map<string, LineageEdge> = new Map();
+  private _nodes: Map<string, DataLineageNode> = new Map();
+  private _edges: Map<string, LineageEdge> = new Map();
   private _crossSystemLinks: Map<string, CrossSystemLink> = new Map();
-  private _traceRecords: Map<string, TraceRecord[]> = new Map();
-  private _impactAnalyses: Map<string, ImpactAnalysisResult> = new Map();
+  private _traceRecords: Map<string, TraceRecord> = new Map();
+  private _lastResult: ImpactAnalysisResult | null = null;
   private _counter: number = 0;
-  private _lastResult: DigitalThreadResult | null = null;
-  private _systemRegistry: Map<string, {
-    name: string;
-    type: string;
-    status: 'active' | 'inactive' | 'deprecated';
-  }> = new Map();
-  private _dataCatalog: Map<string, {
-    name: string;
-    description: string;
-    owner: string;
-    classification: string;
-    sensitivity: 'public' | 'internal' | 'confidential' | 'restricted';
-  }> = new Map();
-  private _threadStats: {
-    totalTraces: number;
-    totalNodes: number;
-    totalEdges: number;
-    avgPathLength: number;
-    coverage: number;
-  } = {
-    totalTraces: 0,
-    totalNodes: 0,
-    totalEdges: 0,
-    avgPathLength: 0,
-    coverage: 0,
-  };
-  private _semanticModels: Map<string, {
-    name: string;
-    entities: string[];
-    relationships: { from: string; to: string; type: string }[];
-  }> = new Map();
+  private _qualityMetrics: Map<string, DataQualityMetric> = new Map();
+  private _provenanceRecords: Map<string, ProvenanceRecord> = new Map();
+  private _autoTrace: boolean = true;
+  private _maxTraceDepth: number = 10;
+  private _indexByTag: Map<string, Set<string>> = new Map();
+  private _indexByOwner: Map<string, Set<string>> = new Map();
+  private _indexByType: Map<string, Set<string>> = new Map();
+  private _graphCache: Map<string, { nodes: string[]; edges: string[]; timestamp: number }> = new Map();
+  private _cacheTTL: number = 300000;
+  private _changeListeners: ((event: string, nodeId: string) => void)[] = [];
+  private _auditLog: { timestamp: number; action: string; entityId: string; details: string }[] = [];
 
-  constructor() {
-    this._initSystemRegistry();
-    this._initDataCatalog();
-    this._initSemanticModels();
+  get nodes(): Map<string, DataLineageNode> {
+    return new Map(this._nodes);
   }
 
-  private _initSystemRegistry(): void {
-    const systems = [
-      { name: 'erp', config: { type: 'enterprise_resource_planning', status: 'active' as const } },
-      { name: 'mes', config: { type: 'manufacturing_execution_system', status: 'active' as const } },
-      { name: 'scada', config: { type: 'supervisory_control', status: 'active' as const } },
-      { name: 'plm', config: { type: 'product_lifecycle_management', status: 'active' as const } },
-      { name: 'crm', config: { type: 'customer_relationship_management', status: 'active' as const } },
-      { name: 'cmms', config: { type: 'computerized_maintenance', status: 'active' as const } },
-      { name: 'lims', config: { type: 'laboratory_information', status: 'active' as const } },
-      { name: 'data_warehouse', config: { type: 'analytics', status: 'active' as const } },
-    ];
-    systems.forEach(s => this._systemRegistry.set(s.name, s.config));
+  get edges(): Map<string, LineageEdge> {
+    return new Map(this._edges);
   }
 
-  private _initDataCatalog(): void {
-    const datasets = [
-      {
-        name: 'sensor_data',
-        catalog: {
-          description: 'Real-time sensor readings from equipment',
-          owner: 'iot_team',
-          classification: 'time_series',
-          sensitivity: 'internal' as const,
-        },
-      },
-      {
-        name: 'production_records',
-        catalog: {
-          description: 'Manufacturing production records and quality data',
-          owner: 'production_team',
-          classification: 'transactional',
-          sensitivity: 'confidential' as const,
-        },
-      },
-      {
-        name: 'maintenance_logs',
-        catalog: {
-          description: 'Equipment maintenance history and work orders',
-          owner: 'maintenance_team',
-          classification: 'operational',
-          sensitivity: 'internal' as const,
-        },
-      },
-      {
-        name: 'quality_inspections',
-        catalog: {
-          description: 'Quality inspection results and defect data',
-          owner: 'quality_team',
-          classification: 'quality',
-          sensitivity: 'confidential' as const,
-        },
-      },
-    ];
-    datasets.forEach(d => this._dataCatalog.set(d.name, d.catalog));
+  get crossSystemLinks(): Map<string, CrossSystemLink> {
+    return new Map(this._crossSystemLinks);
   }
 
-  private _initSemanticModels(): void {
-    const models = [
-      {
-        name: 'equipment_model',
-        model: {
-          entities: ['Equipment', 'Sensor', 'MaintenanceRecord', 'Failure'],
-          relationships: [
-            { from: 'Equipment', to: 'Sensor', type: 'has_sensor' },
-            { from: 'Equipment', to: 'MaintenanceRecord', type: 'has_maintenance' },
-            { from: 'Equipment', to: 'Failure', type: 'experiences' },
-          ],
-        },
-      },
-      {
-        name: 'product_model',
-        model: {
-          entities: ['Product', 'BOM', 'Process', 'QualityCheck'],
-          relationships: [
-            { from: 'Product', to: 'BOM', type: 'has_bill_of_materials' },
-            { from: 'Product', to: 'Process', type: 'manufactured_by' },
-            { from: 'Process', to: 'QualityCheck', type: 'has_quality_check' },
-          ],
-        },
-      },
-    ];
-    models.forEach(m => this._semanticModels.set(m.name, m.model));
+  get traceRecords(): Map<string, TraceRecord> {
+    return new Map(this._traceRecords);
   }
 
-  get lineageNodes(): DataLineageNode[] {
-    return Array.from(this._lineageNodes.values());
+  get lastResult(): ImpactAnalysisResult | null {
+    return this._lastResult;
   }
 
-  get lineageEdges(): LineageEdge[] {
-    return Array.from(this._lineageEdges.values());
+  get qualityMetrics(): Map<string, DataQualityMetric> {
+    return new Map(this._qualityMetrics);
   }
 
-  get crossSystemLinks(): CrossSystemLink[] {
-    return Array.from(this._crossSystemLinks.values());
+  get provenanceRecords(): Map<string, ProvenanceRecord> {
+    return new Map(this._provenanceRecords);
   }
 
-  get traceRecords(): TraceRecord[] {
-    const all: TraceRecord[] = [];
-    for (const records of this._traceRecords.values()) {
-      all.push(...records);
-    }
-    return all;
+  get autoTrace(): boolean {
+    return this._autoTrace;
   }
 
-  get impactAnalyses(): ImpactAnalysisResult[] {
-    return Array.from(this._impactAnalyses.values());
+  get maxTraceDepth(): number {
+    return this._maxTraceDepth;
   }
 
-  get totalNodes(): number {
-    return this._lineageNodes.size;
+  get nodeCount(): number {
+    return this._nodes.size;
   }
 
-  get totalEdges(): number {
-    return this._lineageEdges.size;
+  get edgeCount(): number {
+    return this._edges.size;
   }
 
-  get tracedEntities(): number {
+  get crossSystemLinkCount(): number {
+    return this._crossSystemLinks.size;
+  }
+
+  get traceRecordCount(): number {
     return this._traceRecords.size;
   }
 
-  get threadStats(): {
-    totalTraces: number;
-    totalNodes: number;
-    totalEdges: number;
-    avgPathLength: number;
-    coverage: number;
-  } {
-    return { ...this._threadStats };
+  setAutoTrace(enabled: boolean): void {
+    this._autoTrace = enabled;
   }
 
-  addLineageNode(
-    name: string,
-    type: 'source' | 'transform' | 'sink' | 'model' | 'report',
-    system: string,
-    attributes: Record<string, unknown> = {}
-  ): DataLineageNode {
-    const id = `node-${Date.now()}-${this._counter++}`;
-    const node: DataLineageNode = {
-      id,
-      name,
-      type,
-      system,
-      timestamp: Date.now(),
-      attributes,
-      inputs: [],
-      outputs: [],
-    };
-    this._lineageNodes.set(id, node);
-    this._threadStats.totalNodes++;
-    return node;
+  setMaxTraceDepth(depth: number): void {
+    this._maxTraceDepth = depth;
   }
 
-  addLineageEdge(
-    fromId: string,
-    toId: string,
-    type: 'data_flow' | 'dependency' | 'reference' | 'derived_from',
-    params: {
-      dataFormat?: string;
-      volume?: number;
-      quality?: number;
-    } = {}
-  ): LineageEdge | null {
-    const fromNode = this._lineageNodes.get(fromId);
-    const toNode = this._lineageNodes.get(toId);
-    if (!fromNode || !toNode) return null;
-    const id = `edge-${Date.now()}-${this._counter++}`;
-    const edge: LineageEdge = {
-      id,
-      from: fromId,
-      to: toId,
-      type,
-      timestamp: Date.now(),
-      dataFormat: params.dataFormat ?? 'json',
-      volume: params.volume ?? 0,
-      quality: params.quality ?? 0.95,
-    };
-    this._lineageEdges.set(id, edge);
-    fromNode.outputs.push(toId);
-    toNode.inputs.push(fromId);
-    this._threadStats.totalEdges++;
-    return edge;
+  setCacheTTL(ttl: number): void {
+    this._cacheTTL = ttl;
   }
 
-  addCrossSystemLink(
-    systemA: string,
-    systemB: string,
-    entityType: string,
-    entityIdA: string,
-    entityIdB: string,
-    params: {
-      correlationConfidence?: number;
-      syncDirection?: 'a_to_b' | 'b_to_a' | 'bidirectional';
-      mappingRules?: Record<string, string>;
-    } = {}
-  ): CrossSystemLink {
-    const id = `link-${Date.now()}-${this._counter++}`;
-    const link: CrossSystemLink = {
-      id,
-      systemA,
-      systemB,
-      entityType,
-      entityIdA,
-      entityIdB,
-      correlationConfidence: params.correlationConfidence ?? 0.9,
-      lastSync: Date.now(),
-      syncDirection: params.syncDirection ?? 'bidirectional',
-      mappingRules: params.mappingRules ?? {},
-    };
+  addNode(node: DataLineageNode): void {
+    this._nodes.set(node.id, node);
+    this._indexNode(node);
+    this._notifyListeners('node-added', node.id);
+    this._audit('add-node', node.id, `Added node ${node.name}`);
+  }
+
+  removeNode(id: string): boolean {
+    const removed = this._nodes.delete(id);
+    if (removed) {
+      this._unindexNode(id);
+      const edgesToRemove = Array.from(this._edges.values()).filter(e => e.sourceId === id || e.targetId === id);
+      for (const edge of edgesToRemove) {
+        this._edges.delete(edge.id);
+      }
+      this._qualityMetrics.delete(id);
+      this._notifyListeners('node-removed', id);
+      this._audit('remove-node', id, 'Removed node and associated edges');
+    }
+    return removed;
+  }
+
+  updateNode(id: string, updates: Partial<DataLineageNode>): boolean {
+    const node = this._nodes.get(id);
+    if (!node) return false;
+    this._unindexNode(id);
+    const updated = { ...node, ...updates, id };
+    this._nodes.set(id, updated);
+    this._indexNode(updated);
+    this._notifyListeners('node-updated', id);
+    this._audit('update-node', id, 'Updated node');
+    return true;
+  }
+
+  private _indexNode(node: DataLineageNode): void {
+    for (const tag of node.tags) {
+      const set = this._indexByTag.get(tag) || new Set();
+      set.add(node.id);
+      this._indexByTag.set(tag, set);
+    }
+
+    const ownerSet = this._indexByOwner.get(node.owner) || new Set();
+    ownerSet.add(node.id);
+    this._indexByOwner.set(node.owner, ownerSet);
+
+    const typeSet = this._indexByType.get(node.type) || new Set();
+    typeSet.add(node.id);
+    this._indexByType.set(node.type, typeSet);
+  }
+
+  private _unindexNode(id: string): void {
+    const node = this._nodes.get(id);
+    if (!node) return;
+
+    for (const tag of node.tags) {
+      const set = this._indexByTag.get(tag);
+      if (set) {
+        set.delete(id);
+        if (set.size === 0) this._indexByTag.delete(tag);
+      }
+    }
+
+    const ownerSet = this._indexByOwner.get(node.owner);
+    if (ownerSet) {
+      ownerSet.delete(id);
+      if (ownerSet.size === 0) this._indexByOwner.delete(node.owner);
+    }
+
+    const typeSet = this._indexByType.get(node.type);
+    if (typeSet) {
+      typeSet.delete(id);
+      if (typeSet.size === 0) this._indexByType.delete(node.type);
+    }
+  }
+
+  addEdge(edge: LineageEdge): void {
+    this._edges.set(edge.id, edge);
+    if (this._autoTrace) {
+      this._recordTrace('edge-created', [edge.sourceId], [edge.targetId], 0, 'success');
+    }
+  }
+
+  removeEdge(id: string): boolean {
+    return this._edges.delete(id);
+  }
+
+  addCrossSystemLink(link: CrossSystemLink): void {
+    this._crossSystemLinks.set(link.id, link);
+  }
+
+  removeCrossSystemLink(id: string): boolean {
+    return this._crossSystemLinks.delete(id);
+  }
+
+  updateCrossSystemLinkStatus(id: string, status: CrossSystemLink['status']): boolean {
+    const link = this._crossSystemLinks.get(id);
+    if (!link) return false;
+    link.status = status;
+    link.lastSyncTime = Date.now();
     this._crossSystemLinks.set(id, link);
-    return link;
+    return true;
   }
 
-  recordTrace(
-    entityId: string,
-    eventType: string,
-    system: string,
-    actor: string,
-    action: string,
-    params: {
-      beforeState?: Record<string, unknown>;
-      afterState?: Record<string, unknown>;
-      metadata?: Record<string, unknown>;
-    } = {}
-  ): TraceRecord {
-    const id = `trace-${Date.now()}-${this._counter++}`;
-    const traceId = `trace-${entityId}-${Date.now()}`;
-    const record: TraceRecord = {
-      id,
-      traceId,
-      entityId,
-      eventType,
-      timestamp: Date.now(),
-      system,
-      actor,
-      action,
-      beforeState: params.beforeState ?? {},
-      afterState: params.afterState ?? {},
-      metadata: params.metadata ?? {},
-    };
-    if (!this._traceRecords.has(entityId)) {
-      this._traceRecords.set(entityId, []);
-    }
-    this._traceRecords.get(entityId)!.push(record);
-    this._threadStats.totalTraces++;
-    return record;
+  addTraceRecord(record: TraceRecord): void {
+    this._traceRecords.set(record.id, record);
   }
 
-  getEntityTraces(entityId: string, limit?: number): TraceRecord[] {
-    const records = this._traceRecords.get(entityId) ?? [];
-    if (limit === undefined) return [...records];
-    return records.slice(-limit);
+  addQualityMetric(metric: DataQualityMetric): void {
+    this._qualityMetrics.set(metric.nodeId, metric);
   }
 
-  getTraceById(traceId: string): TraceRecord | null {
-    for (const records of this._traceRecords.values()) {
-      const record = records.find(r => r.traceId === traceId);
-      if (record) return record;
-    }
-    return null;
+  updateQualityMetric(nodeId: string, updates: Partial<DataQualityMetric>): boolean {
+    const metric = this._qualityMetrics.get(nodeId);
+    if (!metric) return false;
+    this._qualityMetrics.set(nodeId, { ...metric, ...updates, nodeId });
+    return true;
   }
 
-  performImpactAnalysis(targetId: string): ImpactAnalysisResult | null {
-    const target = this._lineageNodes.get(targetId);
-    if (!target) return null;
-    const upstream: { id: string; name: string; distance: number; impactScore: number }[] = [];
-    const downstream: { id: string; name: string; distance: number; impactScore: number }[] = [];
-    const visitedUp = new Set<string>();
-    const visitedDown = new Set<string>();
-    const upstreamQueue: { id: string; distance: number }[] = [];
-    for (const inputId of target.inputs) {
-      if (!visitedUp.has(inputId)) {
-        upstreamQueue.push({ id: inputId, distance: 1 });
-        visitedUp.add(inputId);
-      }
-    }
-    while (upstreamQueue.length > 0) {
-      const { id, distance } = upstreamQueue.shift()!;
-      const node = this._lineageNodes.get(id);
-      if (node) {
-        upstream.push({
-          id,
-          name: node.name,
-          distance,
-          impactScore: 1 / distance,
-        });
-        for (const inputId of node.inputs) {
-          if (!visitedUp.has(inputId)) {
-            upstreamQueue.push({ id: inputId, distance: distance + 1 });
-            visitedUp.add(inputId);
-          }
-        }
-      }
-    }
-    const downstreamQueue: { id: string; distance: number }[] = [];
-    for (const outputId of target.outputs) {
-      if (!visitedDown.has(outputId)) {
-        downstreamQueue.push({ id: outputId, distance: 1 });
-        visitedDown.add(outputId);
-      }
-    }
-    while (downstreamQueue.length > 0) {
-      const { id, distance } = downstreamQueue.shift()!;
-      const node = this._lineageNodes.get(id);
-      if (node) {
-        downstream.push({
-          id,
-          name: node.name,
-          distance,
-          impactScore: 1 / distance,
-        });
-        for (const outputId of node.outputs) {
-          if (!visitedDown.has(outputId)) {
-            downstreamQueue.push({ id: outputId, distance: distance + 1 });
-            visitedDown.add(outputId);
-          }
-        }
-      }
-    }
-    const affectedSystems = new Set<string>();
-    affectedSystems.add(target.system);
-    for (const u of upstream) {
-      const node = this._lineageNodes.get(u.id);
-      if (node) affectedSystems.add(node.system);
-    }
-    for (const d of downstream) {
-      const node = this._lineageNodes.get(d.id);
-      if (node) affectedSystems.add(node.system);
-    }
-    const totalImpact = upstream.length + downstream.length;
-    let riskLevel: 'low' | 'medium' | 'high' | 'critical' = 'low';
-    if (totalImpact > 20) riskLevel = 'critical';
-    else if (totalImpact > 10) riskLevel = 'high';
-    else if (totalImpact > 5) riskLevel = 'medium';
-    const result: ImpactAnalysisResult = {
-      targetId,
-      upstream,
-      downstream,
-      affectedSystems: Array.from(affectedSystems),
-      riskLevel,
-      estimatedImpact: totalImpact,
-    };
-    this._impactAnalyses.set(targetId, result);
-    return result;
+  addProvenanceRecord(record: ProvenanceRecord): void {
+    this._provenanceRecords.set(record.id, record);
   }
 
-  traceLineage(
-    nodeId: string,
-    direction: 'upstream' | 'downstream' | 'both',
-    maxDepth: number = 5
-  ): {
-    nodes: DataLineageNode[];
-    edges: LineageEdge[];
-    depth: number;
-  } {
-    const nodes: Map<string, DataLineageNode> = new Map();
-    const edges: Map<string, LineageEdge> = new Map();
-    const target = this._lineageNodes.get(nodeId);
-    if (!target) return { nodes: [], edges: [], depth: 0 };
-    nodes.set(nodeId, target);
-    let maxDepthReached = 0;
-    if (direction === 'upstream' || direction === 'both') {
-      const queue: { id: string; depth: number }[] = [{ id: nodeId, depth: 0 }];
-      while (queue.length > 0) {
-        const { id, depth } = queue.shift()!;
-        if (depth >= maxDepth) continue;
-        const node = this._lineageNodes.get(id);
-        if (!node) continue;
-        maxDepthReached = Math.max(maxDepthReached, depth);
-        for (const inputId of node.inputs) {
-          if (!nodes.has(inputId)) {
-            const inputNode = this._lineageNodes.get(inputId);
-            if (inputNode) {
-              nodes.set(inputId, inputNode);
-              queue.push({ id: inputId, depth: depth + 1 });
-            }
-          }
-          for (const edge of this._lineageEdges.values()) {
-            if (edge.from === inputId && edge.to === id) {
-              edges.set(edge.id, edge);
-            }
-          }
-        }
-      }
-    }
-    if (direction === 'downstream' || direction === 'both') {
-      const queue: { id: string; depth: number }[] = [{ id: nodeId, depth: 0 }];
-      while (queue.length > 0) {
-        const { id, depth } = queue.shift()!;
-        if (depth >= maxDepth) continue;
-        const node = this._lineageNodes.get(id);
-        if (!node) continue;
-        maxDepthReached = Math.max(maxDepthReached, depth);
-        for (const outputId of node.outputs) {
-          if (!nodes.has(outputId)) {
-            const outputNode = this._lineageNodes.get(outputId);
-            if (outputNode) {
-              nodes.set(outputId, outputNode);
-              queue.push({ id: outputId, depth: depth + 1 });
-            }
-          }
-          for (const edge of this._lineageEdges.values()) {
-            if (edge.from === id && edge.to === outputId) {
-              edges.set(edge.id, edge);
-            }
-          }
-        }
-      }
-    }
-    return {
-      nodes: Array.from(nodes.values()),
-      edges: Array.from(edges.values()),
-      depth: maxDepthReached,
-    };
+  getProvenance(entityId: string): ProvenanceRecord[] {
+    return Array.from(this._provenanceRecords.values()).filter(r => r.entityId === entityId);
   }
 
-  getLineageNode(nodeId: string): DataLineageNode | null {
-    return this._lineageNodes.get(nodeId) ?? null;
+  getNodesByTag(tag: string): DataLineageNode[] {
+    const ids = this._indexByTag.get(tag);
+    if (!ids) return [];
+    return Array.from(ids).map(id => this._nodes.get(id)).filter(Boolean) as DataLineageNode[];
   }
 
-  getCrossSystemLinksForEntity(entityType: string): CrossSystemLink[] {
-    const result: CrossSystemLink[] = [];
-    for (const link of this._crossSystemLinks.values()) {
-      if (link.entityType === entityType) {
-        result.push(link);
-      }
-    }
-    return result;
-  }
-
-  getNodesBySystem(system: string): DataLineageNode[] {
-    const result: DataLineageNode[] = [];
-    for (const node of this._lineageNodes.values()) {
-      if (node.system === system) {
-        result.push(node);
-      }
-    }
-    return result;
+  getNodesByOwner(owner: string): DataLineageNode[] {
+    const ids = this._indexByOwner.get(owner);
+    if (!ids) return [];
+    return Array.from(ids).map(id => this._nodes.get(id)).filter(Boolean) as DataLineageNode[];
   }
 
   getNodesByType(type: string): DataLineageNode[] {
-    const result: DataLineageNode[] = [];
-    for (const node of this._lineageNodes.values()) {
-      if (node.type === type) {
-        result.push(node);
+    const ids = this._indexByType.get(type);
+    if (!ids) return [];
+    return Array.from(ids).map(id => this._nodes.get(id)).filter(Boolean) as DataLineageNode[];
+  }
+
+  queryLineage(query: LineageQuery): { nodes: DataLineageNode[]; edges: LineageEdge[] } {
+    const resultNodes = new Set<string>();
+    const resultEdges = new Set<string>();
+
+    let startNodes: string[] = [];
+    if (query.nodeId) {
+      startNodes = [query.nodeId];
+    } else if (query.nodeType) {
+      startNodes = Array.from(this._indexByType.get(query.nodeType) || []);
+    } else if (query.tags) {
+      startNodes = Array.from(this._indexByTag.get(query.tags[0]) || []);
+    } else if (query.owner) {
+      startNodes = Array.from(this._indexByOwner.get(query.owner) || []);
+    }
+
+    const maxDepth = query.maxDepth || this._maxTraceDepth;
+
+    for (const startId of startNodes) {
+      this._traverseGraph(startId, maxDepth, query.direction || 'both', resultNodes, resultEdges);
+    }
+
+    return {
+      nodes: Array.from(resultNodes).map(id => this._nodes.get(id)).filter(Boolean) as DataLineageNode[],
+      edges: Array.from(resultEdges).map(id => this._edges.get(id)).filter(Boolean) as LineageEdge[]
+    };
+  }
+
+  private _traverseGraph(nodeId: string, depth: number, direction: string, resultNodes: Set<string>, resultEdges: Set<string>): void {
+    if (depth <= 0 || resultNodes.has(nodeId)) return;
+    resultNodes.add(nodeId);
+
+    for (const edge of this._edges.values()) {
+      if (direction === 'downstream' || direction === 'both') {
+        if (edge.sourceId === nodeId) {
+          resultEdges.add(edge.id);
+          this._traverseGraph(edge.targetId, depth - 1, direction, resultNodes, resultEdges);
+        }
+      }
+      if (direction === 'upstream' || direction === 'both') {
+        if (edge.targetId === nodeId) {
+          resultEdges.add(edge.id);
+          this._traverseGraph(edge.sourceId, depth - 1, direction, resultNodes, resultEdges);
+        }
       }
     }
+  }
+
+  analyzeImpact(targetId: string, maxDepth: number = 5): ImpactAnalysisResult {
+    const impactedNodes = new Set<string>();
+    const impactedEdges = new Set<string>();
+
+    this._traverseGraph(targetId, maxDepth, 'both', impactedNodes, impactedEdges);
+    impactedNodes.delete(targetId);
+
+    const upstream = new Set<string>();
+    const downstream = new Set<string>();
+
+    for (const edgeId of impactedEdges) {
+      const edge = this._edges.get(edgeId);
+      if (!edge) continue;
+      if (edge.targetId === targetId || this._isUpstream(edge.targetId, targetId)) {
+        upstream.add(edge.sourceId);
+      } else {
+        downstream.add(edge.targetId);
+      }
+    }
+
+    const nodeList = Array.from(impactedNodes).map(id => this._nodes.get(id)).filter(Boolean) as DataLineageNode[];
+    const edgeList = Array.from(impactedEdges).map(id => this._edges.get(id)).filter(Boolean) as LineageEdge[];
+
+    const riskScore = this._calculateRiskScore(targetId, nodeList, edgeList);
+
+    const result: ImpactAnalysisResult = {
+      targetId,
+      impactedNodes: nodeList,
+      impactedEdges: edgeList,
+      depth: maxDepth,
+      upstreamCount: upstream.size,
+      downstreamCount: downstream.size,
+      riskScore,
+      recommendations: this._generateRecommendations(targetId, riskScore)
+    };
+
+    this._lastResult = result;
+    this._counter++;
     return result;
   }
 
-  validateLineage(): {
-    valid: boolean;
-    errors: string[];
-    warnings: string[];
-  } {
-    const errors: string[] = [];
-    const warnings: string[] = [];
-    for (const node of this._lineageNodes.values()) {
-      if (node.inputs.length === 0 && node.type !== 'source') {
-        warnings.push(`Node ${node.name} (${node.type}) has no inputs`);
-      }
-      if (node.outputs.length === 0 && node.type !== 'sink') {
-        warnings.push(`Node ${node.name} (${node.type}) has no outputs`);
-      }
-      for (const inputId of node.inputs) {
-        if (!this._lineageNodes.has(inputId)) {
-          errors.push(`Input node ${inputId} not found for ${node.name}`);
-        }
-      }
-      for (const outputId of node.outputs) {
-        if (!this._lineageNodes.has(outputId)) {
-          errors.push(`Output node ${outputId} not found for ${node.name}`);
+  private _isUpstream(nodeId: string, targetId: string): boolean {
+    const visited = new Set<string>();
+    const queue = [nodeId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current === targetId) return true;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      for (const edge of this._edges.values()) {
+        if (edge.sourceId === current) {
+          queue.push(edge.targetId);
         }
       }
     }
-    for (const edge of this._lineageEdges.values()) {
-      if (!this._lineageNodes.has(edge.from)) {
-        errors.push(`Edge ${edge.id} references non-existent source node ${edge.from}`);
-      }
-      if (!this._lineageNodes.has(edge.to)) {
-        errors.push(`Edge ${edge.id} references non-existent target node ${edge.to}`);
+    return false;
+  }
+
+  private _calculateRiskScore(targetId: string, nodes: DataLineageNode[], edges: LineageEdge[]): number {
+    const target = this._nodes.get(targetId);
+    if (!target) return 0;
+
+    let score = 0;
+    score += nodes.length * 2;
+    score += edges.length;
+
+    const metric = this._qualityMetrics.get(targetId);
+    if (metric) {
+      score += (1 - metric.overallScore) * 50;
+    }
+
+    return Math.min(100, score);
+  }
+
+  private _generateRecommendations(targetId: string, riskScore: number): string[] {
+    const recommendations: string[] = [];
+    if (riskScore > 50) {
+      recommendations.push('Review all upstream dependencies before making changes');
+      recommendations.push('Implement comprehensive testing strategy');
+    }
+    if (riskScore > 75) {
+      recommendations.push('Consider staged rollout to minimize blast radius');
+      recommendations.push('Enable enhanced monitoring for affected components');
+    }
+    recommendations.push('Document changes for audit trail');
+    return recommendations;
+  }
+
+  getUpstreamDependencies(nodeId: string, maxDepth: number = 5): DataLineageNode[] {
+    const result = this.queryLineage({ nodeId, direction: 'upstream', maxDepth });
+    return result.nodes.filter(n => n.id !== nodeId);
+  }
+
+  getDownstreamDependencies(nodeId: string, maxDepth: number = 5): DataLineageNode[] {
+    const result = this.queryLineage({ nodeId, direction: 'downstream', maxDepth });
+    return result.nodes.filter(n => n.id !== nodeId);
+  }
+
+  findPath(sourceId: string, targetId: string): { nodes: DataLineageNode[]; edges: LineageEdge[] } | null {
+    const visited = new Set<string>();
+    const parent = new Map<string, { nodeId: string; edgeId: string }>();
+    const queue = [sourceId];
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (current === targetId) break;
+      if (visited.has(current)) continue;
+      visited.add(current);
+
+      for (const edge of this._edges.values()) {
+        if (edge.sourceId === current && !visited.has(edge.targetId)) {
+          parent.set(edge.targetId, { nodeId: current, edgeId: edge.id });
+          queue.push(edge.targetId);
+        }
       }
     }
-    return { valid: errors.length === 0, errors, warnings };
+
+    if (!parent.has(targetId)) return null;
+
+    const pathNodes: DataLineageNode[] = [];
+    const pathEdges: LineageEdge[] = [];
+    let current = targetId;
+
+    while (current !== sourceId) {
+      const node = this._nodes.get(current);
+      if (node) pathNodes.unshift(node);
+      const p = parent.get(current);
+      if (!p) break;
+      const edge = this._edges.get(p.edgeId);
+      if (edge) pathEdges.unshift(edge);
+      current = p.nodeId;
+    }
+
+    const sourceNode = this._nodes.get(sourceId);
+    if (sourceNode) pathNodes.unshift(sourceNode);
+
+    return { nodes: pathNodes, edges: pathEdges };
   }
 
-  getSystemNames(): string[] {
-    return Array.from(this._systemRegistry.keys());
-  }
+  detectCycles(): { hasCycle: boolean; cycles: string[][] } {
+    const cycles: string[][] = [];
+    const visited = new Set<string>();
+    const recursionStack = new Set<string>();
 
-  getDataCatalogNames(): string[] {
-    return Array.from(this._dataCatalog.keys());
-  }
+    const dfs = (nodeId: string, path: string[]) => {
+      visited.add(nodeId);
+      recursionStack.add(nodeId);
+      path.push(nodeId);
 
-  getSemanticModelNames(): string[] {
-    return Array.from(this._semanticModels.keys());
-  }
+      for (const edge of this._edges.values()) {
+        if (edge.sourceId === nodeId) {
+          if (!visited.has(edge.targetId)) {
+            dfs(edge.targetId, [...path]);
+          } else if (recursionStack.has(edge.targetId)) {
+            const cycleStart = path.indexOf(edge.targetId);
+            cycles.push(path.slice(cycleStart).concat(edge.targetId));
+          }
+        }
+      }
 
-  toPacket(): DataPacket<DigitalThreadResult> {
-    const result: DigitalThreadResult = {
-      lineageNodes: Array.from(this._lineageNodes.values()),
-      lineageEdges: Array.from(this._lineageEdges.values()),
-      crossSystemLinks: Array.from(this._crossSystemLinks.values()),
-      traceRecords: this.traceRecords,
-      impactAnalyses: Array.from(this._impactAnalyses.values()),
-      totalNodes: this.totalNodes,
-      totalEdges: this.totalEdges,
-      tracedEntities: this.tracedEntities,
-      threadCoverage: this._threadStats.coverage,
+      recursionStack.delete(nodeId);
     };
-    this._lastResult = result;
+
+    for (const nodeId of this._nodes.keys()) {
+      if (!visited.has(nodeId)) {
+        dfs(nodeId, []);
+      }
+    }
+
+    return { hasCycle: cycles.length > 0, cycles };
+  }
+
+  computeGraphMetrics(): {
+    density: number;
+    averageDegree: number;
+    connectedComponents: number;
+    diameter: number;
+  } {
+    const n = this._nodes.size;
+    const m = this._edges.size;
+    const density = n > 1 ? m / (n * (n - 1)) : 0;
+    const averageDegree = n > 0 ? (2 * m) / n : 0;
+
+    const visited = new Set<string>();
+    let components = 0;
+    for (const nodeId of this._nodes.keys()) {
+      if (!visited.has(nodeId)) {
+        components++;
+        const queue = [nodeId];
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          if (visited.has(current)) continue;
+          visited.add(current);
+          for (const edge of this._edges.values()) {
+            if (edge.sourceId === current && !visited.has(edge.targetId)) {
+              queue.push(edge.targetId);
+            }
+            if (edge.targetId === current && !visited.has(edge.sourceId)) {
+              queue.push(edge.sourceId);
+            }
+          }
+        }
+      }
+    }
+
+    return { density, averageDegree, connectedComponents: components, diameter: 0 };
+  }
+
+  exportLineage(format: 'json' | 'graphml' | 'dot' = 'json'): string {
+    const nodes = Array.from(this._nodes.values());
+    const edges = Array.from(this._edges.values());
+
+    if (format === 'json') {
+      return JSON.stringify({ nodes, edges }, null, 2);
+    }
+
+    if (format === 'dot') {
+      let dot = 'digraph Lineage {\n';
+      for (const node of nodes) {
+        dot += `  "${node.id}" [label="${node.name}"];\n`;
+      }
+      for (const edge of edges) {
+        dot += `  "${edge.sourceId}" -> "${edge.targetId}";\n`;
+      }
+      dot += '}';
+      return dot;
+    }
+
+    return '';
+  }
+
+  addChangeListener(listener: (event: string, nodeId: string) => void): void {
+    this._changeListeners.push(listener);
+  }
+
+  removeChangeListener(listener: (event: string, nodeId: string) => void): void {
+    const idx = this._changeListeners.indexOf(listener);
+    if (idx >= 0) this._changeListeners.splice(idx, 1);
+  }
+
+  private _notifyListeners(event: string, nodeId: string): void {
+    for (const listener of this._changeListeners) {
+      listener(event, nodeId);
+    }
+  }
+
+  private _recordTrace(operation: string, inputIds: string[], outputIds: string[], duration: number, status: TraceRecord['status']): void {
+    const record: TraceRecord = {
+      id: `trace-${Date.now()}-${this._counter++}`,
+      traceId: `trace-${Date.now()}`,
+      timestamp: Date.now(),
+      operation,
+      inputIds,
+      outputIds,
+      duration,
+      status,
+      metadata: {}
+    };
+    this.addTraceRecord(record);
+  }
+
+  private _audit(action: string, entityId: string, details: string): void {
+    this._auditLog.push({ timestamp: Date.now(), action, entityId, details });
+    if (this._auditLog.length > 10000) {
+      this._auditLog.shift();
+    }
+  }
+
+  getAuditLog(): { timestamp: number; action: string; entityId: string; details: string }[] {
+    return [...this._auditLog];
+  }
+
+  getQualitySummary(): { averageScore: number; nodeCount: number; failingNodes: number } {
+    const metrics = Array.from(this._qualityMetrics.values());
+    if (metrics.length === 0) return { averageScore: 0, nodeCount: 0, failingNodes: 0 };
+
+    const averageScore = metrics.reduce((sum, m) => sum + m.overallScore, 0) / metrics.length;
+    const failingNodes = metrics.filter(m => m.overallScore < 0.7).length;
+
+    return { averageScore, nodeCount: metrics.length, failingNodes };
+  }
+
+  toPacket(): DataPacket<ImpactAnalysisResult> {
+    const result = this._lastResult || {
+      targetId: '',
+      impactedNodes: [],
+      impactedEdges: [],
+      depth: 0,
+      upstreamCount: 0,
+      downstreamCount: 0,
+      riskScore: 0,
+      recommendations: []
+    };
     this._counter++;
     return {
       id: `digital-thread-${Date.now()}-${this._counter}`,
       payload: result,
       metadata: {
         createdAt: Date.now(),
-        route: ['digital_twin', 'digital_thread'],
+        route: ['digital-twin', 'digital-thread'],
         priority: 1,
-        phase: 'traceability',
-      },
+        phase: 'lineage'
+      }
     };
   }
 
   reset(): void {
-    this._lineageNodes.clear();
-    this._lineageEdges.clear();
+    this._nodes.clear();
+    this._edges.clear();
     this._crossSystemLinks.clear();
     this._traceRecords.clear();
-    this._impactAnalyses.clear();
-    this._counter = 0;
     this._lastResult = null;
-    this._threadStats = {
-      totalTraces: 0,
-      totalNodes: 0,
-      totalEdges: 0,
-      avgPathLength: 0,
-      coverage: 0,
-    };
+    this._counter = 0;
+    this._qualityMetrics.clear();
+    this._provenanceRecords.clear();
+    this._autoTrace = true;
+    this._maxTraceDepth = 10;
+    this._indexByTag.clear();
+    this._indexByOwner.clear();
+    this._indexByType.clear();
+    this._graphCache.clear();
+    this._cacheTTL = 300000;
+    this._changeListeners = [];
+    this._auditLog = [];
   }
 }

@@ -746,6 +746,69 @@ export class ApplicationLayer {
     return { websocketsCleaned, sshCleaned, http2Cleaned };
   }
 
+  httpStatusDistribution(): Record<string, number> {
+    const distribution: Record<string, number> = {};
+    for (const response of this._responses) {
+      const category = `${Math.floor(response.status / 100)}xx`;
+      distribution[category] = (distribution[category] ?? 0) + 1;
+    }
+    return distribution;
+  }
+
+  methodDistribution(): Record<HTTPMethod, number> {
+    const distribution: Record<string, number> = {};
+    for (const request of this._requests) {
+      distribution[request.method] = (distribution[request.method] ?? 0) + 1;
+    }
+    return distribution as Record<HTTPMethod, number>;
+  }
+
+  averageResponseLatency(): number {
+    if (this._responses.length === 0) return 0;
+    const total = this._responses.reduce((sum, r) => sum + r.latency, 0);
+    return Math.round(total / this._responses.length * 100) / 100;
+  }
+
+  slowestRequests(limit: number = 10): { url: string; method: HTTPMethod; latency: number; status: HTTPStatus }[] {
+    return this._requests
+      .map((req, i) => ({ url: req.url, method: req.method, latency: this._responses[i]?.latency ?? 0, status: (this._responses[i]?.status ?? 200) as HTTPStatus }))
+      .sort((a, b) => b.latency - a.latency)
+      .slice(0, limit);
+  }
+
+  errorRate(): number {
+    if (this._responses.length === 0) return 0;
+    const errors = this._responses.filter(r => r.status >= 400).length;
+    return Math.round((errors / this._responses.length) * 10000) / 100;
+  }
+
+  trafficStatistics(): {
+    totalRequests: number;
+    totalResponses: number;
+    avgLatency: number;
+    errorRate: number;
+    statusDistribution: Record<string, number>;
+    methodDistribution: Record<string, number>;
+    activeWebsockets: number;
+    activeSSHSessions: number;
+    activeHTTP2Streams: number;
+  } {
+    const activeWs = Array.from(this._websocketConnections.values()).filter(c => c.state === 'open').length;
+    const activeSsh = Array.from(this._sshSessions.values()).filter(s => s.state === 'connected').length;
+    const activeH2 = Array.from(this._http2Streams.values()).filter(s => s.state === 'open').length;
+    return {
+      totalRequests: this._requests.length,
+      totalResponses: this._responses.length,
+      avgLatency: this.averageResponseLatency(),
+      errorRate: this.errorRate(),
+      statusDistribution: this.httpStatusDistribution(),
+      methodDistribution: this.methodDistribution(),
+      activeWebsockets: activeWs,
+      activeSSHSessions: activeSsh,
+      activeHTTP2Streams: activeH2,
+    };
+  }
+
   toPacket(): DataPacket<{
     requests: number;
     responses: number;

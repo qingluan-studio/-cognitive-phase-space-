@@ -246,3 +246,7 @@ export class DigitalTwinCore {
     };
   }
 }
+importimport { DataPacket } from '../shared/types';
+
+export interface DigitalTwin {
+  id

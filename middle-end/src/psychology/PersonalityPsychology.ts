@@ -468,7 +468,7 @@ export class PersonalityPsychology {
     }).sort((a, b) => b.score - a.score);
   }
 
-  characterStrengthProfile(strengths: string[], context: string = 'general'): { strengths: CharacterStrength[]; signatureStrengths: string[]; growthOpportunities: string[]; applications: string[]; well-beingImpact: number } {
+  characterStrengthProfile(strengths: string[], context: string = 'general'): { strengths: CharacterStrength[]; signatureStrengths: string[]; growthOpportunities: string[]; applications: string[]; wellbeingImpact: number } {
     const profile: CharacterStrength[] = strengths.map(name => {
       const existing = this._characterStrengths.get(name);
       return existing || { name, category: 'wisdom', score: 0.7, description: name, manifestations: [] };
@@ -476,9 +476,9 @@ export class PersonalityPsychology {
     const signatureStrengths = profile.filter(s => s.score > 0.7).map(s => s.name);
     const growthOpportunities = profile.filter(s => s.score < 0.5).map(s => s.name);
     const applications = signatureStrengths.length > 0 ? ['use-signature-strengths-daily', 'develop-growth-areas'] : ['explore-various-strengths'];
-    const well-beingImpact = profile.reduce((sum, s) => sum + s.score * 0.2, 0);
+    const wellbeingImpact = profile.reduce((sum, s) => sum + s.score * 0.2, 0);
     this._history.push({ op: 'characterStrengthProfile', signatureCount: signatureStrengths.length, context });
-    return { strengths: profile, signatureStrengths, growthOpportunities, applications, well-beingImpact: Number(well-beingImpact.toFixed(2)) };
+    return { strengths: profile, signatureStrengths, growthOpportunities, applications, wellbeingImpact: Number(wellbeingImpact.toFixed(2)) };
   }
 
   selfConcept(domain: SelfConcept['domain'], selfEsteem: number = 0.5, selfEfficacy: number = 0.5): SelfConcept {
@@ -584,6 +584,350 @@ export class PersonalityPsychology {
       { name: 'hope', category: 'transcendence', score: 0, description: 'expecting the best', manifestations: ['optimism', 'goal-setting', 'perseverance'] },
     ];
     for (const s of strengths) this._characterStrengths.set(s.name, s);
+  }
+
+  /** Compute the Big Five personality composite. */
+  bigFiveComposite(openness: number, conscientiousness: number, extraversion: number, agreeableness: number, neuroticism: number): { composite: number; dominant: string } {
+    const composite = (openness + conscientiousness + extraversion + agreeableness + (1 - neuroticism)) / 5;
+    const traits: Record<string, number> = { openness, conscientiousness, extraversion, agreeableness };
+    traits['emotional-stability'] = 1 - neuroticism;
+    const dominant = Object.entries(traits).reduce((max, [k, v]) => v > max[1] ? [k, v] : max, ['none', 0])[0];
+    return { composite: Number(composite.toFixed(2)), dominant };
+  }
+
+  /** Compute the personality consistency across situations. */
+  personalityConsistency(situationScores: number[]): number {
+    if (situationScores.length < 2) return 1;
+    const mean = situationScores.reduce((a, b) => a + b, 0) / situationScores.length;
+    const variance = situationScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / situationScores.length;
+    const stdDev = Math.sqrt(variance);
+    return Number(Math.max(0, 1 - stdDev).toFixed(2));
+  }
+
+  /** Compute the personality stability over time (test-retest reliability). */
+  personalityStability(testScores1: number[], testScores2: number[]): number {
+    if (testScores1.length === 0 || testScores2.length === 0) return 0;
+    const n = Math.min(testScores1.length, testScores2.length);
+    const mean1 = testScores1.slice(0, n).reduce((a, b) => a + b, 0) / n;
+    const mean2 = testScores2.slice(0, n).reduce((a, b) => a + b, 0) / n;
+    let cov = 0;
+    let var1 = 0;
+    let var2 = 0;
+    for (let i = 0; i < n; i++) {
+      cov += (testScores1[i] - mean1) * (testScores2[i] - mean2);
+      var1 += Math.pow(testScores1[i] - mean1, 2);
+      var2 += Math.pow(testScores2[i] - mean2, 2);
+    }
+    const denom = Math.sqrt(var1 * var2);
+    return denom === 0 ? 0 : Number((cov / denom).toFixed(4));
+  }
+
+  /** Compute the personality-environment fit. */
+  personalityEnvironmentFit(personalityTraits: Record<string, number>, environmentDemands: Record<string, number>): number {
+    const keys = Object.keys(personalityTraits).filter(k => k in environmentDemands);
+    if (keys.length === 0) return 0;
+    let totalFit = 0;
+    for (const k of keys) {
+      const diff = Math.abs(personalityTraits[k] - environmentDemands[k]);
+      totalFit += 1 - diff;
+    }
+    return Number((totalFit / keys.length).toFixed(2));
+  }
+
+  /** Compute the HEXACO personality model. */
+  hexacoModel(honesty: number, emotionality: number, extraversion: number, agreeableness: number, conscientiousness: number, openness: number): { composite: number; profile: Record<string, number> } {
+    const profile = { honesty, emotionality, extraversion, agreeableness, conscientiousness, openness };
+    const composite = (honesty + emotionality + extraversion + agreeableness + conscientiousness + openness) / 6;
+    return { composite: Number(composite.toFixed(2)), profile };
+  }
+
+  /** Compute the MBTI type from dichotomies. */
+  mbtiType(EI: number, SN: number, TF: number, JP: number): string {
+    return `${EI > 0.5 ? 'E' : 'I'}${SN > 0.5 ? 'S' : 'N'}${TF > 0.5 ? 'T' : 'F'}${JP > 0.5 ? 'J' : 'P'}`;
+  }
+
+  /** Compute the Enneagram type wing. */
+  enneagramWing(mainType: number, wingType: number): string {
+    return `${mainType}w${wingType}`;
+  }
+
+  /** Compute the personality trait extremity. */
+  traitExtremity(score: number, populationMean: number = 0.5, populationStdDev: number = 0.15): number {
+    const z = Math.abs(score - populationMean) / Math.max(0.0001, populationStdDev);
+    return Number(z.toFixed(2));
+  }
+
+  /** Compute the personality disorder indicator (clusters A, B, C). */
+  personalityDisorderIndicator(clusterASymptoms: number, clusterBSymptoms: number, clusterCSymptoms: number): { cluster: 'A' | 'B' | 'C' | 'none'; severity: number } {
+    const max = Math.max(clusterASymptoms, clusterBSymptoms, clusterCSymptoms);
+    if (max < 0.3) return { cluster: 'none', severity: Number(max.toFixed(2)) };
+    if (clusterASymptoms === max) return { cluster: 'A', severity: Number(max.toFixed(2)) };
+    if (clusterBSymptoms === max) return { cluster: 'B', severity: Number(max.toFixed(2)) };
+    return { cluster: 'C', severity: Number(max.toFixed(2)) };
+  }
+
+  /** Compute the dark triad score (Machiavellianism, Narcissism, Psychopathy). */
+  darkTriadScore(machiavellianism: number, narcissism: number, psychopathy: number): number {
+    return Number(((machiavellianism + narcissism + psychopathy) / 3).toFixed(2));
+  }
+
+  /** Compute the light triad score (Kantianism, Humanism, Faith in Humanity). */
+  lightTriadScore(kantianism: number, humanism: number, faithInHumanity: number): number {
+    return Number(((kantianism + humanism + faithInHumanity) / 3).toFixed(2));
+  }
+
+  /** Compute the personality trait heritability estimate. */
+  traitHeritabilityEstimate(trait: string): number {
+    const heritability: Record<string, number> = {
+      'openness': 0.45,
+      'conscientiousness': 0.49,
+      'extraversion': 0.53,
+      'agreeableness': 0.41,
+      'neuroticism': 0.47,
+    };
+    return heritability[trait.toLowerCase()] ?? 0.4;
+  }
+
+  /** Compute the personality maturation trajectory. */
+  personalityMaturation(age: number, trait: string): number {
+    const maturationCurves: Record<string, (a: number) => number> = {
+      'conscientiousness': a => Math.min(1, 0.3 + a * 0.01),
+      'agreeableness': a => Math.min(1, 0.4 + a * 0.008),
+      'neuroticism': a => Math.max(0, 0.6 - a * 0.005),
+      'openness': a => Math.max(0.3, 0.7 - Math.max(0, a - 50) * 0.005),
+      'extraversion': a => Math.max(0.3, 0.6 - Math.max(0, a - 30) * 0.003),
+    };
+    const curve = maturationCurves[trait.toLowerCase()];
+    return curve ? Number(curve(age).toFixed(2)) : 0.5;
+  }
+
+  /** Compute the personality states vs traits distinction. */
+  stateTraitDistinction(stateScores: number[], traitScore: number): { stateVariability: number; traitConsistency: number } {
+    if (stateScores.length === 0) return { stateVariability: 0, traitConsistency: 1 };
+    const mean = stateScores.reduce((a, b) => a + b, 0) / stateScores.length;
+    const variance = stateScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / stateScores.length;
+    const stateVariability = Math.sqrt(variance);
+    const traitConsistency = 1 - Math.min(1, Math.abs(mean - traitScore));
+    return { stateVariability: Number(stateVariability.toFixed(2)), traitConsistency: Number(traitConsistency.toFixed(2)) };
+  }
+
+  /** Compute the personality coherence. */
+  personalityCoherence(values: number[], goals: number[], behaviors: number[]): number {
+    if (values.length === 0) return 0;
+    const valueGoalAlignment = values.reduce((s, v, i) => s + (1 - Math.abs(v - (goals[i] ?? v))), 0) / values.length;
+    const goalBehaviorAlignment = goals.reduce((s, g, i) => s + (1 - Math.abs(g - (behaviors[i] ?? g))), 0) / goals.length;
+    return Number(((valueGoalAlignment + goalBehaviorAlignment) / 2).toFixed(2));
+  }
+
+  /** Compute the self-concept clarity. */
+  selfConceptClarity(consistency: number, stability: number, certainty: number, internalConsistency: number): number {
+    return Number(((consistency + stability + certainty + internalConsistency) / 4).toFixed(2));
+  }
+
+  /** Compute the self-esteem stability. */
+  selfEsteemStability(selfEsteemScores: number[]): number {
+    if (selfEsteemScores.length < 2) return 1;
+    const mean = selfEsteemScores.reduce((a, b) => a + b, 0) / selfEsteemScores.length;
+    const variance = selfEsteemScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / selfEsteemScores.length;
+    return Number(Math.max(0, 1 - Math.sqrt(variance)).toFixed(2));
+  }
+
+  /** Compute the self-monitoring score. */
+  selfMonitoringScore(sensitivityToCues: number, abilityToModify: number, concernForAppropriateness: number): number {
+    return Number(((sensitivityToCues + abilityToModify + concernForAppropriateness) / 3).toFixed(2));
+  }
+
+  /** Compute the self-efficacy domain specificity. */
+  selfEfficacyDomainSpecificity(domainScores: number[]): number {
+    if (domainScores.length < 2) return 0;
+    const mean = domainScores.reduce((a, b) => a + b, 0) / domainScores.length;
+    const variance = domainScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / domainScores.length;
+    return Number(Math.sqrt(variance).toFixed(2));
+  }
+
+  /** Compute the locus of control. */
+  locusOfControl(internalBeliefs: number, externalBeliefs: number): { orientation: 'internal' | 'external' | 'balanced'; score: number } {
+    const score = internalBeliefs - externalBeliefs;
+    let orientation: 'internal' | 'external' | 'balanced';
+    if (score > 0.2) orientation = 'internal';
+    else if (score < -0.2) orientation = 'external';
+    else orientation = 'balanced';
+    return { orientation, score: Number(score.toFixed(2)) };
+  }
+
+  /** Compute the attributional style (optimistic vs pessimistic). */
+  attributionalStyle(internalForPositive: number, stableForPositive: number, globalForPositive: number, internalForNegative: number, stableForNegative: number, globalForNegative: number): { optimistic: number; explanatoryStyle: string } {
+    const optimistic = (internalForPositive + stableForPositive + globalForPositive) / 3 - (internalForNegative + stableForNegative + globalForNegative) / 3;
+    return {
+      optimistic: Number(optimistic.toFixed(2)),
+      explanatoryStyle: optimistic > 0.2 ? 'optimistic' : optimistic < -0.2 ? 'pessimistic' : 'balanced',
+    };
+  }
+
+  /** Compute the learned helplessness indicator. */
+  learnedHelplessnessIndicator(uncontrollableExperiences: number, attributionStyle: number, generalization: number): number {
+    return Number((uncontrollableExperiences * 0.4 + (1 - attributionStyle) * 0.3 + generalization * 0.3).toFixed(2));
+  }
+
+  /** Compute the self-actualization indicator (Maslow). */
+  selfActualizationIndicator(autonomy: number, authenticity: number, creativity: number, problemSolving: number, peakExperiences: number): number {
+    return Number(((autonomy + authenticity + creativity + problemSolving + peakExperiences) / 5).toFixed(2));
+  }
+
+  /** Compute the individuation score (Jung). */
+  individuationScore(selfAwareness: number, shadowIntegration: number, personaBalance: number, animaAnimusIntegration: number): number {
+    return Number(((selfAwareness + shadowIntegration + personaBalance + animaAnimusIntegration) / 4).toFixed(2));
+  }
+
+  /** Compute the personality defense mechanisms maturity. */
+  defenseMechanismMaturity(matureDefenses: number, neuroticDefenses: number, immatureDefenses: number): { level: 'mature' | 'neurotic' | 'immature'; score: number } {
+    const total = matureDefenses + neuroticDefenses + immatureDefenses;
+    if (total === 0) return { level: 'mature', score: 0.5 };
+    const matureRatio = matureDefenses / total;
+    const neuroticRatio = neuroticDefenses / total;
+    let level: 'mature' | 'neurotic' | 'immature';
+    if (matureRatio > 0.5) level = 'mature';
+    else if (neuroticRatio > 0.4) level = 'neurotic';
+    else level = 'immature';
+    return { level, score: Number(matureRatio.toFixed(2)) };
+  }
+
+  /** Compute the personality development stage (Erikson). */
+  personalityDevelopmentStage(age: number): { stage: number; virtue: string; crisis: string } {
+    const stages: { stage: number; virtue: string; crisis: string; ageRange: [number, number] }[] = [
+      { stage: 1, virtue: 'hope', crisis: 'trust-vs-mistrust', ageRange: [0, 1] },
+      { stage: 2, virtue: 'will', crisis: 'autonomy-vs-shame', ageRange: [1, 3] },
+      { stage: 3, virtue: 'purpose', crisis: 'initiative-vs-guilt', ageRange: [3, 6] },
+      { stage: 4, virtue: 'competence', crisis: 'industry-vs-inferiority', ageRange: [6, 12] },
+      { stage: 5, virtue: 'fidelity', crisis: 'identity-vs-role-confusion', ageRange: [12, 18] },
+      { stage: 6, virtue: 'love', crisis: 'intimacy-vs-isolation', ageRange: [18, 40] },
+      { stage: 7, virtue: 'care', crisis: 'generativity-vs-stagnation', ageRange: [40, 65] },
+      { stage: 8, virtue: 'wisdom', crisis: 'integrity-vs-despair', ageRange: [65, 100] },
+    ];
+    const stage = stages.find(s => age >= s.ageRange[0] && age < s.ageRange[1]) ?? stages[stages.length - 1];
+    return { stage: stage.stage, virtue: stage.virtue, crisis: stage.crisis };
+  }
+
+  /** Compute the narrative identity coherence. */
+  narrativeIdentityCoherence(causalLinks: number, thematicConsistency: number, temporalContinuity: number): number {
+    return Number(((causalLinks + thematicConsistency + temporalContinuity) / 3).toFixed(2));
+  }
+
+  /** Compute the possible selves discrepancy. */
+  possibleSelvesDiscrepancy(hopedSelf: number, expectedSelf: number, fearedSelf: number, currentSelf: number): { hopedGap: number; fearedGap: number } {
+    return {
+      hopedGap: Number((hopedSelf - currentSelf).toFixed(2)),
+      fearedGap: Number((currentSelf - fearedSelf).toFixed(2)),
+    };
+  }
+
+  /** Compute the personality assessment validity. */
+  personalityAssessmentValidity(faceValidity: number, contentValidity: number, criterionValidity: number, constructValidity: number): number {
+    return Number(((faceValidity + contentValidity + criterionValidity + constructValidity) / 4).toFixed(2));
+  }
+
+  /** Compute the personality trait centrality. */
+  traitCentrality(traitScore: number, relatedTraits: number[]): number {
+    if (relatedTraits.length === 0) return 0;
+    const correlations = relatedTraits.map(r => Math.abs(r - traitScore));
+    const avgCorrelation = correlations.reduce((a, b) => a + b, 0) / correlations.length;
+    return Number((1 - avgCorrelation).toFixed(2));
+  }
+
+  /** Compute the personality profile elevation. */
+  profileElevation(traitScores: number[]): number {
+    if (traitScores.length === 0) return 0;
+    return Number((traitScores.reduce((a, b) => a + b, 0) / traitScores.length).toFixed(2));
+  }
+
+  /** Compute the personality profile scatter. */
+  profileScatter(traitScores: number[]): number {
+    if (traitScores.length < 2) return 0;
+    const mean = traitScores.reduce((a, b) => a + b, 0) / traitScores.length;
+    const variance = traitScores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / traitScores.length;
+    return Number(Math.sqrt(variance).toFixed(2));
+  }
+
+  /** Compute the personality profile code. */
+  profileCode(traitScores: { trait: string; score: number }[]): string {
+    const sorted = [...traitScores].sort((a, b) => b.score - a.score);
+    return sorted.slice(0, 3).map(s => s.trait.charAt(0).toUpperCase()).join('');
+  }
+
+  /** Compute the personality-environment congruence (Holland). */
+  hollandCongruence(personalityType: string, environmentType: string): number {
+    const hexagon: Record<string, string[]> = {
+      'R': ['R', 'I', 'A', 'S', 'E', 'C'],
+      'I': ['I', 'R', 'A', 'S', 'C', 'E'],
+      'A': ['A', 'I', 'R', 'E', 'S', 'C'],
+      'S': ['S', 'A', 'I', 'E', 'R', 'C'],
+      'E': ['E', 'S', 'A', 'C', 'I', 'R'],
+      'C': ['C', 'E', 'S', 'I', 'A', 'R'],
+    };
+    const order = hexagon[personalityType];
+    if (!order) return 0;
+    const distance = order.indexOf(environmentType);
+    return Number((1 - distance / 5).toFixed(2));
+  }
+
+  /** Compute the personality consistency across roles. */
+  crossRoleConsistency(roleScores: { role: string; score: number }[]): { consistency: number; variability: number } {
+    if (roleScores.length === 0) return { consistency: 1, variability: 0 };
+    const scores = roleScores.map(r => r.score);
+    const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const variance = scores.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / scores.length;
+    return {
+      consistency: Number(Math.max(0, 1 - Math.sqrt(variance)).toFixed(2)),
+      variability: Number(Math.sqrt(variance).toFixed(2)),
+    };
+  }
+
+  /** Compute the personality impression management. */
+  impressionManagement(selfPresentation: number, socialDesirability: number, deception: number): number {
+    return Number(((selfPresentation + socialDesirability + deception) / 3).toFixed(2));
+  }
+
+  /** Compute the personality test response style. */
+  responseStyle(acquiescence: number, extremity: number, socialDesirability: number, carelessness: number): { style: string; score: number } {
+    const styles: Record<string, number> = { acquiescence, extremity, socialDesirability, carelessness };
+    const max = Object.entries(styles).reduce((m, [k, v]) => v > m[1] ? [k, v] : m, ['none', 0]);
+    return { style: max[0], score: Number(max[1].toFixed(2)) };
+  }
+
+  /** Compute the personality test reliability (Cronbach's alpha). */
+  cronbachsAlpha(itemVariances: number[], totalVariance: number): number {
+    if (itemVariances.length === 0 || totalVariance === 0) return 0;
+    const k = itemVariances.length;
+    const sumItemVariances = itemVariances.reduce((a, b) => a + b, 0);
+    return Number(((k / (k - 1)) * (1 - sumItemVariances / totalVariance)).toFixed(4));
+  }
+
+  /** Compute the personality assessment profile interpretation. */
+  profileInterpretation(traitScores: { trait: string; score: number; criticalValue: number }[]): { elevated: string[]; suppressed: string[]; normal: string[] } {
+    const elevated: string[] = [];
+    const suppressed: string[] = [];
+    const normal: string[] = [];
+    for (const t of traitScores) {
+      if (t.score > t.criticalValue + 10) elevated.push(t.trait);
+      else if (t.score < t.criticalValue - 10) suppressed.push(t.trait);
+      else normal.push(t.trait);
+    }
+    return { elevated, suppressed, normal };
+  }
+
+  /** Generate a personality assessment summary. */
+  personalitySummary(traitScores: { trait: string; score: number }[]): Record<string, unknown> {
+    const sorted = [...traitScores].sort((a, b) => b.score - a.score);
+    const profile = this.profileElevation(traitScores.map(t => t.score));
+    const scatter = this.profileScatter(traitScores.map(t => t.score));
+    return {
+      topTrait: sorted[0]?.trait,
+      lowestTrait: sorted[sorted.length - 1]?.trait,
+      profileElevation: profile,
+      profileScatter: scatter,
+      profileCode: this.profileCode(traitScores),
+      traitCount: traitScores.length,
+    };
   }
 
   toPacket(): DataPacket<{
