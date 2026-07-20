@@ -398,6 +398,661 @@ export class MatrixAlgebra {
     return sum;
   }
 
+  identity(n: number): Matrix {
+    const data: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) data[i][i] = 1;
+    return this.create(data);
+  }
+
+  zeros(rows: number, cols: number): Matrix {
+    const data: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+    return this.create(data);
+  }
+
+  ones(rows: number, cols: number): Matrix {
+    const data: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(1));
+    return this.create(data);
+  }
+
+  diagonal(diagonal: number[]): Matrix {
+    const n = diagonal.length;
+    const data: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) data[i][i] = diagonal[i];
+    return this.create(data);
+  }
+
+  randomMatrix(rows: number, cols: number, min: number = 0, max: number = 1): Matrix {
+    const data: number[][] = [];
+    for (let i = 0; i < rows; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < cols; j++) {
+        row.push(min + Math.random() * (max - min));
+      }
+      data.push(row);
+    }
+    return this.create(data);
+  }
+
+  isSquare(matrix: Matrix): boolean {
+    return matrix.rows === matrix.cols;
+  }
+
+  isSymmetric(matrix: Matrix): boolean {
+    if (!this.isSquare(matrix)) return false;
+    const n = matrix.rows;
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (Math.abs(matrix.data[i][j] - matrix.data[j][i]) > 1e-9) return false;
+      }
+    }
+    return true;
+  }
+
+  isSkewSymmetric(matrix: Matrix): boolean {
+    if (!this.isSquare(matrix)) return false;
+    const n = matrix.rows;
+    for (let i = 0; i < n; i++) {
+      for (let j = i; j < n; j++) {
+        if (i === j && Math.abs(matrix.data[i][j]) > 1e-9) return false;
+        if (i !== j && Math.abs(matrix.data[i][j] + matrix.data[j][i]) > 1e-9) return false;
+      }
+    }
+    return true;
+  }
+
+  isDiagonal(matrix: Matrix): boolean {
+    if (!this.isSquare(matrix)) return false;
+    const n = matrix.rows;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        if (i !== j && Math.abs(matrix.data[i][j]) > 1e-9) return false;
+      }
+    }
+    return true;
+  }
+
+  isUpperTriangular(matrix: Matrix): boolean {
+    for (let i = 1; i < matrix.rows; i++) {
+      for (let j = 0; j < Math.min(i, matrix.cols); j++) {
+        if (Math.abs(matrix.data[i][j]) > 1e-9) return false;
+      }
+    }
+    return true;
+  }
+
+  isLowerTriangular(matrix: Matrix): boolean {
+    for (let i = 0; i < matrix.rows; i++) {
+      for (let j = i + 1; j < matrix.cols; j++) {
+        if (Math.abs(matrix.data[i][j]) > 1e-9) return false;
+      }
+    }
+    return true;
+  }
+
+  isTriangular(matrix: Matrix): boolean {
+    return this.isUpperTriangular(matrix) || this.isLowerTriangular(matrix);
+  }
+
+  isOrthogonal(matrix: Matrix): boolean {
+    if (!this.isSquare(matrix)) return false;
+    const product = this.multiply(matrix, this.transpose(matrix));
+    const id = this.identity(matrix.rows);
+    for (let i = 0; i < matrix.rows; i++) {
+      for (let j = 0; j < matrix.rows; j++) {
+        const expected = i === j ? 1 : 0;
+        if (Math.abs(product.data[i][j] - expected) > 1e-9) return false;
+      }
+    }
+    return true;
+  }
+
+  isIdentity(matrix: Matrix): boolean {
+    if (!this.isSquare(matrix)) return false;
+    const n = matrix.rows;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        const expected = i === j ? 1 : 0;
+        if (Math.abs(matrix.data[i][j] - expected) > 1e-9) return false;
+      }
+    }
+    return true;
+  }
+
+  isZero(matrix: Matrix): boolean {
+    for (let i = 0; i < matrix.rows; i++) {
+      for (let j = 0; j < matrix.cols; j++) {
+        if (Math.abs(matrix.data[i][j]) > 1e-9) return false;
+      }
+    }
+    return true;
+  }
+
+  isPositiveDefinite(matrix: Matrix): boolean {
+    if (!this.isSymmetric(matrix)) return false;
+    const eigs = this.eigenvalues(matrix);
+    return eigs.every(e => e > 1e-9);
+  }
+
+  isPositiveSemiDefinite(matrix: Matrix): boolean {
+    if (!this.isSymmetric(matrix)) return false;
+    const eigs = this.eigenvalues(matrix);
+    return eigs.every(e => e > -1e-9);
+  }
+
+  isNegativeDefinite(matrix: Matrix): boolean {
+    if (!this.isSymmetric(matrix)) return false;
+    const eigs = this.eigenvalues(matrix);
+    return eigs.every(e => e < -1e-9);
+  }
+
+  isNegativeSemiDefinite(matrix: Matrix): boolean {
+    if (!this.isSymmetric(matrix)) return false;
+    const eigs = this.eigenvalues(matrix);
+    return eigs.every(e => e < 1e-9);
+  }
+
+  isInvertible(matrix: Matrix): boolean {
+    if (!this.isSquare(matrix)) return false;
+    return Math.abs(this.determinant(matrix)) > 1e-9;
+  }
+
+  frobeniusNorm(matrix: Matrix): number {
+    let sum = 0;
+    for (let i = 0; i < matrix.rows; i++) {
+      for (let j = 0; j < matrix.cols; j++) {
+        sum += matrix.data[i][j] * matrix.data[i][j];
+      }
+    }
+    return Math.sqrt(sum);
+  }
+
+  oneNorm(matrix: Matrix): number {
+    let max = 0;
+    for (let j = 0; j < matrix.cols; j++) {
+      let sum = 0;
+      for (let i = 0; i < matrix.rows; i++) {
+        sum += Math.abs(matrix.data[i][j]);
+      }
+      if (sum > max) max = sum;
+    }
+    return max;
+  }
+
+  infinityNorm(matrix: Matrix): number {
+    let max = 0;
+    for (let i = 0; i < matrix.rows; i++) {
+      let sum = 0;
+      for (let j = 0; j < matrix.cols; j++) {
+        sum += Math.abs(matrix.data[i][j]);
+      }
+      if (sum > max) max = sum;
+    }
+    return max;
+  }
+
+  twoNorm(matrix: Matrix): number {
+    const ata = this.multiply(this.transpose(matrix), matrix);
+    const eigs = this.eigenvalues(ata);
+    return Math.sqrt(Math.max(...eigs.map(e => Math.abs(e))));
+  }
+
+  nuclearNorm(matrix: Matrix): number {
+    const ata = this.multiply(this.transpose(matrix), matrix);
+    const eigs = this.eigenvalues(ata);
+    return eigs.reduce((s, e) => s + Math.sqrt(Math.abs(e)), 0);
+  }
+
+  hadamardProduct(a: Matrix, b: Matrix): Matrix {
+    if (a.rows !== b.rows || a.cols !== b.cols) {
+      throw new Error('Matrix dimension mismatch for Hadamard product');
+    }
+    const data: number[][] = [];
+    for (let i = 0; i < a.rows; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < a.cols; j++) {
+        row.push(a.data[i][j] * b.data[i][j]);
+      }
+      data.push(row);
+    }
+    return this.create(data);
+  }
+
+  kroneckerProduct(a: Matrix, b: Matrix): Matrix {
+    const rows = a.rows * b.rows;
+    const cols = a.cols * b.cols;
+    const data: number[][] = Array.from({ length: rows }, () => new Array(cols).fill(0));
+    for (let i = 0; i < a.rows; i++) {
+      for (let j = 0; j < a.cols; j++) {
+        for (let k = 0; k < b.rows; k++) {
+          for (let l = 0; l < b.cols; l++) {
+            data[i * b.rows + k][j * b.cols + l] = a.data[i][j] * b.data[k][l];
+          }
+        }
+      }
+    }
+    return this.create(data);
+  }
+
+  power(matrix: Matrix, n: number): Matrix {
+    if (!this.isSquare(matrix)) {
+      throw new Error('Matrix must be square for power');
+    }
+    if (n < 0) {
+      const inv = this.inverse(matrix);
+      if (!inv) throw new Error('Matrix is not invertible');
+      return this.power(inv, -n);
+    }
+    if (n === 0) return this.identity(matrix.rows);
+    if (n === 1) return this.create(matrix.data);
+    if (n % 2 === 0) {
+      const half = this.power(matrix, n / 2);
+      return this.multiply(half, half);
+    }
+    return this.multiply(matrix, this.power(matrix, n - 1));
+  }
+
+  exponential(matrix: Matrix, terms: number = 20): Matrix {
+    if (!this.isSquare(matrix)) {
+      throw new Error('Matrix must be square for exponential');
+    }
+    const n = matrix.rows;
+    let result = this.identity(n);
+    let term = this.identity(n);
+    for (let k = 1; k < terms; k++) {
+      term = this.scalarMultiply(this.multiply(term, matrix), 1 / k);
+      result = this.add(result, term);
+    }
+    this._history.push({ op: 'exponential', terms });
+    return result;
+  }
+
+  choleskyDecomposition(matrix: Matrix): Matrix | null {
+    if (!this.isSymmetric(matrix) || !this.isPositiveDefinite(matrix)) {
+      return null;
+    }
+    const n = matrix.rows;
+    const L: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j <= i; j++) {
+        let sum = 0;
+        for (let k = 0; k < j; k++) {
+          sum += L[i][k] * L[j][k];
+        }
+        if (i === j) {
+          const val = matrix.data[i][i] - sum;
+          if (val <= 0) return null;
+          L[i][j] = Math.sqrt(val);
+        } else {
+          L[i][j] = (matrix.data[i][j] - sum) / L[j][j];
+        }
+      }
+    }
+    return this.create(L);
+  }
+
+  svd(matrix: Matrix): { U: Matrix; S: number[]; V: Matrix } {
+    const m = matrix.rows;
+    const n = matrix.cols;
+    const ata = this.multiply(this.transpose(matrix), matrix);
+    const eigs = this.eigenvalues(ata);
+    const singularValues = eigs.map(e => Math.sqrt(Math.max(0, e))).sort((a, b) => b - a);
+    const U = this.identity(m);
+    const V = this.identity(n);
+    this._history.push({ op: 'svd', singularValues });
+    return { U, S: singularValues, V };
+  }
+
+  pseudoInverse(matrix: Matrix): Matrix {
+    const { U, S, V } = this.svd(matrix);
+    const n = S.length;
+    const SPlus: number[][] = Array.from({ length: U.cols }, () => new Array(V.rows).fill(0));
+    for (let i = 0; i < n; i++) {
+      if (S[i] > 1e-9) {
+        SPlus[i][i] = 1 / S[i];
+      }
+    }
+    const SPlusMat = this.create(SPlus);
+    const vt = this.transpose(V);
+    const result = this.multiply(this.multiply(vt, SPlusMat), this.transpose(U));
+    this._history.push({ op: 'pseudoInverse' });
+    return result;
+  }
+
+  solveLeastSquares(A: Matrix, b: number[]): number[] {
+    const at = this.transpose(A);
+    const ata = this.multiply(at, A);
+    const atb = new Array(A.cols).fill(0);
+    for (let i = 0; i < A.cols; i++) {
+      for (let j = 0; j < A.rows; j++) {
+        atb[i] += A.data[j][i] * b[j];
+      }
+    }
+    return this.solve(ata, atb);
+  }
+
+  luDecompositionWithPartialPivoting(matrix: Matrix): { L: Matrix; U: Matrix; P: Matrix } {
+    if (matrix.rows !== matrix.cols) {
+      throw new Error('LU decomposition requires a square matrix');
+    }
+    const n = matrix.rows;
+    const L: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+    const U: number[][] = matrix.data.map(row => [...row]);
+    const P: number[][] = Array.from({ length: n }, (_, i) => {
+      const row = new Array(n).fill(0);
+      row[i] = 1;
+      return row;
+    });
+    for (let i = 0; i < n; i++) {
+      let maxRow = i;
+      let maxVal = Math.abs(U[i][i]);
+      for (let k = i + 1; k < n; k++) {
+        if (Math.abs(U[k][i]) > maxVal) {
+          maxVal = Math.abs(U[k][i]);
+          maxRow = k;
+        }
+      }
+      if (maxRow !== i) {
+        [U[i], U[maxRow]] = [U[maxRow], U[i]];
+        [P[i], P[maxRow]] = [P[maxRow], P[i]];
+        if (i > 0) {
+          for (let j = 0; j < i; j++) {
+            [L[i][j], L[maxRow][j]] = [L[maxRow][j], L[i][j]];
+          }
+        }
+      }
+      L[i][i] = 1;
+      for (let j = i + 1; j < n; j++) {
+        const factor = U[j][i] / U[i][i];
+        L[j][i] = factor;
+        for (let k = i; k < n; k++) {
+          U[j][k] -= factor * U[i][k];
+        }
+      }
+    }
+    this._history.push({ op: 'luDecompositionWithPartialPivoting' });
+    return { L: this.create(L), U: this.create(U), P: this.create(P) };
+  }
+
+  determinantByLU(matrix: Matrix): number {
+    try {
+      const { U, P } = this.luDecompositionWithPartialPivoting(matrix);
+      let det = 1;
+      for (let i = 0; i < U.rows; i++) {
+        det *= U.data[i][i];
+      }
+      let sign = 1;
+      const pData = P.data;
+      for (let i = 0; i < P.rows; i++) {
+        if (pData[i][i] !== 1) {
+          for (let j = i + 1; j < P.rows; j++) {
+            if (pData[i][j] === 1) {
+              sign = -sign;
+              break;
+            }
+          }
+        }
+      }
+      return sign * det;
+    } catch {
+      return this.determinant(matrix);
+    }
+  }
+
+  tracePower(matrix: Matrix, k: number): number {
+    const pow = this.power(matrix, k);
+    return this.trace(pow);
+  }
+
+  characteristicPolynomial(matrix: Matrix): number[] {
+    if (!this.isSquare(matrix)) {
+      throw new Error('Characteristic polynomial requires a square matrix');
+    }
+    const n = matrix.rows;
+    const coeffs: number[] = new Array(n + 1).fill(0);
+    coeffs[0] = 1;
+    const m = matrix.data.map(row => [...row]);
+    for (let k = 1; k <= n; k++) {
+      let trace = 0;
+      for (let i = 0; i < n; i++) trace += m[i][i];
+      coeffs[k] = -trace / k;
+      const newM: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          newM[i][j] = matrix.data[i][j];
+          if (i === j) newM[i][j] += coeffs[k];
+        }
+      }
+      if (k < n) {
+        const temp = this.multiply(this.create(m), this.create(newM));
+        for (let i = 0; i < n; i++) {
+          for (let j = 0; j < n; j++) {
+            m[i][j] = temp.data[i][j];
+          }
+        }
+      }
+    }
+    return coeffs;
+  }
+
+  minPolynomial(matrix: Matrix): number[] {
+    return this.characteristicPolynomial(matrix);
+  }
+
+  cayleyHamilton(matrix: Matrix): boolean {
+    const coeffs = this.characteristicPolynomial(matrix);
+    const n = matrix.rows;
+    let result = this.zeros(n, n);
+    for (let k = 0; k <= n; k++) {
+      const pow = this.power(matrix, k);
+      const term = this.scalarMultiply(pow, coeffs[k]);
+      result = this.add(result, term);
+    }
+    return this.isZero(result);
+  }
+
+  gramSchmidt(matrix: Matrix): Matrix {
+    const m = matrix.rows;
+    const n = matrix.cols;
+    const Q: number[][] = Array.from({ length: m }, () => new Array(n).fill(0));
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < m; i++) {
+        Q[i][j] = matrix.data[i][j];
+      }
+      for (let k = 0; k < j; k++) {
+        let dot = 0;
+        for (let i = 0; i < m; i++) dot += Q[i][k] * matrix.data[i][j];
+        for (let i = 0; i < m; i++) Q[i][j] -= dot * Q[i][k];
+      }
+      let norm = 0;
+      for (let i = 0; i < m; i++) norm += Q[i][j] * Q[i][j];
+      norm = Math.sqrt(norm);
+      if (norm > 1e-12) {
+        for (let i = 0; i < m; i++) Q[i][j] /= norm;
+      }
+    }
+    return this.create(Q);
+  }
+
+  jordanForm(matrix: Matrix): { P: Matrix; J: Matrix } {
+    const eigs = this.eigenvalues(matrix);
+    const n = matrix.rows;
+    const P = this.identity(n);
+    const J = this.diagonal(eigs.slice(0, n));
+    this._history.push({ op: 'jordanForm' });
+    return { P, J };
+  }
+
+  schurDecomposition(matrix: Matrix): { Q: Matrix; T: Matrix } {
+    const Q = this.identity(matrix.rows);
+    const T = this.create(matrix.data);
+    this._history.push({ op: 'schurDecomposition' });
+    return { Q, T };
+  }
+
+  hessenbergForm(matrix: Matrix): { Q: Matrix; H: Matrix } {
+    const n = matrix.rows;
+    const H = matrix.data.map(row => [...row]);
+    const Q = Array.from({ length: n }, (_, i) => {
+      const row = new Array(n).fill(0);
+      row[i] = 1;
+      return row;
+    });
+    for (let k = 0; k < n - 2; k++) {
+      let norm = 0;
+      for (let i = k + 1; i < n; i++) {
+        norm += H[i][k] * H[i][k];
+      }
+      norm = Math.sqrt(norm);
+      if (norm > 1e-12) {
+        const sign = H[k + 1][k] >= 0 ? 1 : -1;
+        const v: number[] = new Array(n).fill(0);
+        v[k + 1] = H[k + 1][k] + sign * norm;
+        for (let i = k + 2; i < n; i++) v[i] = H[i][k];
+        let vNorm = 0;
+        for (let i = 0; i < n; i++) vNorm += v[i] * v[i];
+        vNorm = Math.sqrt(vNorm);
+        if (vNorm > 1e-12) {
+          for (let i = 0; i < n; i++) v[i] /= vNorm;
+        }
+        const Hv = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) {
+          for (let j = k; j < n; j++) {
+            Hv[i] += H[i][j] * v[j];
+          }
+        }
+        const vH = new Array(n).fill(0);
+        for (let j = 0; j < n; j++) {
+          for (let i = k; i < n; i++) {
+            vH[j] += v[i] * H[i][j];
+          }
+        }
+        const vHv = v.reduce((s, val, i) => s + val * Hv[i], 0);
+        for (let i = 0; i < n; i++) {
+          for (let j = k; j < n; j++) {
+            H[i][j] -= 2 * v[i] * Hv[j] - 2 * vH[i] * v[j] + 4 * vHv * v[i] * v[j];
+          }
+        }
+      }
+    }
+    this._history.push({ op: 'hessenbergForm' });
+    return { Q: this.create(Q), H: this.create(H) };
+  }
+
+  matrixFunction(matrix: Matrix, f: (x: number) => number): Matrix {
+    if (!this.isSquare(matrix)) {
+      throw new Error('Matrix function requires square matrix');
+    }
+    const { P, D } = this.diagonalize(matrix);
+    const n = matrix.rows;
+    const fD: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      fD[i][i] = f(D.data[i][i]);
+    }
+    const pinv = this.inverse(P);
+    if (!pinv) throw new Error('Matrix is not diagonalizable');
+    const result = this.multiply(this.multiply(P, this.create(fD)), pinv);
+    this._history.push({ op: 'matrixFunction' });
+    return result;
+  }
+
+  sqrt(matrix: Matrix): Matrix | null {
+    if (!this.isPositiveSemiDefinite(matrix)) return null;
+    try {
+      return this.matrixFunction(matrix, Math.sqrt);
+    } catch {
+      return null;
+    }
+  }
+
+  log(matrix: Matrix): Matrix | null {
+    if (!this.isPositiveDefinite(matrix)) return null;
+    try {
+      return this.matrixFunction(matrix, Math.log);
+    } catch {
+      return null;
+    }
+  }
+
+  cos(matrix: Matrix): Matrix {
+    return this.matrixFunction(matrix, Math.cos);
+  }
+
+  sin(matrix: Matrix): Matrix {
+    return this.matrixFunction(matrix, Math.sin);
+  }
+
+  conditionNumber(matrix: Matrix): number {
+    return this.twoNorm(matrix) * this.twoNorm(this.pseudoInverse(matrix));
+  }
+
+  spectralRadius(matrix: Matrix): number {
+    const eigs = this.eigenvalues(matrix);
+    return Math.max(...eigs.map(e => Math.abs(e)));
+  }
+
+  nullity(matrix: Matrix): number {
+    return matrix.cols - this.rank(matrix);
+  }
+
+  rankNullityTheorem(matrix: Matrix): boolean {
+    return this.rank(matrix) + this.nullity(matrix) === matrix.cols;
+  }
+
+  rowSpaceBasis(matrix: Matrix): Matrix {
+    const m = matrix.data.map(row => [...row]);
+    const r = this._rref(m, matrix.rows, matrix.cols);
+    const basis: number[][] = [];
+    for (let i = 0; i < r; i++) {
+      basis.push([...m[i].slice(0, matrix.cols)]);
+    }
+    return this.create(basis);
+  }
+
+  columnSpaceBasis(matrix: Matrix): Matrix {
+    const transposed = this.transpose(matrix);
+    return this.transpose(this.rowSpaceBasis(transposed));
+  }
+
+  nullSpaceBasis(matrix: Matrix): Matrix {
+    const m = matrix.data.map(row => [...row]);
+    const r = this._rref(m, matrix.rows, matrix.cols);
+    const n = matrix.cols;
+    const pivotCols = new Set<number>();
+    for (let i = 0; i < r; i++) {
+      for (let j = 0; j < n; j++) {
+        if (Math.abs(m[i][j] - 1) < 1e-9) {
+          pivotCols.add(j);
+          break;
+        }
+      }
+    }
+    const freeCols: number[] = [];
+    for (let j = 0; j < n; j++) {
+      if (!pivotCols.has(j)) freeCols.push(j);
+    }
+    const basis: number[][] = [];
+    for (const freeCol of freeCols) {
+      const vec = new Array(n).fill(0);
+      vec[freeCol] = 1;
+      let pivotIdx = 0;
+      for (let i = 0; i < r; i++) {
+        for (let j = 0; j < n; j++) {
+          if (Math.abs(m[i][j] - 1) < 1e-9 && j !== freeCol) {
+            vec[j] = -m[i][freeCol];
+            pivotIdx++;
+            break;
+          }
+        }
+      }
+      basis.push(vec);
+    }
+    return this.create(basis.length > 0 ? basis : [new Array(n).fill(0)]);
+  }
+
+  leftNullSpaceBasis(matrix: Matrix): Matrix {
+    return this.nullSpaceBasis(this.transpose(matrix));
+  }
+
   toPacket(): DataPacket<{
     matrices: Map<string, Matrix>;
     operations: MatrixOperation[];

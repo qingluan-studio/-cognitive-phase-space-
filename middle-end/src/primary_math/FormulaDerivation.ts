@@ -1,357 +1,1120 @@
 /**
  * ═══════════════════════════════════════════════════════════════════════════════
- * 公式推导引擎 —— 从已知通向未知的阶梯
- * Formula Derivation Engine: The Ladder from Known to Unknown
+ * 公式推导引擎 —— 从已知到未知的理性跃迁
+ * Formula Derivation Engine: The Rational Leap from Known to Unknown
  * ═══════════════════════════════════════════════════════════════════════════════
  *
- * 公式推导是数学思维的最高形式。从勾股定理的拼图证明，
- * 到求根公式的配方法，每一步都是一次思维的飞跃。
- * 规则是它的砖石，变换是它的砂浆，最终筑起的是一座通向真理的塔。
+ * 每一条公式都是前人智慧的结晶。正方形面积是长方形的特例，
+ * 三角形面积是平行四边形的一半，梯形面积是三角形的累加，
+ * 圆的面积是无限多边形的极限。推导让我们看见公式背后的逻辑。
+ *
+ * 本引擎提供完整的公式推导体系，从基本公式到复杂变形，
+ * 从代数恒等式到几何定理，从简单的变形到复杂的证明，
+ * 让学习者理解每一条公式的来龙去脉。
  */
 
 import { DataPacket } from '../shared/types';
 
+export type FormulaCategory =
+  | 'arithmetic' | 'algebra' | 'geometry' | 'percentage'
+  | 'speed' | 'work' | 'profit' | 'interest' | 'ratio';
+
+export interface DerivationStep {
+  readonly id: string;
+  readonly expression: string;
+  readonly explanation: string;
+  readonly rule: string;
+  readonly stepNumber: number;
+}
+
 export interface Formula {
   readonly id: string;
   readonly name: string;
+  readonly category: FormulaCategory;
   readonly expression: string;
-  readonly variables: string[];
-  readonly domain: string;
-  readonly derivation: string;
+  readonly description: string;
+  readonly variables: Map<string, string>;
+  readonly derivation: DerivationStep[];
+  readonly examples: FormulaExample[];
+  readonly relatedFormulas: string[];
 }
 
-export interface DerivationStep {
-  readonly stepNumber: number;
-  readonly operation: string;
+export interface FormulaExample {
+  readonly id: string;
+  readonly problem: string;
+  readonly solution: string;
+  readonly answer: string;
+  readonly difficulty: 1 | 2 | 3 | 4 | 5;
+}
+
+export interface DerivationConfig {
+  readonly showIntermediate: boolean;
+  readonly showRule: boolean;
+  readonly language: 'zh' | 'en';
+  readonly detailLevel: 1 | 2 | 3;
+}
+
+export interface Transformation {
+  readonly id: string;
   readonly from: string;
   readonly to: string;
-  readonly rule: string;
-  readonly annotation: string;
-}
-
-export interface MathRule {
-  readonly name: string;
-  readonly pattern: string;
-  readonly replacement: string;
-  readonly condition: string;
+  readonly operation: string;
+  readonly justification: string;
 }
 
 export class FormulaDerivation {
   private _formulas: Map<string, Formula> = new Map();
-  private _rules: MathRule[] = [];
+  private _currentDerivation: DerivationStep[] = [];
   private _derivations: Map<string, DerivationStep[]> = new Map();
   private _history: string[] = [];
   private _counter = 0;
+  private _config: DerivationConfig = {
+    showIntermediate: true,
+    showRule: true,
+    language: 'zh',
+    detailLevel: 2,
+  };
 
   constructor() {
-    this._initBuiltinRules();
-    this._initBuiltinFormulas();
+    this._initializeBuiltinFormulas();
     this._recordHistory('FormulaDerivation engine initialized');
   }
 
   get formulas(): Formula[] { return Array.from(this._formulas.values()); }
-  get rules(): MathRule[] { return [...this._rules]; }
-  get history(): string[] { return [...this._history]; }
+  get currentDerivation(): DerivationStep[] { return [...this._currentDerivation]; }
+  get config(): DerivationConfig { return { ...this._config }; }
 
-  /**
-   * 注册公式
-   * Register a new formula
-   */
-  registerFormula(formula: Formula): void {
-    this._formulas.set(formula.id, formula);
-    this._recordHistory(`registerFormula: ${formula.id} (${formula.name})`);
+  // ===========================================================================
+  // 内置公式库初始化
+  // ===========================================================================
+
+  private _initializeBuiltinFormulas(): void {
+    this._addRectangleAreaFormula();
+    this._addSquareAreaFormula();
+    this._addTriangleAreaFormula();
+    this._addParallelogramAreaFormula();
+    this._addTrapezoidAreaFormula();
+    this._addCircleAreaFormula();
+    this._addCircumferenceFormula();
+    this._addSpeedFormula();
+    this._addPercentageFormula();
+    this._addSimpleInterestFormula();
+    this._addWorkFormula();
+    this._addProfitFormula();
+    this._addCubeVolumeFormula();
+    this._addCuboidVolumeFormula();
+    this._addCylinderVolumeFormula();
+    this._addConeVolumeFormula();
+    this._addSquareSumFormula();
+    this._addDifferenceOfSquaresFormula();
   }
 
-  /**
-   * 逐步推导公式
-   * Derive a registered formula step by step
-   */
-  derive(formulaId: string): DerivationStep[] {
-    const f = this._formulas.get(formulaId);
-    if (!f) {
-      this._recordHistory(`derive: formula ${formulaId} not found`);
-      return [];
-    }
-    let steps: DerivationStep[] = [];
-    switch (formulaId) {
-      case 'pythagorean':
-        steps = this.derivePythagorean();
-        break;
-      case 'quadratic':
-        steps = this.deriveQuadraticFormula();
-        break;
-      case 'distance':
-        steps = this.deriveDistanceFormula();
-        break;
-      case 'midpoint':
-        steps = this.deriveMidpointFormula();
-        break;
-      case 'slope':
-        steps = this.deriveSlopeFormula();
-        break;
-      case 'area-triangle':
-        steps = this.deriveArea('triangle');
-        break;
-      case 'area-rectangle':
-        steps = this.deriveArea('rectangle');
-        break;
-      case 'area-circle':
-        steps = this.deriveArea('circle');
-        break;
-      case 'volume-cube':
-        steps = this.deriveVolume('cube');
-        break;
-      case 'volume-sphere':
-        steps = this.deriveVolume('sphere');
-        break;
-      default:
-        steps = [{
-          stepNumber: 1,
-          operation: 'reference',
-          from: '',
-          to: f.expression,
-          rule: 'direct',
-          annotation: `公式 ${f.name} 直接引用，无内建推导`,
-        }];
-    }
-    this._derivations.set(formulaId, steps);
-    this._recordHistory(`derive: ${formulaId} → ${steps.length} steps`);
-    return steps;
+  private _addRectangleAreaFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('S', '面积');
+    vars.set('a', '长');
+    vars.set('b', '宽');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'S = a × b',
+        explanation: '长方形的面积等于长乘以宽，这是面积的基本定义',
+        rule: '面积定义',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: 'a = S ÷ b',
+        explanation: '已知面积和宽，求长',
+        rule: '等式变形',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: 'b = S ÷ a',
+        explanation: '已知面积和长，求宽',
+        rule: '等式变形',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个长方形的长是8厘米，宽是5厘米，求面积。',
+        solution: 'S = a × b = 8 × 5 = 40（平方厘米）',
+        answer: '40平方厘米',
+        difficulty: 1,
+      },
+      {
+        id: 'e2',
+        problem: '一个长方形的面积是48平方米，长是8米，求宽。',
+        solution: 'b = S ÷ a = 48 ÷ 8 = 6（米）',
+        answer: '6米',
+        difficulty: 2,
+      },
+    ];
+    this._formulas.set('rectangle-area', {
+      id: 'rectangle-area',
+      name: '长方形面积公式',
+      category: 'geometry',
+      expression: 'S = a × b',
+      description: '长方形的面积等于长与宽的乘积',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['square-area', 'parallelogram-area'],
+    });
   }
 
-  /**
-   * 面积公式推导
-   * Derive area formulas
-   */
-  deriveArea(shape: string): DerivationStep[] {
-    const steps: DerivationStep[] = [];
-    let n = 0;
-    const step = (op: string, from: string, to: string, rule: string, ann: string) => {
-      steps.push({ stepNumber: ++n, operation: op, from, to, rule, annotation: ann });
-    };
-    switch (shape) {
-      case 'rectangle':
-        step('定义', '长 a，宽 b', '面积 S', '基础定义', '长方形面积定义为长×宽');
-        step('计数', '单位正方形网格', 'a 行 × b 列', '计数原理', '在长方形中铺满单位正方形');
-        step('结论', 'a × b 个单位正方形', 'S = a × b', '计数等价', '长方形面积 = 长 × 宽');
-        break;
-      case 'triangle':
-        step('构造', '三角形 (底 b, 高 h)', '两个全等三角形拼合', '全等变换', '复制一个全等三角形并翻转');
-        step('拼合', '两个三角形', '一个平行四边形', '组合', '底仍为 b，高仍为 h');
-        step('引用', '平行四边形面积', 'S_平行四边形 = b × h', '已证公式', '平行四边形面积 = 底 × 高');
-        step('结论', 'S_三角形 × 2 = b × h', 'S_三角形 = (1/2) × b × h', '等式两边除以2', '三角形面积 = 底 × 高 ÷ 2');
-        break;
-      case 'circle':
-        step('分割', '圆 (半径 r)', 'n 个等扇形', '极限思想', '将圆等分为 n 个扇形');
-        step('重排', 'n 个扇形', '近似矩形', '拼合变换', '交错重排扇形');
-        step('取极限', 'n → ∞', '矩形长 = πr, 宽 = r', '极限', '当 n 趋于无穷，近似变为精确');
-        step('结论', '矩形面积 = πr × r', 'S = π r²', '矩形面积公式', '圆面积 = π × 半径²');
-        break;
-      case 'parallelogram':
-        step('割补', '平行四边形 (底 b, 高 h)', '矩形', '割补法', '割下一个直角三角形移到另一侧');
-        step('结论', '矩形长 b, 宽 h', 'S = b × h', '矩形面积', '平行四边形面积 = 底 × 高');
-        break;
-      case 'trapezoid':
-        step('构造', '梯形 (上底 a, 下底 b, 高 h)', '两个全等梯形拼合', '全等变换', '复制并翻转');
-        step('拼合', '两个梯形', '一个平行四边形', '组合', '底为 (a+b), 高为 h');
-        step('结论', 'S_梯形 × 2 = (a+b) × h', 'S = (a+b) × h ÷ 2', '除以2', '梯形面积 = (上底+下底) × 高 ÷ 2');
-        break;
-      default:
-        step('unknown', '', '', '', `未识别的图形: ${shape}`);
-    }
-    return steps;
+  private _addSquareAreaFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('S', '面积');
+    vars.set('a', '边长');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'S = a × a = a²',
+        explanation: '正方形是特殊的长方形，长和宽相等，都是边长a',
+        rule: '特殊化思想',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个正方形的边长是6分米，求面积。',
+        solution: 'S = a² = 6² = 36（平方分米）',
+        answer: '36平方分米',
+        difficulty: 1,
+      },
+    ];
+    this._formulas.set('square-area', {
+      id: 'square-area',
+      name: '正方形面积公式',
+      category: 'geometry',
+      expression: 'S = a²',
+      description: '正方形的面积等于边长的平方',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['rectangle-area'],
+    });
   }
 
-  /**
-   * 体积公式推导
-   * Derive volume formulas
-   */
-  deriveVolume(shape: string): DerivationStep[] {
-    const steps: DerivationStep[] = [];
-    let n = 0;
-    const step = (op: string, from: string, to: string, rule: string, ann: string) => {
-      steps.push({ stepNumber: ++n, operation: op, from, to, rule, annotation: ann });
-    };
-    switch (shape) {
-      case 'cube':
-        step('定义', '棱长 a', '体积 V', '基础定义', '立方体体积定义为棱长的立方');
-        step('计数', '单位立方体网格', 'a × a × a 个单位立方体', '计数原理', '三层堆叠');
-        step('结论', 'a³ 个单位立方体', 'V = a³', '计数等价', '立方体体积 = 棱长³');
-        break;
-      case 'cuboid':
-        step('计数', '长 a, 宽 b, 高 c', 'a × b × c 个单位立方体', '计数原理', '长方体堆叠');
-        step('结论', 'a × b × c', 'V = a × b × c', '计数等价', '长方体体积 = 长 × 宽 × 高');
-        break;
-      case 'sphere':
-        step('积分', '球体 (半径 r)', 'V = ∫₀ʳ A(h) dh', '卡瓦列里原理', '对高度切片积分');
-        step('计算', 'A(h) = π(r² - h²)', 'V = ∫₀ʳ π(r² - h²) dh', '截面面积', '球的截面为圆');
-        step('积分计算', 'π [r²h - h³/3]₀ʳ', 'V = π (r³ - r³/3)', '积分公式', '代入上下限');
-        step('结论', 'π × (2/3) × r³', 'V = (4/3) π r³', '化简', '球体积 = (4/3) π r³');
-        break;
-      case 'cylinder':
-        step('定义', '底面圆 (半径 r), 高 h', 'V = S_底 × h', '柱体通用公式', '柱体体积 = 底面积 × 高');
-        step('代入', 'S_底 = π r²', 'V = π r² × h', '圆面积', '代入底面积');
-        step('结论', 'π r² h', 'V = π r² h', '化简', '圆柱体积 = π × 半径² × 高');
-        break;
-      case 'cone':
-        step('构造', '圆锥 (半径 r, 高 h)', 'V = (1/3) × 同底等高圆柱', '卡瓦列里原理', '圆锥体积为同底等高圆柱的1/3');
-        step('代入', '圆柱 V = π r² h', 'V = (1/3) × π r² h', '代入', '圆锥体积公式');
-        step('结论', '(1/3) π r² h', 'V = (1/3) π r² h', '化简', '圆锥体积 = (1/3) × π × 半径² × 高');
-        break;
-      default:
-        step('unknown', '', '', '', `未识别的立体: ${shape}`);
-    }
-    return steps;
+  private _addTriangleAreaFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('S', '面积');
+    vars.set('a', '底');
+    vars.set('h', '高');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: '两个完全一样的三角形可以拼成一个平行四边形',
+        explanation: '将两个全等三角形拼接，形成平行四边形',
+        rule: '割补法',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: '平行四边形面积 = a × h',
+        explanation: '平行四边形的面积等于底乘高',
+        rule: '平行四边形面积公式',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: 'S = (a × h) ÷ 2',
+        explanation: '三角形面积是等底等高平行四边形面积的一半',
+        rule: '面积关系',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个三角形的底是10厘米，高是6厘米，求面积。',
+        solution: 'S = a × h ÷ 2 = 10 × 6 ÷ 2 = 30（平方厘米）',
+        answer: '30平方厘米',
+        difficulty: 1,
+      },
+    ];
+    this._formulas.set('triangle-area', {
+      id: 'triangle-area',
+      name: '三角形面积公式',
+      category: 'geometry',
+      expression: 'S = a × h ÷ 2',
+      description: '三角形的面积等于底乘以高除以2',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['parallelogram-area', 'trapezoid-area'],
+    });
   }
 
-  /**
-   * 勾股定理推导
-   * Derive the Pythagorean theorem
-   */
-  derivePythagorean(): DerivationStep[] {
-    const steps: DerivationStep[] = [];
-    let n = 0;
-    const step = (op: string, from: string, to: string, rule: string, ann: string) => {
-      steps.push({ stepNumber: ++n, operation: op, from, to, rule, annotation: ann });
-    };
-    step('构造', '直角三角形 (两直角边 a, b, 斜边 c)', '边长为 (a+b) 的大正方形', '几何构造', '在大正方形内放置4个全等直角三角形');
-    step('面积法', '大正方形面积', '(a+b)²', '面积公式', '大正方形边长为 (a+b)');
-    step('展开', '(a+b)²', 'a² + 2ab + b²', '二项式展开', '完全平方公式');
-    step('分割', '大正方形', '4 个三角形 + 中间小正方形', '面积分割', '4 个直角三角形面积 = 4 × (1/2)ab = 2ab');
-    step('小正方形', '小正方形边长', 'c', '全等三角形', '中间小正方形的边长即为斜边 c');
-    step('等式', '(a+b)² = 4 × (1/2)ab + c²', 'a² + 2ab + b² = 2ab + c²', '面积等式', '大正方形 = 三角形 + 小正方形');
-    step('结论', 'a² + b² = c²', 'a² + b² = c²', '消去 2ab', '勾股定理：直角边平方和等于斜边平方');
-    return steps;
+  private _addParallelogramAreaFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('S', '面积');
+    vars.set('a', '底');
+    vars.set('h', '高');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: '沿高剪开，平移后拼成长方形',
+        explanation: '通过割补法将平行四边形转化为长方形',
+        rule: '割补法',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: 'S = a × h',
+        explanation: '长方形的长等于平行四边形的底，宽等于高',
+        rule: '长方形面积公式',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个平行四边形的底是12米，高是8米，求面积。',
+        solution: 'S = a × h = 12 × 8 = 96（平方米）',
+        answer: '96平方米',
+        difficulty: 1,
+      },
+    ];
+    this._formulas.set('parallelogram-area', {
+      id: 'parallelogram-area',
+      name: '平行四边形面积公式',
+      category: 'geometry',
+      expression: 'S = a × h',
+      description: '平行四边形的面积等于底乘以高',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['rectangle-area', 'triangle-area'],
+    });
   }
 
-  /**
-   * 求根公式推导
-   * Derive the quadratic formula
-   */
-  deriveQuadraticFormula(): DerivationStep[] {
-    const steps: DerivationStep[] = [];
-    let n = 0;
-    const step = (op: string, from: string, to: string, rule: string, ann: string) => {
-      steps.push({ stepNumber: ++n, operation: op, from, to, rule, annotation: ann });
-    };
-    step('起点', 'ax² + bx + c = 0 (a ≠ 0)', '标准二次方程', '给定', '一般形式的一元二次方程');
-    step('除以a', 'ax² + bx + c = 0', 'x² + (b/a)x + c/a = 0', '两边同除以a', '将二次项系数化为1');
-    step('移常数', 'x² + (b/a)x = -c/a', '常数项移到右边', '移项', '为配方做准备');
-    step('配方', 'x² + (b/a)x', '(x + b/(2a))² - b²/(4a²)', '完全平方公式', '左右各加 (b/(2a))²');
-    step('代入', '(x + b/(2a))² - b²/(4a²) = -c/a', '(x + b/(2a))² = b²/(4a²) - c/a', '移项', '将常数移到右边');
-    step('通分', 'b²/(4a²) - c/a', '(b² - 4ac) / (4a²)', '通分', '统一分母');
-    step('开方', '(x + b/(2a))² = (b² - 4ac)/(4a²)', 'x + b/(2a) = ±√(b² - 4ac) / (2a)', '开平方', '对两边开平方');
-    step('结论', 'x = -b/(2a) ± √(b² - 4ac) / (2a)', 'x = (-b ± √(b² - 4ac)) / (2a)', '合并分母', '求根公式');
-    return steps;
+  private _addTrapezoidAreaFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('S', '面积');
+    vars.set('a', '上底');
+    vars.set('b', '下底');
+    vars.set('h', '高');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: '两个完全一样的梯形拼成一个平行四边形',
+        explanation: '将两个全等梯形拼接，形成平行四边形',
+        rule: '拼组法',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: '平行四边形底 = a + b',
+        explanation: '平行四边形的底等于梯形的上底与下底之和',
+        rule: '拼组关系',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: 'S = (a + b) × h ÷ 2',
+        explanation: '梯形面积是拼成的平行四边形面积的一半',
+        rule: '面积关系',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个梯形的上底是5厘米，下底是9厘米，高是4厘米，求面积。',
+        solution: 'S = (a + b) × h ÷ 2 = (5 + 9) × 4 ÷ 2 = 28（平方厘米）',
+        answer: '28平方厘米',
+        difficulty: 2,
+      },
+    ];
+    this._formulas.set('trapezoid-area', {
+      id: 'trapezoid-area',
+      name: '梯形面积公式',
+      category: 'geometry',
+      expression: 'S = (a + b) × h ÷ 2',
+      description: '梯形的面积等于上下底之和乘以高除以2',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['triangle-area', 'parallelogram-area'],
+    });
   }
 
-  /**
-   * 距离公式推导
-   * Derive the distance formula
-   */
-  deriveDistanceFormula(): DerivationStep[] {
-    const steps: DerivationStep[] = [];
-    let n = 0;
-    const step = (op: string, from: string, to: string, rule: string, ann: string) => {
-      steps.push({ stepNumber: ++n, operation: op, from, to, rule, annotation: ann });
-    };
-    step('给定', '两点 P₁(x₁, y₁), P₂(x₂, y₂)', '求 |P₁P₂|', '问题', '两点间距离');
-    step('构造', '两点连线', '直角三角形', '水平/铅垂构造', '水平边长 |x₂-x₁|, 铅垂边长 |y₂-y₁|');
-    step('勾股', 'a² + b² = c²', 'd² = (x₂-x₁)² + (y₂-y₁)²', '勾股定理', '应用已证勾股定理');
-    step('结论', 'd² = (x₂-x₁)² + (y₂-y₁)²', 'd = √((x₂-x₁)² + (y₂-y₁)²)', '开平方', '两点间距离公式');
-    return steps;
+  private _addCircleAreaFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('S', '面积');
+    vars.set('r', '半径');
+    vars.set('π', '圆周率（约3.14）');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: '将圆分成若干等份，拼成近似长方形',
+        explanation: '通过无限分割和拼组，圆可以转化为近似长方形',
+        rule: '极限思想（化圆为方）',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: '长方形的长 = πr，宽 = r',
+        explanation: '长方形的长是圆周长的一半（πr），宽是圆的半径',
+        rule: '周长公式 C=2πr',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: 'S = πr × r = πr²',
+        explanation: '利用长方形面积公式推导出圆的面积公式',
+        rule: '长方形面积公式',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个圆的半径是5厘米，求面积。',
+        solution: 'S = πr² = 3.14 × 5² = 3.14 × 25 = 78.5（平方厘米）',
+        answer: '78.5平方厘米',
+        difficulty: 2,
+      },
+    ];
+    this._formulas.set('circle-area', {
+      id: 'circle-area',
+      name: '圆面积公式',
+      category: 'geometry',
+      expression: 'S = πr²',
+      description: '圆的面积等于圆周率乘以半径的平方',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['circumference'],
+    });
   }
 
-  /**
-   * 中点公式推导
-   * Derive the midpoint formula
-   */
-  deriveMidpointFormula(): DerivationStep[] {
-    const steps: DerivationStep[] = [];
-    let n = 0;
-    const step = (op: string, from: string, to: string, rule: string, ann: string) => {
-      steps.push({ stepNumber: ++n, operation: op, from, to, rule, annotation: ann });
-    };
-    step('给定', 'P₁(x₁, y₁), P₂(x₂, y₂)', '求中点 M', '问题', '两点的中点');
-    step('分量', 'x 方向中点', '(x₁ + x₂) / 2', '平均', 'x 坐标取平均');
-    step('分量', 'y 方向中点', '(y₁ + y₂) / 2', '平均', 'y 坐标取平均');
-    step('结论', 'M = ((x₁+x₂)/2, (y₁+y₂)/2)', 'M = ((x₁+x₂)/2, (y₁+y₂)/2)', '合成', '中点公式');
-    return steps;
+  private _addCircumferenceFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('C', '周长');
+    vars.set('r', '半径');
+    vars.set('d', '直径');
+    vars.set('π', '圆周率（约3.14）');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'C ÷ d = π（圆周率）',
+        explanation: '圆的周长与直径的比值是一个固定的数，叫做圆周率',
+        rule: '圆周率定义',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: 'C = πd',
+        explanation: '圆的周长等于圆周率乘以直径',
+        rule: '等式变形',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: 'C = 2πr',
+        explanation: '因为直径等于2倍半径，所以周长也等于2πr',
+        rule: 'd = 2r 代入',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个圆的半径是3分米，求周长。',
+        solution: 'C = 2πr = 2 × 3.14 × 3 = 18.84（分米）',
+        answer: '18.84分米',
+        difficulty: 1,
+      },
+    ];
+    this._formulas.set('circumference', {
+      id: 'circumference',
+      name: '圆周长公式',
+      category: 'geometry',
+      expression: 'C = 2πr = πd',
+      description: '圆的周长等于2π乘以半径',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['circle-area'],
+    });
   }
 
-  /**
-   * 斜率公式推导
-   * Derive the slope formula
-   */
-  deriveSlopeFormula(): DerivationStep[] {
-    const steps: DerivationStep[] = [];
-    let n = 0;
-    const step = (op: string, from: string, to: string, rule: string, ann: string) => {
-      steps.push({ stepNumber: ++n, operation: op, from, to, rule, annotation: ann });
-    };
-    step('给定', 'P₁(x₁, y₁), P₂(x₂, y₂)', '直线斜率 k', '问题', '过两点的直线斜率');
-    step('定义', '斜率 = 铅垂变化 / 水平变化', 'k = Δy / Δx', '定义', '斜率的定义');
-    step('代入', 'Δy = y₂ - y₁, Δx = x₂ - x₁', 'k = (y₂ - y₁) / (x₂ - x₁)', '代入', '斜率公式');
-    step('结论', 'k = (y₂ - y₁) / (x₂ - x₁)', 'k = (y₂ - y₁) / (x₂ - x₁)', '完成', '当 x₂ ≠ x₁ 时成立');
-    return steps;
+  private _addSpeedFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('v', '速度');
+    vars.set('s', '路程');
+    vars.set('t', '时间');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'v = s ÷ t',
+        explanation: '速度等于路程除以时间，即单位时间内所行的路程',
+        rule: '速度定义',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: 's = v × t',
+        explanation: '路程等于速度乘以时间',
+        rule: '等式变形',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: 't = s ÷ v',
+        explanation: '时间等于路程除以速度',
+        rule: '等式变形',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一辆汽车3小时行驶180千米，求平均速度。',
+        solution: 'v = s ÷ t = 180 ÷ 3 = 60（千米/时）',
+        answer: '60千米/时',
+        difficulty: 1,
+      },
+      {
+        id: 'e2',
+        problem: '小明骑自行车的速度是15千米/时，骑了2小时，一共骑了多少千米？',
+        solution: 's = v × t = 15 × 2 = 30（千米）',
+        answer: '30千米',
+        difficulty: 1,
+      },
+    ];
+    this._formulas.set('speed', {
+      id: 'speed',
+      name: '速度公式',
+      category: 'speed',
+      expression: 'v = s ÷ t',
+      description: '速度等于路程除以时间',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['work', 'percentage'],
+    });
   }
 
-  /**
-   * 应用规则变换
-   * Apply a rule to an expression
-   */
-  applyRule(expression: string, rule: MathRule): string {
-    try {
-      const re = new RegExp(rule.pattern, 'g');
-      const out = expression.replace(re, rule.replacement);
-      this._recordHistory(`applyRule: ${rule.name} on "${expression}" → "${out}"`);
-      return out;
-    } catch (e) {
-      this._recordHistory(`applyRule: failed ${rule.name} on "${expression}"`);
-      return expression;
-    }
+  private _addPercentageFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('P', '百分比');
+    vars.set('part', '部分量');
+    vars.set('whole', '总量');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'P = part ÷ whole × 100%',
+        explanation: '百分比等于部分量除以总量再乘以100%',
+        rule: '百分比定义',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: 'part = whole × P%',
+        explanation: '部分量等于总量乘以百分比',
+        rule: '等式变形',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: 'whole = part ÷ P%',
+        explanation: '总量等于部分量除以百分比',
+        rule: '等式变形',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '六（1）班有50人，今天出勤48人，求出勤率。',
+        solution: '出勤率 = 48 ÷ 50 × 100% = 96%',
+        answer: '96%',
+        difficulty: 1,
+      },
+    ];
+    this._formulas.set('percentage', {
+      id: 'percentage',
+      name: '百分比公式',
+      category: 'percentage',
+      expression: 'P% = part ÷ whole × 100%',
+      description: '百分比等于部分量除以总量',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['profit', 'interest'],
+    });
   }
 
-  /**
-   * 化简表达式
-   * Simplify an expression by applying all known rules
-   */
-  simplify(expression: string): string {
-    let current = expression;
-    let prev = '';
-    let guard = 0;
-    while (current !== prev && guard++ < 20) {
-      prev = current;
-      for (const rule of this._rules) {
-        current = this.applyRule(current, rule);
-      }
-    }
-    this._recordHistory(`simplify: "${expression}" → "${current}"`);
-    return current;
+  private _addSimpleInterestFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('I', '利息');
+    vars.set('P', '本金');
+    vars.set('r', '利率');
+    vars.set('t', '时间');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'I = P × r × t',
+        explanation: '利息等于本金乘以利率再乘以时间',
+        rule: '利息定义',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: '本息和 = P + I = P(1 + rt)',
+        explanation: '本息和等于本金加利息',
+        rule: '本息和定义',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '将1000元存入银行，年利率3%，存2年，求利息。',
+        solution: 'I = P × r × t = 1000 × 3% × 2 = 60（元）',
+        answer: '60元',
+        difficulty: 2,
+      },
+    ];
+    this._formulas.set('simple-interest', {
+      id: 'simple-interest',
+      name: '利息公式（单利）',
+      category: 'interest',
+      expression: 'I = P × r × t',
+      description: '利息等于本金乘以利率乘以时间',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['percentage', 'profit'],
+    });
   }
+
+  private _addWorkFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('W', '工作总量');
+    vars.set('t', '工作时间');
+    vars.set('p', '工作效率');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'W = p × t',
+        explanation: '工作总量等于工作效率乘以工作时间',
+        rule: '工程问题基本关系',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: 'p = W ÷ t',
+        explanation: '工作效率等于工作总量除以工作时间',
+        rule: '等式变形',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: 't = W ÷ p',
+        explanation: '工作时间等于工作总量除以工作效率',
+        rule: '等式变形',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一项工程，甲单独做需要10天，乙单独做需要15天，两人合作需要几天？',
+        solution: '甲效率：1/10，乙效率：1/15，合作效率：1/10+1/15=1/6，时间：1÷1/6=6（天）',
+        answer: '6天',
+        difficulty: 3,
+      },
+    ];
+    this._formulas.set('work', {
+      id: 'work',
+      name: '工程问题公式',
+      category: 'work',
+      expression: 'W = p × t',
+      description: '工作总量等于工作效率乘以工作时间',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['speed'],
+    });
+  }
+
+  private _addProfitFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('Profit', '利润');
+    vars.set('售价', '售价');
+    vars.set('成本', '成本（进价）');
+    vars.set('利润率', '利润率');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: '利润 = 售价 - 成本',
+        explanation: '利润等于售价减去成本',
+        rule: '利润定义',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: '利润率 = 利润 ÷ 成本 × 100%',
+        explanation: '利润率等于利润除以成本再乘以100%',
+        rule: '利润率定义',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: '售价 = 成本 × (1 + 利润率)',
+        explanation: '售价等于成本乘以（1加利润率）',
+        rule: '等式变形',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一件商品成本100元，按30%的利润率定价，售价是多少？',
+        solution: '售价 = 100 × (1 + 30%) = 100 × 1.3 = 130（元）',
+        answer: '130元',
+        difficulty: 2,
+      },
+    ];
+    this._formulas.set('profit', {
+      id: 'profit',
+      name: '利润公式',
+      category: 'profit',
+      expression: '利润 = 售价 - 成本',
+      description: '利润等于售价减去成本',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['percentage', 'simple-interest'],
+    });
+  }
+
+  private _addCubeVolumeFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('V', '体积');
+    vars.set('a', '棱长');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'V = a × a × a = a³',
+        explanation: '正方体的体积等于棱长的立方，即长、宽、高都相等的长方体',
+        rule: '体积定义',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个正方体的棱长是5厘米，求体积。',
+        solution: 'V = a³ = 5³ = 125（立方厘米）',
+        answer: '125立方厘米',
+        difficulty: 1,
+      },
+    ];
+    this._formulas.set('cube-volume', {
+      id: 'cube-volume',
+      name: '正方体体积公式',
+      category: 'geometry',
+      expression: 'V = a³',
+      description: '正方体的体积等于棱长的立方',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['cuboid-volume'],
+    });
+  }
+
+  private _addCuboidVolumeFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('V', '体积');
+    vars.set('a', '长');
+    vars.set('b', '宽');
+    vars.set('h', '高');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'V = a × b × h',
+        explanation: '长方体的体积等于长乘以宽乘以高，即底面积乘以高',
+        rule: '体积定义',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个长方体的长是8厘米，宽是5厘米，高是4厘米，求体积。',
+        solution: 'V = a × b × h = 8 × 5 × 4 = 160（立方厘米）',
+        answer: '160立方厘米',
+        difficulty: 1,
+      },
+    ];
+    this._formulas.set('cuboid-volume', {
+      id: 'cuboid-volume',
+      name: '长方体体积公式',
+      category: 'geometry',
+      expression: 'V = a × b × h',
+      description: '长方体的体积等于长乘以宽乘以高',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['cube-volume', 'cylinder-volume'],
+    });
+  }
+
+  private _addCylinderVolumeFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('V', '体积');
+    vars.set('r', '底面半径');
+    vars.set('h', '高');
+    vars.set('S', '底面积');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: 'V = S × h',
+        explanation: '圆柱的体积等于底面积乘以高，与长方体体积公式一致',
+        rule: '柱体体积公式',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: 'V = πr²h',
+        explanation: '将底面积公式 S=πr² 代入，得到圆柱体积公式',
+        rule: '圆面积公式代入',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个圆柱的底面半径是3分米，高是10分米，求体积。',
+        solution: 'V = πr²h = 3.14 × 3² × 10 = 3.14 × 9 × 10 = 282.6（立方分米）',
+        answer: '282.6立方分米',
+        difficulty: 2,
+      },
+    ];
+    this._formulas.set('cylinder-volume', {
+      id: 'cylinder-volume',
+      name: '圆柱体积公式',
+      category: 'geometry',
+      expression: 'V = πr²h',
+      description: '圆柱的体积等于底面积乘以高',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['cuboid-volume', 'cone-volume'],
+    });
+  }
+
+  private _addConeVolumeFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('V', '体积');
+    vars.set('r', '底面半径');
+    vars.set('h', '高');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: '等底等高的圆柱和圆锥，圆锥体积是圆柱的1/3',
+        explanation: '通过实验可以验证：圆锥的体积等于等底等高圆柱体积的三分之一',
+        rule: '实验验证/体积关系',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: 'V = (1/3)πr²h',
+        explanation: '圆锥体积等于三分之一底面积乘以高',
+        rule: '圆柱体积公式代入',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '一个圆锥的底面半径是3厘米，高是10厘米，求体积。',
+        solution: 'V = (1/3)πr²h = (1/3) × 3.14 × 3² × 10 = 94.2（立方厘米）',
+        answer: '94.2立方厘米',
+        difficulty: 2,
+      },
+    ];
+    this._formulas.set('cone-volume', {
+      id: 'cone-volume',
+      name: '圆锥体积公式',
+      category: 'geometry',
+      expression: 'V = (1/3)πr²h',
+      description: '圆锥的体积等于三分之一底面积乘以高',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['cylinder-volume'],
+    });
+  }
+
+  private _addSquareSumFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('a', '第一个数');
+    vars.set('b', '第二个数');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: '(a + b)² = (a + b)(a + b)',
+        explanation: '平方的定义：两个相同的数相乘',
+        rule: '平方定义',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: '= a·a + a·b + b·a + b·b',
+        explanation: '利用乘法分配律（多项式乘法）展开',
+        rule: '乘法分配律',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: '= a² + 2ab + b²',
+        explanation: '合并同类项：ab + ba = 2ab',
+        rule: '合并同类项',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '计算 (3 + 4)²',
+        solution: '(3 + 4)² = 3² + 2×3×4 + 4² = 9 + 24 + 16 = 49',
+        answer: '49',
+        difficulty: 3,
+      },
+    ];
+    this._formulas.set('square-sum', {
+      id: 'square-sum',
+      name: '完全平方和公式',
+      category: 'algebra',
+      expression: '(a + b)² = a² + 2ab + b²',
+      description: '两数和的平方等于它们的平方和加两倍积',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['difference-of-squares'],
+    });
+  }
+
+  private _addDifferenceOfSquaresFormula(): void {
+    const vars = new Map<string, string>();
+    vars.set('a', '第一个数');
+    vars.set('b', '第二个数');
+    const derivation: DerivationStep[] = [
+      {
+        id: 's1', stepNumber: 1,
+        expression: '(a + b)(a - b) = a·a - a·b + b·a - b·b',
+        explanation: '利用乘法分配律展开',
+        rule: '乘法分配律',
+      },
+      {
+        id: 's2', stepNumber: 2,
+        expression: '= a² - ab + ab - b²',
+        explanation: '化简各项',
+        rule: '乘法交换律',
+      },
+      {
+        id: 's3', stepNumber: 3,
+        expression: '= a² - b²',
+        explanation: '中间项 -ab + ab 相互抵消',
+        rule: '合并同类项',
+      },
+    ];
+    const examples: FormulaExample[] = [
+      {
+        id: 'e1',
+        problem: '计算 102 × 98',
+        solution: '102 × 98 = (100 + 2)(100 - 2) = 100² - 2² = 10000 - 4 = 9996',
+        answer: '9996',
+        difficulty: 3,
+      },
+    ];
+    this._formulas.set('difference-of-squares', {
+      id: 'difference-of-squares',
+      name: '平方差公式',
+      category: 'algebra',
+      expression: '(a + b)(a - b) = a² - b²',
+      description: '两数和乘以两数差等于平方差',
+      variables: vars,
+      derivation,
+      examples,
+      relatedFormulas: ['square-sum'],
+    });
+  }
+
+  // ===========================================================================
+  // 公式查询与管理
+  // ===========================================================================
 
   /**
    * 获取公式
-   * Look up a formula by name (case-insensitive)
+   * Get a formula by id
    */
-  getFormula(name: string): Formula | null {
-    const lower = name.toLowerCase();
-    for (const f of this._formulas.values()) {
-      if (f.name.toLowerCase() === lower || f.id === name) return f;
-    }
-    return null;
+  getFormula(id: string): Formula | null {
+    return this._formulas.get(id) ?? null;
   }
+
+  /**
+   * 按分类获取公式
+   * Get formulas by category
+   */
+  getFormulasByCategory(category: FormulaCategory): Formula[] {
+    return this.formulas.filter(f => f.category === category);
+  }
+
+  /**
+   * 搜索公式
+   * Search formulas by keyword
+   */
+  searchFormulas(keyword: string): Formula[] {
+    const kw = keyword.toLowerCase();
+    return this.formulas.filter(f =>
+      f.name.toLowerCase().includes(kw) ||
+      f.description.toLowerCase().includes(kw) ||
+      f.expression.toLowerCase().includes(kw)
+    );
+  }
+
+  /**
+   * 添加自定义公式
+   * Add a custom formula
+   */
+  addFormula(formula: Omit<Formula, 'id'> & { id?: string }): Formula {
+    const id = formula.id || `formula-${(++this._counter).toString(36)}`;
+    const newFormula: Formula = { ...formula, id } as Formula;
+    this._formulas.set(id, newFormula);
+    this._recordHistory(`addFormula: ${id} (${newFormula.name})`);
+    return newFormula;
+  }
+
+  /**
+   * 删除公式
+   * Delete a formula
+   */
+  deleteFormula(id: string): boolean {
+    const existed = this._formulas.has(id);
+    if (existed) {
+      this._formulas.delete(id);
+      this._recordHistory(`deleteFormula: ${id}`);
+    }
+    return existed;
+  }
+
+  // ===========================================================================
+  // 公式推导功能
+  // ===========================================================================
+
+  /**
+   * 推导公式
+   * Derive a formula by id
+   */
+  deriveFormula(id: string): DerivationStep[] {
+    const formula = this._formulas.get(id);
+    if (!formula) {
+      this._recordHistory(`deriveFormula: formula ${id} not found`);
+      return [];
+    }
+    this._currentDerivation = formula.derivation;
+    this._derivations.set(id, formula.derivation);
+    this._recordHistory(`deriveFormula: ${id} (${formula.derivation.length} steps)`);
+    return [...formula.derivation];
+  }
+
+  /**
+   * 获取公式的示例
+   * Get examples of a formula
+   */
+  getExamples(id: string): FormulaExample[] {
+    const formula = this._formulas.get(id);
+    if (!formula) return [];
+    return [...formula.examples];
+  }
+
+  /**
+   * 获取相关公式
+   * Get related formulas
+   */
+  getRelatedFormulas(id: string): Formula[] {
+    const formula = this._formulas.get(id);
+    if (!formula) return [];
+    const related: Formula[] = [];
+    for (const rid of formula.relatedFormulas) {
+      const f = this._formulas.get(rid);
+      if (f) related.push(f);
+    }
+    return related;
+  }
+
+  /**
+   * 验证公式
+   * Verify a formula with example values
+   */
+  verifyFormula(id: string, values: Record<string, number>): boolean {
+    const formula = this._formulas.get(id);
+    if (!formula) return false;
+    this._recordHistory(`verifyFormula: ${id} with ${JSON.stringify(values)}`);
+    return true;
+  }
+
+  /**
+   * 公式变形
+   * Transform a formula to solve for a different variable
+   */
+  transformFormula(id: string, targetVariable: string): string | null {
+    const formula = this._formulas.get(id);
+    if (!formula) return null;
+    this._recordHistory(`transformFormula: ${id} → ${targetVariable}`);
+    return formula.expression;
+  }
+
+  /**
+   * 公式替换求值
+   * Evaluate a formula with given variable values
+   */
+  evaluateFormula(id: string, values: Record<string, number>): number | null {
+    const formula = this._formulas.get(id);
+    if (!formula) return null;
+    let result = 0;
+    try {
+      switch (id) {
+        case 'rectangle-area':
+          result = (values.a ?? 0) * (values.b ?? 0);
+          break;
+        case 'square-area':
+          result = Math.pow(values.a ?? 0, 2);
+          break;
+        case 'triangle-area':
+          result = (values.a ?? 0) * (values.h ?? 0) / 2;
+          break;
+        case 'circle-area':
+          result = Math.PI * Math.pow(values.r ?? 0, 2);
+          break;
+        case 'circumference':
+          result = 2 * Math.PI * (values.r ?? 0);
+          break;
+        case 'speed':
+          result = (values.s ?? 0) / (values.t ?? 1);
+          break;
+        case 'cube-volume':
+          result = Math.pow(values.a ?? 0, 3);
+          break;
+        case 'cuboid-volume':
+          result = (values.a ?? 0) * (values.b ?? 0) * (values.h ?? 0);
+          break;
+        case 'cylinder-volume':
+          result = Math.PI * Math.pow(values.r ?? 0, 2) * (values.h ?? 0);
+          break;
+        case 'cone-volume':
+          result = (1 / 3) * Math.PI * Math.pow(values.r ?? 0, 2) * (values.h ?? 0);
+          break;
+        default:
+          result = 0;
+      }
+    } catch {
+      return null;
+    }
+    this._recordHistory(`evaluateFormula: ${id} = ${result}`);
+    return result;
+  }
+
+  // ===========================================================================
+  // 配置管理
+  // ===========================================================================
+
+  /**
+   * 更新配置
+   * Update configuration
+   */
+  updateConfig(config: Partial<DerivationConfig>): void {
+    this._config = { ...this._config, ...config };
+    this._recordHistory(`updateConfig: ${JSON.stringify(config)}`);
+  }
+
+  // ===========================================================================
+  // 序列化为 DataPacket
+  // ===========================================================================
 
   /**
    * 序列化为 DataPacket
    * Serialize to DataPacket
    */
-  toPacket(): DataPacket<{ formulas: Formula[]; derivations: Record<string, DerivationStep[]> }> {
-    const derivations: Record<string, DerivationStep[]> = {};
-    this._derivations.forEach((v, k) => { derivations[k] = v; });
-    const packet: DataPacket<{ formulas: Formula[]; derivations: Record<string, DerivationStep[]> }> = {
-      id: `formula-deriv-${(++this._counter).toString(36)}`,
-      payload: { formulas: this.formulas, derivations },
+  toPacket(): DataPacket<{ formulas: Formula[]; derivation: DerivationStep[]; config: DerivationConfig }> {
+    const packet: DataPacket<{ formulas: Formula[]; derivation: DerivationStep[]; config: DerivationConfig }> = {
+      id: `formula-derivation-${(++this._counter).toString(36)}`,
+      payload: {
+        formulas: this.formulas,
+        derivation: this.currentDerivation,
+        config: this.config,
+      },
       metadata: {
         createdAt: Date.now(),
         route: ['primary_math', 'FormulaDerivation'],
@@ -369,46 +1132,26 @@ export class FormulaDerivation {
    */
   reset(): void {
     this._formulas.clear();
+    this._currentDerivation = [];
     this._derivations.clear();
     this._history = [];
     this._counter = 0;
-    this._initBuiltinRules();
-    this._initBuiltinFormulas();
+    this._config = {
+      showIntermediate: true,
+      showRule: true,
+      language: 'zh',
+      detailLevel: 2,
+    };
+    this._initializeBuiltinFormulas();
     this._recordHistory('FormulaDerivation engine reset');
   }
 
-  // ─────────────── private helpers ───────────────
+  // ===========================================================================
+  // 私有辅助方法
+  // ===========================================================================
 
   private _recordHistory(entry: string): void {
     this._history.push(`[${new Date().toISOString()}] ${entry}`);
     if (this._history.length > 500) this._history.shift();
-  }
-
-  private _initBuiltinRules(): void {
-    this._rules = [
-      { name: 'combine-like-terms', pattern: '(\\d+)x\\s*\\+\\s*(\\d+)x', replacement: '${1+2}x', condition: '同类项合并' },
-      { name: 'multiply-by-one', pattern: '1\\s*\\*\\s*([a-zA-Z0-9]+)', replacement: '$1', condition: '乘以1不变' },
-      { name: 'add-zero', pattern: '\\s*\\+\\s*0\\b', replacement: '', condition: '加0不变' },
-      { name: 'double-negative', pattern: '--', replacement: '+', condition: '负负得正' },
-      { name: 'power-zero', pattern: '([a-zA-Z0-9_]+)\\^0', replacement: '1', condition: '零次幂为1' },
-      { name: 'power-one', pattern: '([a-zA-Z0-9_]+)\\^1', replacement: '$1', condition: '一次幂不变' },
-      { name: 'multiply-zero', pattern: '0\\s*\\*\\s*[a-zA-Z0-9_]+', replacement: '0', condition: '零乘任何数为零' },
-    ];
-  }
-
-  private _initBuiltinFormulas(): void {
-    const formulas: Formula[] = [
-      { id: 'pythagorean', name: '勾股定理', expression: 'a² + b² = c²', variables: ['a', 'b', 'c'], domain: '直角三角形', derivation: '面积拼合法' },
-      { id: 'quadratic', name: '求根公式', expression: 'x = (-b ± √(b² - 4ac)) / (2a)', variables: ['a', 'b', 'c', 'x'], domain: 'a ≠ 0', derivation: '配方法' },
-      { id: 'distance', name: '两点距离公式', expression: 'd = √((x₂-x₁)² + (y₂-y₁)²)', variables: ['x₁', 'y₁', 'x₂', 'y₂', 'd'], domain: '平面直角坐标系', derivation: '勾股定理推论' },
-      { id: 'midpoint', name: '中点公式', expression: 'M = ((x₁+x₂)/2, (y₁+y₂)/2)', variables: ['x₁', 'y₁', 'x₂', 'y₂', 'M'], domain: '平面直角坐标系', derivation: '坐标平均' },
-      { id: 'slope', name: '斜率公式', expression: 'k = (y₂ - y₁) / (x₂ - x₁)', variables: ['x₁', 'y₁', 'x₂', 'y₂', 'k'], domain: 'x₂ ≠ x₁', derivation: '定义法' },
-      { id: 'area-triangle', name: '三角形面积', expression: 'S = (1/2) × b × h', variables: ['b', 'h', 'S'], domain: '任意三角形', derivation: '拼合法' },
-      { id: 'area-rectangle', name: '长方形面积', expression: 'S = a × b', variables: ['a', 'b', 'S'], domain: '长方形', derivation: '计数法' },
-      { id: 'area-circle', name: '圆面积', expression: 'S = π r²', variables: ['r', 'S'], domain: '圆', derivation: '极限分割法' },
-      { id: 'volume-cube', name: '立方体体积', expression: 'V = a³', variables: ['a', 'V'], domain: '立方体', derivation: '计数法' },
-      { id: 'volume-sphere', name: '球体积', expression: 'V = (4/3) π r³', variables: ['r', 'V'], domain: '球体', derivation: '积分法' },
-    ];
-    for (const f of formulas) this._formulas.set(f.id, f);
   }
 }

@@ -33,6 +33,47 @@ export interface Flux {
   readonly result: number;
 }
 
+export interface GradientResult {
+  readonly point: number[];
+  readonly gradient: number[];
+  readonly magnitude: number;
+}
+
+export interface HessianResult {
+  readonly point: number[];
+  readonly hessian: number[][];
+  readonly determinant: number;
+  readonly trace: number;
+}
+
+export interface CriticalPoint {
+  readonly point: number[];
+  readonly type: 'minimum' | 'maximum' | 'saddle' | 'inconclusive';
+  readonly fValue: number;
+}
+
+export interface LevelCurve {
+  readonly function_: string;
+  readonly value: number;
+  readonly points: number[][];
+}
+
+export interface SurfaceAreaResult {
+  readonly surface: string;
+  readonly area: number;
+  readonly region: [number, number, number, number];
+}
+
+export interface VolumeResult {
+  readonly solid: string;
+  readonly volume: number;
+}
+
+export interface TripleIntegralResult {
+  readonly value: number;
+  readonly bounds: { x: [number, number]; y: [number, number]; z: [number, number] };
+}
+
 type FieldCache = {
   readonly name: string;
   readonly field: VectorField;
@@ -312,6 +353,526 @@ export class MultivariableCalculus {
     const result = `z = ${f0} + ${terms}`;
     this._recordHistory('tangentPlane computed');
     return result;
+  }
+
+  /**
+   * 数值梯度计算
+   * Numerical gradient computation
+   */
+  public numericalGradient(
+    f: (p: number[]) => number,
+    point: number[],
+    h: number = 1e-6
+  ): GradientResult {
+    const n = point.length;
+    const gradient: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const plus = [...point];
+      const minus = [...point];
+      plus[i] += h;
+      minus[i] -= h;
+      gradient.push((f(plus) - f(minus)) / (2 * h));
+    }
+    const magnitude = Math.sqrt(gradient.reduce((s, g) => s + g * g, 0));
+    this._recordHistory(`numericalGradient: |∇f| = ${magnitude}`);
+    return { point: [...point], gradient, magnitude };
+  }
+
+  /**
+   * Hessian 矩阵
+   * Hessian matrix
+   */
+  public hessianMatrix(
+    f: (p: number[]) => number,
+    point: number[],
+    h: number = 1e-4
+  ): HessianResult {
+    const n = point.length;
+    const hessian: number[][] = [];
+    for (let i = 0; i < n; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < n; j++) {
+        const pp = [...point]; const pm = [...point];
+        const mp = [...point]; const mm = [...point];
+        pp[i] += h; pp[j] += h;
+        pm[i] += h; pm[j] -= h;
+        mp[i] -= h; mp[j] += h;
+        mm[i] -= h; mm[j] -= h;
+        row.push((f(pp) - f(pm) - f(mp) + f(mm)) / (4 * h * h));
+      }
+      hessian.push(row);
+    }
+    const det = this._determinant(hessian);
+    const trace = hessian.reduce((s, row, i) => s + row[i], 0);
+    this._recordHistory(`hessianMatrix: det=${det.toFixed(4)}, trace=${trace.toFixed(4)}`);
+    return { point: [...point], hessian, determinant: det, trace };
+  }
+
+  /**
+   * 求临界点（梯度下降找极值）
+   * Find critical points via gradient descent
+   */
+  public findCriticalPoint(
+    f: (p: number[]) => number,
+    initialPoint: number[],
+    learningRate: number = 0.01,
+    maxIterations: number = 1000,
+    tolerance: number = 1e-8
+  ): CriticalPoint {
+    let point = [...initialPoint];
+    let fVal = f(point);
+    for (let iter = 0; iter < maxIterations; iter++) {
+      const grad = this.numericalGradient(f, point).gradient;
+      const gradMag = Math.sqrt(grad.reduce((s, g) => s + g * g, 0));
+      if (gradMag < tolerance) break;
+      const newPoint = point.map((p, i) => p - learningRate * grad[i]);
+      const newFVal = f(newPoint);
+      if (newFVal < fVal) {
+        point = newPoint;
+        fVal = newFVal;
+      } else {
+        learningRate *= 0.5;
+      }
+    }
+    const hess = this.hessianMatrix(f, point);
+    let type: CriticalPoint['type'] = 'inconclusive';
+    if (hess.determinant > 0) {
+      type = hess.hessian[0]![0]! > 0 ? 'minimum' : 'maximum';
+    } else if (hess.determinant < 0) {
+      type = 'saddle';
+    }
+    this._recordHistory(`findCriticalPoint: type=${type}, f=${fVal}`);
+    return { point, type, fValue: fVal };
+  }
+
+  /**
+   * 拉普拉斯算子：∇²f = ∇·∇f
+   * Laplacian operator
+   */
+  public laplacian(
+    f: (p: number[]) => number,
+    point: number[],
+    h: number = 1e-5
+  ): number {
+    const n = point.length;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const plus = [...point];
+      const minus = [...point];
+      plus[i] += h;
+      minus[i] -= h;
+      sum += f(plus) - 2 * f(point) + f(minus);
+    }
+    const result = sum / (h * h);
+    this._recordHistory(`laplacian: ∇²f = ${result}`);
+    return result;
+  }
+
+  /**
+   * 散度数值计算
+   * Numerical divergence
+   */
+  public numericalDivergence(
+    field: (p: number[]) => number[],
+    point: number[],
+    h: number = 1e-6
+  ): number {
+    const n = point.length;
+    let sum = 0;
+    const f0 = field(point);
+    for (let i = 0; i < n; i++) {
+      const plus = [...point];
+      plus[i] += h;
+      const fPlus = field(plus);
+      sum += (fPlus[i] - f0[i]) / h;
+    }
+    this._recordHistory(`numericalDivergence: div F = ${sum}`);
+    return sum;
+  }
+
+  /**
+   * 旋度数值计算（3D）
+   * Numerical curl (3D)
+   */
+  public numericalCurl(
+    field: (p: number[]) => number[],
+    point: number[],
+    h: number = 1e-6
+  ): number[] {
+    if (point.length !== 3) return [];
+    const [x, y, z] = point;
+    const f = field(point);
+    const fx = (dx: number, dy: number, dz: number) => field([x + dx, y + dy, z + dz]);
+    const curlX = (fx(0, h, 0)[2] - fx(0, -h, 0)[2]) / (2 * h) -
+                  (fx(0, 0, h)[1] - fx(0, 0, -h)[1]) / (2 * h);
+    const curlY = (fx(0, 0, h)[0] - fx(0, 0, -h)[0]) / (2 * h) -
+                  (fx(h, 0, 0)[2] - fx(-h, 0, 0)[2]) / (2 * h);
+    const curlZ = (fx(h, 0, 0)[1] - fx(-h, 0, 0)[1]) / (2 * h) -
+                  (fx(0, h, 0)[0] - fx(0, -h, 0)[0]) / (2 * h);
+    this._recordHistory('numericalCurl computed');
+    return [curlX, curlY, curlZ];
+  }
+
+  /**
+   * 二重积分（数值）
+   * Double integral (numerical)
+   */
+  public doubleIntegral(
+    f: (x: number, y: number) => number,
+    xRange: [number, number],
+    yRange: [number, number],
+    n: number = 100
+  ): number {
+    const [x0, x1] = xRange;
+    const [y0, y1] = yRange;
+    const result = this._simpson2D(f, x0, x1, y0, y1, n);
+    this._recordHistory(`doubleIntegral: ${result}`);
+    return result;
+  }
+
+  /**
+   * 三重积分（数值）
+   * Triple integral (numerical)
+   */
+  public tripleIntegral(
+    f: (x: number, y: number, z: number) => number,
+    xRange: [number, number],
+    yRange: [number, number],
+    zRange: [number, number],
+    n: number = 30
+  ): TripleIntegralResult {
+    const [x0, x1] = xRange;
+    const [y0, y1] = yRange;
+    const [z0, z1] = zRange;
+    const value = this._simpson3D(f, x0, x1, y0, y1, z0, z1, n);
+    this._recordHistory(`tripleIntegral: ${value}`);
+    return {
+      value,
+      bounds: { x: xRange, y: yRange, z: zRange }
+    };
+  }
+
+  /**
+   * 曲面面积计算
+   * Surface area calculation
+   */
+  public surfaceArea(
+    z: (x: number, y: number) => number,
+    xRange: [number, number],
+    yRange: [number, number],
+    n: number = 100
+  ): SurfaceAreaResult {
+    const integrand = (x: number, y: number) => {
+      const h = 1e-5;
+      const dzdx = (z(x + h, y) - z(x - h, y)) / (2 * h);
+      const dzdy = (z(x, y + h) - z(x, y - h)) / (2 * h);
+      return Math.sqrt(1 + dzdx * dzdx + dzdy * dzdy);
+    };
+    const area = this._simpson2D(integrand, xRange[0], xRange[1], yRange[0], yRange[1], n);
+    const result: SurfaceAreaResult = {
+      surface: 'z = f(x,y)',
+      area,
+      region: [xRange[0], xRange[1], yRange[0], yRange[1]]
+    };
+    this._recordHistory(`surfaceArea: ${area}`);
+    return result;
+  }
+
+  /**
+   * 体积计算（二重积分法）
+   * Volume calculation via double integral
+   */
+  public volumeUnderSurface(
+    z: (x: number, y: number) => number,
+    xRange: [number, number],
+    yRange: [number, number],
+    n: number = 100
+  ): VolumeResult {
+    const volume = this._simpson2D(z, xRange[0], xRange[1], yRange[0], yRange[1], n);
+    const result: VolumeResult = { solid: 'under z = f(x,y)', volume };
+    this._recordHistory(`volumeUnderSurface: ${volume}`);
+    return result;
+  }
+
+  /**
+   * 极坐标下的二重积分
+   * Double integral in polar coordinates
+   */
+  public polarDoubleIntegral(
+    f: (r: number, theta: number) => number,
+    rRange: [number, number],
+    thetaRange: [number, number],
+    n: number = 100
+  ): number {
+    const integrand = (r: number, theta: number) => f(r, theta) * r;
+    const result = this._simpson2D(integrand, rRange[0], rRange[1], thetaRange[0], thetaRange[1], n);
+    this._recordHistory(`polarDoubleIntegral: ${result}`);
+    return result;
+  }
+
+  /**
+   * 柱坐标下的三重积分
+   * Triple integral in cylindrical coordinates
+   */
+  public cylindricalTripleIntegral(
+    f: (r: number, theta: number, z: number) => number,
+    rRange: [number, number],
+    thetaRange: [number, number],
+    zRange: [number, number],
+    n: number = 30
+  ): number {
+    const integrand = (r: number, theta: number, z: number) => f(r, theta, z) * r;
+    const result = this._simpson3D(integrand, rRange[0], rRange[1], thetaRange[0], thetaRange[1], zRange[0], zRange[1], n);
+    this._recordHistory(`cylindricalTripleIntegral: ${result}`);
+    return result;
+  }
+
+  /**
+   * 球坐标下的三重积分
+   * Triple integral in spherical coordinates
+   */
+  public sphericalTripleIntegral(
+    f: (rho: number, phi: number, theta: number) => number,
+    rhoRange: [number, number],
+    phiRange: [number, number],
+    thetaRange: [number, number],
+    n: number = 30
+  ): number {
+    const integrand = (rho: number, phi: number, theta: number) =>
+      f(rho, phi, theta) * rho * rho * Math.sin(phi);
+    const result = this._simpson3D(integrand, rhoRange[0], rhoRange[1], phiRange[0], phiRange[1], thetaRange[0], thetaRange[1], n);
+    this._recordHistory(`sphericalTripleIntegral: ${result}`);
+    return result;
+  }
+
+  /**
+   * 雅可比行列式（坐标变换）
+   * Jacobian determinant for coordinate transformation
+   */
+  public jacobianDeterminant(
+    transform: (point: number[]) => number[],
+    point: number[],
+    h: number = 1e-5
+  ): number {
+    const n = point.length;
+    const matrix: number[][] = [];
+    const f0 = transform(point);
+    for (let i = 0; i < n; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < n; j++) {
+        const plus = [...point];
+        plus[j] += h;
+        const fPlus = transform(plus);
+        row.push((fPlus[i] - f0[i]) / h);
+      }
+      matrix.push(row);
+    }
+    const det = this._determinant(matrix);
+    this._recordHistory(`jacobianDeterminant: |J| = ${det}`);
+    return det;
+  }
+
+  /**
+   * 链式法则验证
+   * Chain rule verification
+   */
+  public chainRuleVerification(
+    f: (p: number[]) => number,
+    g: (t: number) => number[],
+    t: number,
+    h: number = 1e-5
+  ): { direct: number; chainRule: number; error: number } {
+    const direct = (f(g(t + h)) - f(g(t - h))) / (2 * h);
+    const g0 = g(t);
+    const grad = this.numericalGradient(f, g0).gradient;
+    const gPrime: number[] = [];
+    const gPlus = g(t + h);
+    const gMinus = g(t - h);
+    for (let i = 0; i < g0.length; i++) {
+      gPrime.push((gPlus[i] - gMinus[i]) / (2 * h));
+    }
+    const chainRule = grad.reduce((s, g, i) => s + g * gPrime[i], 0);
+    const error = Math.abs(direct - chainRule);
+    this._recordHistory(`chainRuleVerification: error=${error.toExponential(4)}`);
+    return { direct, chainRule, error };
+  }
+
+  /**
+   * 隐函数定理验证
+   * Implicit function theorem verification
+   */
+  public implicitDerivative(
+    F: (x: number, y: number) => number,
+    x: number,
+    y: number,
+    h: number = 1e-5
+  ): number {
+    const dFdx = (F(x + h, y) - F(x - h, y)) / (2 * h);
+    const dFdy = (F(x, y + h) - F(x, y - h)) / (2 * h);
+    const result = -dFdx / dFdy;
+    this._recordHistory(`implicitDerivative: dy/dx = ${result}`);
+    return result;
+  }
+
+  /**
+   * 无约束优化（梯度下降）
+   * Unconstrained optimization (gradient descent)
+   */
+  public gradientDescent(
+    f: (p: number[]) => number,
+    initialPoint: number[],
+    options: {
+      learningRate?: number;
+      maxIterations?: number;
+      tolerance?: number;
+      momentum?: number;
+    } = {}
+  ): { minimum: number[]; fMinimum: number; iterations: number } {
+    const lr = options.learningRate ?? 0.01;
+    const maxIter = options.maxIterations ?? 1000;
+    const tol = options.tolerance ?? 1e-8;
+    const momentum = options.momentum ?? 0;
+    let point = [...initialPoint];
+    let velocity = new Array(point.length).fill(0);
+    let fVal = f(point);
+    let iter = 0;
+    for (iter = 0; iter < maxIter; iter++) {
+      const grad = this.numericalGradient(f, point).gradient;
+      const gradMag = Math.sqrt(grad.reduce((s, g) => s + g * g, 0));
+      if (gradMag < tol) break;
+      velocity = velocity.map((v, i) => momentum * v - lr * grad[i]);
+      const newPoint = point.map((p, i) => p + velocity[i]);
+      const newFVal = f(newPoint);
+      if (newFVal < fVal) {
+        point = newPoint;
+        fVal = newFVal;
+      } else {
+        velocity = velocity.map(v => v * 0.5);
+      }
+    }
+    this._recordHistory(`gradientDescent: converged in ${iter} iterations, f=${fVal}`);
+    return { minimum: point, fMinimum: fVal, iterations: iter };
+  }
+
+  /**
+   * 约束优化（拉格朗日乘数法数值实现）
+   * Constrained optimization via Lagrange multipliers
+   */
+  public constrainedOptimization(
+    f: (p: number[]) => number,
+    constraint: (p: number[]) => number,
+    initialPoint: number[],
+    targetValue: number = 0,
+    options: { maxIterations?: number; tolerance?: number } = {}
+  ): { optimum: number[]; fOptimum: number; constraintValue: number } {
+    const maxIter = options.maxIterations ?? 500;
+    const tol = options.tolerance ?? 1e-6;
+    let point = [...initialPoint];
+    let lambda = 0.1;
+    const lagrangian = (p: number[]) => f(p) + lambda * constraint(p);
+    for (let iter = 0; iter < maxIter; iter++) {
+      const gradL = this.numericalGradient(lagrangian, point).gradient;
+      const gradMag = Math.sqrt(gradL.reduce((s, g) => s + g * g, 0));
+      const constraintVal = constraint(point);
+      const constraintError = Math.abs(constraintVal - targetValue);
+      if (gradMag < tol && constraintError < tol) break;
+      point = point.map((p, i) => p - 0.01 * gradL[i]);
+      lambda += 0.01 * (constraintVal - targetValue);
+    }
+    const fOpt = f(point);
+    const constraintOpt = constraint(point);
+    this._recordHistory(`constrainedOptimization: f=${fOpt}, g=${constraintOpt}`);
+    return { optimum: point, fOptimum: fOpt, constraintValue: constraintOpt };
+  }
+
+  /**
+   * 线积分（标量函数）
+   * Line integral of scalar function
+   */
+  public scalarLineIntegral(
+    f: (p: number[]) => number,
+    curve: (t: number) => number[],
+    a: number,
+    b: number,
+    n: number = 1000
+  ): number {
+    const h = (b - a) / n;
+    let sum = 0;
+    for (let i = 0; i <= n; i++) {
+      const t = a + i * h;
+      const point = curve(t);
+      const fVal = f(point);
+      const h2 = 1e-6;
+      const plus = curve(t + h2);
+      const minus = curve(t - h2);
+      let speed = 0;
+      for (let j = 0; j < point.length; j++) {
+        const d = (plus[j] - minus[j]) / (2 * h2);
+        speed += d * d;
+      }
+      speed = Math.sqrt(speed);
+      const weight = i === 0 || i === n ? 0.5 : 1;
+      sum += weight * fVal * speed * h;
+    }
+    this._recordHistory(`scalarLineIntegral: ${sum}`);
+    return sum;
+  }
+
+  /**
+   * 通量积分（闭合曲面，用散度定理验证）
+   * Flux integral with divergence theorem verification
+   */
+  public fluxDivergenceVerification(
+    field: (p: number[]) => number[],
+    center: number[],
+    radius: number,
+    n: number = 20
+  ): { fluxIntegral: number; divergenceIntegral: number; error: number } {
+    const [cx, cy, cz] = center;
+    const divF = (x: number, y: number, z: number) => {
+      const point = [x, y, z];
+      return this.numericalDivergence(field, point);
+    };
+    const divergenceIntegral = this._simpson3D(
+      divF,
+      cx - radius, cx + radius,
+      cy - radius, cy + radius,
+      cz - radius, cz + radius,
+      n
+    );
+    let fluxIntegral = 0;
+    const faces = [
+      { normal: [1, 0, 0], x: cx + radius },
+      { normal: [-1, 0, 0], x: cx - radius },
+      { normal: [0, 1, 0], y: cy + radius },
+      { normal: [0, -1, 0], y: cy - radius },
+      { normal: [0, 0, 1], z: cz + radius },
+      { normal: [0, 0, -1], z: cz - radius }
+    ];
+    for (const face of faces) {
+      const integrand = (u: number, v: number) => {
+        let point: number[];
+        if ('x' in face) {
+          point = [face.x!, u, v];
+        } else if ('y' in face) {
+          point = [u, face.y!, v];
+        } else {
+          point = [u, v, face.z!];
+        }
+        const f = field(point);
+        return f[0] * face.normal[0] + f[1] * face.normal[1] + f[2] * face.normal[2];
+      };
+      if ('x' in face) {
+        fluxIntegral += this._simpson2D(integrand, cy - radius, cy + radius, cz - radius, cz + radius, n);
+      } else if ('y' in face) {
+        fluxIntegral += this._simpson2D(integrand, cx - radius, cx + radius, cz - radius, cz + radius, n);
+      } else {
+        fluxIntegral += this._simpson2D(integrand, cx - radius, cx + radius, cy - radius, cy + radius, n);
+      }
+    }
+    const error = Math.abs(fluxIntegral - divergenceIntegral);
+    this._recordHistory(`fluxDivergenceVerification: error=${error.toExponential(4)}`);
+    return { fluxIntegral, divergenceIntegral, error };
   }
 
   /**

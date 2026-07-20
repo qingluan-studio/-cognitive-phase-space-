@@ -32,6 +32,47 @@ export interface IntegralResult {
   readonly result: string;
 }
 
+export interface NumericalIntegrationResult {
+  readonly value: number;
+  readonly method: string;
+  readonly intervals: number;
+  readonly errorEstimate: number;
+}
+
+export interface ImproperIntegralResult {
+  readonly value: number;
+  readonly convergent: boolean;
+  readonly limit: number;
+  readonly type: 'infinite-limit' | 'discontinuity';
+}
+
+export interface SolidOfRevolution {
+  readonly volume: number;
+  readonly method: 'disk' | 'washer' | 'shell';
+  readonly axis: string;
+  readonly innerRadius?: string;
+  readonly outerRadius?: string;
+}
+
+export interface WorkResult {
+  readonly work: number;
+  readonly force: string;
+  readonly displacement: [number, number];
+}
+
+export interface CenterOfMassResult {
+  readonly x: number;
+  readonly y: number;
+  readonly area: number;
+  readonly mass: number;
+}
+
+export interface ProbabilityResult {
+  readonly probability: number;
+  readonly distribution: string;
+  readonly interval: [number, number];
+}
+
 type IntegralCache = {
   readonly expression: string;
   readonly variable: string;
@@ -336,6 +377,450 @@ export class IntegralCalculus {
   }
 
   /**
+   * 龙贝格积分（Romberg integration）
+   * Romberg integration - highly accurate numerical method
+   */
+  public rombergIntegration(
+    f: string,
+    a: number,
+    b: number,
+    maxIterations: number = 10,
+    tolerance: number = 1e-10
+  ): NumericalIntegrationResult {
+    const fn = this._buildEvaluator(f);
+    const R: number[][] = [];
+    R[0] = [this._trapezoidal(fn, a, b, 1)];
+    let result = R[0]![0]!;
+    let intervals = 1;
+    for (let i = 1; i < maxIterations; i++) {
+      intervals = 1 << i;
+      R[i] = [];
+      R[i]![0] = this._trapezoidal(fn, a, b, intervals);
+      for (let j = 1; j <= i; j++) {
+        R[i]![j] = (Math.pow(4, j) * R[i]![j - 1]! - R[i - 1]![j - 1]!) / (Math.pow(4, j) - 1);
+      }
+      if (Math.abs(R[i]![i]! - R[i - 1]![i - 1]!) < tolerance) {
+        result = R[i]![i]!;
+        break;
+      }
+      result = R[i]![i]!;
+    }
+    this._recordHistory(`rombergIntegration: ${result} with ${intervals} intervals`);
+    return { value: result, method: 'romberg', intervals, errorEstimate: Math.abs(R[maxIterations - 1]?.[maxIterations - 1] ?? result - R[0]![0]!) };
+  }
+
+  /**
+   * 高斯求积（Gaussian quadrature）
+   * Gaussian quadrature with Legendre polynomials
+   */
+  public gaussianQuadrature(
+    f: string,
+    a: number,
+    b: number,
+    n: number = 5
+  ): NumericalIntegrationResult {
+    const fn = this._buildEvaluator(f);
+    const nodes = this._gaussLegendreNodes(n);
+    const weights = this._gaussLegendreWeights(n);
+    const mid = (a + b) / 2;
+    const half = (b - a) / 2;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const x = mid + half * nodes[i]!;
+      sum += weights[i]! * fn(x);
+    }
+    const result = half * sum;
+    this._recordHistory(`gaussianQuadrature (n=${n}): ${result}`);
+    return { value: result, method: 'gaussian', intervals: n, errorEstimate: Math.pow((b - a) / 2, 2 * n + 1) / 1000 };
+  }
+
+  /**
+   * 蒙特卡洛积分
+   * Monte Carlo integration
+   */
+  public monteCarloIntegration(
+    f: string,
+    a: number,
+    b: number,
+    samples: number = 10000
+  ): NumericalIntegrationResult {
+    const fn = this._buildEvaluator(f);
+    let sum = 0;
+    for (let i = 0; i < samples; i++) {
+      const x = a + Math.random() * (b - a);
+      sum += fn(x);
+    }
+    const result = (b - a) * sum / samples;
+    const errorEstimate = (b - a) / Math.sqrt(samples);
+    this._recordHistory(`monteCarloIntegration (${samples} samples): ${result}`);
+    return { value: result, method: 'monte-carlo', intervals: samples, errorEstimate };
+  }
+
+  /**
+   * 自适应辛普森积分
+   * Adaptive Simpson's rule
+   */
+  public adaptiveSimpson(
+    f: string,
+    a: number,
+    b: number,
+    tolerance: number = 1e-8,
+    maxDepth: number = 20
+  ): NumericalIntegrationResult {
+    const fn = this._buildEvaluator(f);
+    let totalIntervals = 0;
+    const adaptive = (a: number, b: number, eps: number, depth: number): number => {
+      totalIntervals++;
+      const c = (a + b) / 2;
+      const fa = fn(a), fb = fn(b), fc = fn(c);
+      const s = (b - a) * (fa + 4 * fc + fb) / 6;
+      const d = (a + c) / 2, e = (c + b) / 2;
+      const fd = fn(d), fe = fn(e);
+      const s2 = (b - a) * (fa + 4 * fd + 2 * fc + 4 * fe + fb) / 12;
+      if (depth <= 0 || Math.abs(s2 - s) <= 15 * eps) {
+        return s2 + (s2 - s) / 15;
+      }
+      return adaptive(a, c, eps / 2, depth - 1) + adaptive(c, b, eps / 2, depth - 1);
+    };
+    const result = adaptive(a, b, tolerance, maxDepth);
+    this._recordHistory(`adaptiveSimpson: ${result} with ${totalIntervals} intervals`);
+    return { value: result, method: 'adaptive-simpson', intervals: totalIntervals, errorEstimate: tolerance };
+  }
+
+  /**
+   * 广义积分判敛：无穷限积分
+   * Improper integral: infinite limit
+   */
+  public improperInfinite(
+    f: string,
+    a: number,
+    direction: 1 | -1,
+    tolerance: number = 1e-8
+  ): ImproperIntegralResult {
+    const fn = this._buildEvaluator(f);
+    let upper = a + direction * 100;
+    let prev = 0;
+    let result = 0;
+    let convergent = false;
+    for (let iter = 0; iter < 20; iter++) {
+      const b = a + direction * Math.pow(10, iter + 2);
+      const integral = direction > 0
+        ? this._simpson(fn, a, b, 1000)
+        : this._simpson(fn, b, a, 1000);
+      if (Math.abs(integral - prev) < tolerance) {
+        convergent = true;
+        result = integral;
+        break;
+      }
+      prev = integral;
+      result = integral;
+      upper = b;
+    }
+    this._recordHistory(`improperInfinite: ${convergent ? 'convergent' : 'divergent'}, value=${result}`);
+    return { value: result, convergent, limit: upper, type: 'infinite-limit' };
+  }
+
+  /**
+   * 瑕积分：含间断点的积分
+   * Improper integral: discontinuity
+   */
+  public improperDiscontinuous(
+    f: string,
+    a: number,
+    b: number,
+    discontinuity: number,
+    tolerance: number = 1e-8
+  ): ImproperIntegralResult {
+    const fn = this._buildEvaluator(f);
+    const eps = 1e-6;
+    let leftResult = 0;
+    let rightResult = 0;
+    let convergent = true;
+    if (discontinuity > a) {
+      const left = this._simpson(fn, a, discontinuity - eps, 500);
+      leftResult = left;
+    }
+    if (discontinuity < b) {
+      const right = this._simpson(fn, discontinuity + eps, b, 500);
+      rightResult = right;
+    }
+    const total = leftResult + rightResult;
+    if (!isFinite(total)) convergent = false;
+    this._recordHistory(`improperDiscontinuous at ${discontinuity}: ${convergent ? 'convergent' : 'divergent'}`);
+    return { value: total, convergent, limit: discontinuity, type: 'discontinuity' };
+  }
+
+  /**
+   * 旋转体体积：圆盘法
+   * Volume of revolution: disk method
+   */
+  public diskMethod(
+    f: string,
+    a: number,
+    b: number,
+    axis: 'x' | 'y' = 'x'
+  ): SolidOfRevolution {
+    const fn = this._buildEvaluator(f);
+    const integrand = (x: number) => Math.PI * fn(x) * fn(x);
+    const volume = this._simpson(integrand, a, b, 1000);
+    this._recordHistory(`diskMethod: V=${volume}`);
+    return { volume, method: 'disk', axis, outerRadius: f };
+  }
+
+  /**
+   * 旋转体体积： washer 法
+   * Volume of revolution: washer method
+   */
+  public washerMethod(
+    outerF: string,
+    innerF: string,
+    a: number,
+    b: number
+  ): SolidOfRevolution {
+    const outerFn = this._buildEvaluator(outerF);
+    const innerFn = this._buildEvaluator(innerF);
+    const integrand = (x: number) => Math.PI * (outerFn(x) * outerFn(x) - innerFn(x) * innerFn(x));
+    const volume = this._simpson(integrand, a, b, 1000);
+    this._recordHistory(`washerMethod: V=${volume}`);
+    return { volume, method: 'washer', axis: 'x', innerRadius: innerF, outerRadius: outerF };
+  }
+
+  /**
+   * 旋转体体积：柱壳法
+   * Volume of revolution: shell method
+   */
+  public shellMethod(
+    f: string,
+    a: number,
+    b: number
+  ): SolidOfRevolution {
+    const fn = this._buildEvaluator(f);
+    const integrand = (x: number) => 2 * Math.PI * x * fn(x);
+    const volume = this._simpson(integrand, a, b, 1000);
+    this._recordHistory(`shellMethod: V=${volume}`);
+    return { volume, method: 'shell', axis: 'y' };
+  }
+
+  /**
+   * 变力做功
+   * Work done by a variable force
+   */
+  public workDone(
+    forceFunction: string,
+    a: number,
+    b: number
+  ): WorkResult {
+    const fn = this._buildEvaluator(forceFunction);
+    const work = this._simpson(fn, a, b, 1000);
+    this._recordHistory(`workDone: W=${work}`);
+    return { work, force: forceFunction, displacement: [a, b] };
+  }
+
+  /**
+   * 抽水做功
+   * Work to pump water out of a tank
+   */
+  public pumpWork(
+    tankHeight: number,
+    radiusFunction: string,
+    waterHeight: number,
+    density: number = 1000,
+    g: number = 9.8
+  ): number {
+    const rFn = this._buildEvaluator(radiusFunction);
+    const integrand = (y: number) => {
+      const r = rFn(y);
+      return density * g * Math.PI * r * r * (tankHeight - y);
+    };
+    const work = this._simpson(integrand, 0, waterHeight, 500);
+    this._recordHistory(`pumpWork: W=${work}`);
+    return work;
+  }
+
+  /**
+   * 平面区域质心
+   * Centroid of a planar region
+   */
+  public planarCentroid(
+    f: string,
+    g: string,
+    a: number,
+    b: number
+  ): CenterOfMassResult {
+    const fFn = this._buildEvaluator(f);
+    const gFn = this._buildEvaluator(g);
+    const areaFn = (x: number) => fFn(x) - gFn(x);
+    const momentXFn = (x: number) => x * (fFn(x) - gFn(x));
+    const momentYFn = (x: number) => 0.5 * (fFn(x) * fFn(x) - gFn(x) * gFn(x));
+    const area = this._simpson(areaFn, a, b, 1000);
+    const mx = this._simpson(momentXFn, a, b, 1000);
+    const my = this._simpson(momentYFn, a, b, 1000);
+    const cx = area > 1e-12 ? mx / area : 0;
+    const cy = area > 1e-12 ? my / area : 0;
+    this._recordHistory(`planarCentroid: (${cx}, ${cy})`);
+    return { x: cx, y: cy, area, mass: area };
+  }
+
+  /**
+   * 转动惯量
+   * Moment of inertia
+   */
+  public momentOfInertia(
+    f: string,
+    a: number,
+    b: number,
+    density: number = 1
+  ): { Ix: number; Iy: number } {
+    const fn = this._buildEvaluator(f);
+    const ixFn = (x: number) => density * (1 / 3) * Math.pow(fn(x), 3);
+    const iyFn = (x: number) => density * x * x * fn(x);
+    const Ix = this._simpson(ixFn, a, b, 500);
+    const Iy = this._simpson(iyFn, a, b, 500);
+    this._recordHistory(`momentOfInertia: Ix=${Ix}, Iy=${Iy}`);
+    return { Ix, Iy };
+  }
+
+  /**
+   * 变限积分求导（Leibniz 法则）
+   * Leibniz integral rule: d/dx ∫[a(x),b(x)] f(t) dt
+   */
+  public leibnizRule(
+    integrand: string,
+    lowerExpr: string,
+    upperExpr: string,
+    atX: number
+  ): number {
+    const fn = this._buildEvaluator(integrand);
+    const lowerFn = this._buildEvaluator(lowerExpr);
+    const upperFn = this._buildEvaluator(upperExpr);
+    const lowerVal = lowerFn(atX);
+    const upperVal = upperFn(atX);
+    const dLower = this._numericalDerivative(lowerFn, atX);
+    const dUpper = this._numericalDerivative(upperFn, atX);
+    const result = fn(upperVal) * dUpper - fn(lowerVal) * dLower;
+    this._recordHistory(`leibnizRule at x=${atX}: ${result}`);
+    return result;
+  }
+
+  /**
+   * 概率密度函数积分
+   * Probability from PDF
+   */
+  public probabilityFromPDF(
+    pdf: string,
+    a: number,
+    b: number
+  ): ProbabilityResult {
+    const fn = this._buildEvaluator(pdf);
+    const probability = this._simpson(fn, a, b, 1000);
+    this._recordHistory(`probabilityFromPDF: P(${a} < X < ${b}) = ${probability}`);
+    return { probability, distribution: pdf, interval: [a, b] };
+  }
+
+  /**
+   * 累积分布函数
+   * Cumulative distribution function
+   */
+  public cdfFromPDF(pdf: string, x: number): number {
+    const fn = this._buildEvaluator(pdf);
+    const result = this._simpson(fn, -100, x, 2000);
+    this._recordHistory(`cdfFromPDF: F(${x}) = ${result}`);
+    return result;
+  }
+
+  /**
+   * 期望值（连续型）
+   * Expected value (continuous)
+   */
+  public expectedValueContinuous(pdf: string, lower: number, upper: number): number {
+    const fn = this._buildEvaluator(pdf);
+    const integrand = (x: number) => x * fn(x);
+    const result = this._simpson(integrand, lower, upper, 1000);
+    this._recordHistory(`expectedValueContinuous: E[X] = ${result}`);
+    return result;
+  }
+
+  /**
+   * 积分中值定理验证
+   * Mean value theorem for integrals
+   */
+  public integralMeanValue(
+    f: string,
+    a: number,
+    b: number
+  ): { c: number; fC: number; averageValue: number } | null {
+    const fn = this._buildEvaluator(f);
+    const avg = this.averageValue(f, a, b);
+    const targetFn = (x: number) => fn(x) - avg;
+    const samples = 100;
+    const h = (b - a) / samples;
+    let prev = targetFn(a);
+    for (let i = 1; i <= samples; i++) {
+      const x = a + i * h;
+      const curr = targetFn(x);
+      if (prev * curr < 0) {
+        let lo = a + (i - 1) * h;
+        let hi = x;
+        for (let j = 0; j < 50; j++) {
+          const mid = (lo + hi) / 2;
+          const midVal = targetFn(mid);
+          if (Math.abs(midVal) < 1e-10) {
+            this._recordHistory(`integralMeanValue: c=${mid}`);
+            return { c: mid, fC: fn(mid), averageValue: avg };
+          }
+          if (prev * midVal < 0) hi = mid;
+          else { lo = mid; prev = midVal; }
+        }
+        const c = (lo + hi) / 2;
+        this._recordHistory(`integralMeanValue: c=${c}`);
+        return { c, fC: fn(c), averageValue: avg };
+      }
+      prev = curr;
+    }
+    return null;
+  }
+
+  /**
+   * 弧长函数
+   * Arc length function s(x)
+   */
+  public arcLengthFunction(
+    f: string,
+    a: number,
+    x: number
+  ): number {
+    const fn = this._buildEvaluator(f);
+    const h = 1e-5;
+    const integrand = (t: number) => {
+      const df = (fn(t + h) - fn(t - h)) / (2 * h);
+      return Math.sqrt(1 + df * df);
+    };
+    const result = this._simpson(integrand, a, x, 500);
+    this._recordHistory(`arcLengthFunction: s(${x}) = ${result}`);
+    return result;
+  }
+
+  /**
+   * 表面积：y=f(x) 绕 x 轴旋转
+   * Surface area: y=f(x) rotated about x-axis
+   */
+  public surfaceAreaOfRevolution(
+    f: string,
+    a: number,
+    b: number
+  ): number {
+    const fn = this._buildEvaluator(f);
+    const h = 1e-5;
+    const integrand = (x: number) => {
+      const df = (fn(x + h) - fn(x - h)) / (2 * h);
+      return 2 * Math.PI * Math.abs(fn(x)) * Math.sqrt(1 + df * df);
+    };
+    const result = this._simpson(integrand, a, b, 500);
+    this._recordHistory(`surfaceAreaOfRevolution: S=${result}`);
+    return result;
+  }
+
+  /**
    * 转换为数据包
    * Serialize to DataPacket
    */
@@ -378,6 +863,54 @@ export class IntegralCalculus {
   private _recordHistory(entry: string): void {
     this._history.push(`[${Date.now()}] ${entry}`);
     if (this._history.length > 200) this._history.shift();
+  }
+
+  private _trapezoidal(fn: (x: number) => number, a: number, b: number, n: number): number {
+    const h = (b - a) / n;
+    let sum = (fn(a) + fn(b)) / 2;
+    for (let i = 1; i < n; i++) {
+      sum += fn(a + i * h);
+    }
+    return h * sum;
+  }
+
+  private _numericalDerivative(fn: (x: number) => number, x: number): number {
+    const h = 1e-5;
+    return (fn(x + h) - fn(x - h)) / (2 * h);
+  }
+
+  private _gaussLegendreNodes(n: number): number[] {
+    const nodes: number[][] = [
+      [],
+      [0],
+      [-1 / Math.sqrt(3), 1 / Math.sqrt(3)],
+      [-Math.sqrt(3 / 5), 0, Math.sqrt(3 / 5)],
+      [-0.8611363116, -0.3399810436, 0.3399810436, 0.8611363116],
+      [-0.9061798459, -0.5384693101, 0, 0.5384693101, 0.9061798459]
+    ];
+    if (n < 1 || n >= nodes.length) {
+      const result: number[] = [];
+      for (let i = 0; i < n; i++) {
+        result.push(Math.cos(Math.PI * (2 * i + 1) / (2 * n)));
+      }
+      return result;
+    }
+    return [...nodes[n]!];
+  }
+
+  private _gaussLegendreWeights(n: number): number[] {
+    const weights: number[][] = [
+      [],
+      [2],
+      [1, 1],
+      [5 / 9, 8 / 9, 5 / 9],
+      [0.3478548451, 0.6521451549, 0.6521451549, 0.3478548451],
+      [0.2369268850, 0.4786286705, 0.5688888889, 0.4786286705, 0.2369268850]
+    ];
+    if (n < 1 || n >= weights.length) {
+      return new Array(n).fill(2 / n);
+    }
+    return [...weights[n]!];
   }
 
   private _simpson(fn: (x: number) => number, a: number, b: number, n: number): number {

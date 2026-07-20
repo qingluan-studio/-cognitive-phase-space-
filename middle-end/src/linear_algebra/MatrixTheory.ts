@@ -67,7 +67,7 @@ export class MatrixTheory {
    */
   public luDecompose(matrix: number[][]): { L: number[][]; U: number[][] } {
     const n = matrix.length;
-    const L = Array.from({ length: n }, (_, i) =>
+    const L: number[][] = Array.from({ length: n }, (_, i) =>
       Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
     );
     const U = matrix.map(r => [...r]);
@@ -155,14 +155,14 @@ export class MatrixTheory {
       .map(v => Math.sqrt(v))
       .sort((a, b) => b - a)
       .slice(0, minDim);
-    const U = Array.from({ length: m }, (_, i) =>
+    const U: number[][] = Array.from({ length: m }, (_, i) =>
       Array.from({ length: minDim }, (_, j) => i === j ? 1 : 0)
     );
     const S = Array.from({ length: m }, () => new Array(n).fill(0));
     for (let i = 0; i < singularValues.length; i++) {
       S[i]![i] = singularValues[i]!;
     }
-    const V = Array.from({ length: n }, (_, i) =>
+    const V: number[][] = Array.from({ length: n }, (_, i) =>
       Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
     );
     this._decompositions.push({ type: 'SVD', factors: { U, S, V } });
@@ -179,7 +179,7 @@ export class MatrixTheory {
     const eigenvalues = this._eigenvalues(matrix);
     const T = Array.from({ length: n }, () => new Array(n).fill(0));
     for (let i = 0; i < n; i++) T[i]![i] = eigenvalues[i] ?? 0;
-    const Q = Array.from({ length: n }, (_, i) =>
+    const Q: number[][] = Array.from({ length: n }, (_, i) =>
       Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
     );
     this._decompositions.push({ type: 'Schur', factors: { Q, T } });
@@ -396,6 +396,499 @@ export class MatrixTheory {
   }
 
   /**
+   * 矩阵加法
+   * Matrix addition
+   */
+  public add(a: number[][], b: number[][]): number[][] {
+    if (a.length !== b.length) throw new Error('Dimension mismatch in add');
+    return a.map((row, i) => row.map((v, j) => v + (b[i]![j] ?? 0)));
+  }
+
+  /**
+   * 矩阵减法
+   * Matrix subtraction
+   */
+  public subtract(a: number[][], b: number[][]): number[][] {
+    if (a.length !== b.length) throw new Error('Dimension mismatch in subtract');
+    return a.map((row, i) => row.map((v, j) => v - (b[i]![j] ?? 0)));
+  }
+
+  /**
+   * 标量乘法
+   * Scalar multiplication
+   */
+  public scalarMultiply(matrix: number[][], scalar: number): number[][] {
+    return matrix.map(row => row.map(v => v * scalar));
+  }
+
+  /**
+   * 矩阵乘法
+   * Matrix multiplication
+   */
+  public multiply(a: number[][], b: number[][]): number[][] {
+    return this._multiply(a, b);
+  }
+
+  /**
+   * 矩阵转置
+   * Matrix transpose
+   */
+  public transpose(matrix: number[][]): number[][] {
+    return this._transpose(matrix);
+  }
+
+  /**
+   * 矩阵的幂
+   * Matrix power
+   */
+  public matrixPower(matrix: number[][], k: number): number[][] {
+    const n = matrix.length;
+    if (k === 0) {
+      return Array.from({ length: n }, (_, i) =>
+        Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
+      ) as number[][];
+    }
+    if (k === 1) return matrix.map(r => [...r]);
+    let result = matrix.map(r => [...r]);
+    for (let i = 1; i < k; i++) {
+      result = this._multiply(result, matrix);
+    }
+    this._recordHistory(`matrixPower: A^${k}`);
+    return result;
+  }
+
+  /**
+   * 矩阵指数（级数近似）
+   * Matrix exponential (series approximation)
+   */
+  public matrixExponential(matrix: number[][], terms: number = 20): number[][] {
+    const n = matrix.length;
+    let result: number[][] = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
+    );
+    let current: number[][] = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
+    );
+    for (let k = 1; k <= terms; k++) {
+      current = this._multiply(current, matrix);
+      const factorial = this._factorial(k);
+      result = result.map((row, i) =>
+        row.map((v, j) => v + current[i]![j]! / factorial)
+      );
+    }
+    this._recordHistory(`matrixExponential: ${terms} terms`);
+    return result;
+  }
+
+  /**
+   * 行最简形（RREF）
+   * Reduced row echelon form
+   */
+  public rref(matrix: number[][]): number[][] {
+    const m = matrix.map(r => [...r]);
+    const rows = m.length;
+    const cols = m[0]?.length ?? 0;
+    let lead = 0;
+    for (let r = 0; r < rows && lead < cols; r++) {
+      let i = r;
+      while (i < rows && Math.abs(m[i]![lead]!) < 1e-10) i++;
+      if (i === rows) { lead++; r--; continue; }
+      [m[r]!, m[i]!] = [m[i]!, m[r]!];
+      const pivot = m[r]![lead]!;
+      if (Math.abs(pivot) > 1e-10) {
+        for (let c = 0; c < cols; c++) m[r]![c] = m[r]![c]! / pivot;
+      }
+      for (let j = 0; j < rows; j++) {
+        if (j !== r) {
+          const factor = m[j]![lead]!;
+          for (let c = 0; c < cols; c++) {
+            m[j]![c] = m[j]![c]! - factor * m[r]![c]!;
+          }
+        }
+      }
+      lead++;
+    }
+    this._recordHistory('rref: complete');
+    return m;
+  }
+
+  /**
+   * 矩阵的秩
+   * Rank of matrix
+   */
+  public rank(matrix: number[][]): number {
+    const rref = this.rref(matrix);
+    let rank = 0;
+    for (let r = 0; r < rref.length; r++) {
+      if (rref[r]!.some(v => Math.abs(v) > 1e-10)) rank++;
+    }
+    this._recordHistory(`rank: ${rank}`);
+    return rank;
+  }
+
+  /**
+   * 零空间
+   * Null space (kernel)
+   */
+  public nullSpace(matrix: number[][]): number[][] {
+    const rows = matrix.length;
+    const cols = matrix[0]?.length ?? 0;
+    if (cols === 0) return [];
+    const rref = this.rref(matrix.map(r => [...r]));
+    const pivotCols: number[] = [];
+    const freeCols: number[] = [];
+    for (let c = 0; c < cols; c++) {
+      const pivotRow = rref.findIndex((row, r) => row[c] !== 0 && r === pivotCols.length);
+      if (pivotRow !== -1 && pivotRow < rows) {
+        pivotCols.push(c);
+      } else {
+        freeCols.push(c);
+      }
+    }
+    const kernel: number[][] = [];
+    for (const fc of freeCols) {
+      const components = new Array(cols).fill(0);
+      components[fc] = 1;
+      for (let i = 0; i < pivotCols.length; i++) {
+        components[pivotCols[i]!] = -rref[i]![fc]!;
+      }
+      kernel.push(components);
+    }
+    this._recordHistory(`nullSpace: ${kernel.length} basis vectors`);
+    return kernel;
+  }
+
+  /**
+   * 列空间
+   * Column space (image)
+   */
+  public columnSpace(matrix: number[][]): number[][] {
+    if (matrix.length === 0) return [];
+    const cols = matrix[0]!.length;
+    const basis: number[][] = [];
+    const rref = this.rref(matrix.map(r => [...r]));
+    const pivotCols: number[] = [];
+    let lead = 0;
+    for (let r = 0; r < rref.length && lead < cols; r++) {
+      while (lead < cols && Math.abs(rref[r]![lead]!) < 1e-10) lead++;
+      if (lead < cols) {
+        pivotCols.push(lead);
+        lead++;
+      }
+    }
+    for (const c of pivotCols) {
+      basis.push(matrix.map(row => row[c] ?? 0));
+    }
+    this._recordHistory(`columnSpace: ${basis.length} basis vectors`);
+    return basis;
+  }
+
+  /**
+   * 行空间
+   * Row space
+   */
+  public rowSpace(matrix: number[][]): number[][] {
+    const rref = this.rref(matrix.map(r => [...r]));
+    const basis: number[][] = [];
+    for (let r = 0; r < rref.length; r++) {
+      if (rref[r]!.some(v => Math.abs(v) > 1e-10)) {
+        basis.push([...rref[r]!]);
+      }
+    }
+    this._recordHistory(`rowSpace: ${basis.length} basis vectors`);
+    return basis;
+  }
+
+  /**
+   * 左零空间
+   * Left null space
+   */
+  public leftNullSpace(matrix: number[][]): number[][] {
+    const At = this._transpose(matrix);
+    return this.nullSpace(At);
+  }
+
+  /**
+   * 四个基本子空间
+   * Four fundamental subspaces
+   */
+  public fourFundamentalSubspaces(A: number[][]): {
+    columnSpace: number[][];
+    nullSpace: number[][];
+    rowSpace: number[][];
+    leftNullSpace: number[][];
+  } {
+    const columnSpace = this.columnSpace(A);
+    const nullSpace = this.nullSpace(A);
+    const rowSpace = this.rowSpace(A);
+    const leftNullSpace = this.leftNullSpace(A);
+    this._recordHistory('fourFundamentalSubspaces computed');
+    return { columnSpace, nullSpace, rowSpace, leftNullSpace };
+  }
+
+  /**
+   * 线性方程组求解（Ax = b）
+   * Solve linear system Ax = b
+   */
+  public solveSystem(A: number[][], b: number[]): number[] | null {
+    const n = A.length;
+    const aug = A.map((row, i) => [...row, b[i] ?? 0]);
+    for (let i = 0; i < n; i++) {
+      let pivotRow = i;
+      for (let r = i + 1; r < n; r++) {
+        if (Math.abs(aug[r]![i]!) > Math.abs(aug[pivotRow]![i]!)) pivotRow = r;
+      }
+      [aug[i]!, aug[pivotRow]!] = [aug[pivotRow]!, aug[i]!];
+      const pivot = aug[i]![i]!;
+      if (Math.abs(pivot) < 1e-12) return null;
+      for (let c = i; c <= n; c++) aug[i]![c] = aug[i]![c]! / pivot;
+      for (let r = 0; r < n; r++) {
+        if (r !== i) {
+          const factor = aug[r]![i]!;
+          for (let c = i; c <= n; c++) {
+            aug[r]![c] = aug[r]![c]! - factor * aug[i]![c]!;
+          }
+        }
+      }
+    }
+    return aug.map(row => row[n] ?? 0);
+  }
+
+  /**
+   * 高斯-赛德尔迭代
+   * Gauss-Seidel iteration
+   */
+  public gaussSeidel(
+    A: number[][],
+    b: number[],
+    initialGuess?: number[],
+    tolerance: number = 1e-10,
+    maxIterations: number = 1000
+  ): { solution: number[]; iterations: number; converged: boolean } {
+    const n = A.length;
+    let x = initialGuess ?? new Array(n).fill(0);
+    let iter = 0;
+    for (iter = 0; iter < maxIterations; iter++) {
+      const xOld = [...x];
+      for (let i = 0; i < n; i++) {
+        let sum = b[i] ?? 0;
+        for (let j = 0; j < n; j++) {
+          if (j !== i) {
+            sum -= (A[i]?.[j] ?? 0) * x[j];
+          }
+        }
+        const diag = A[i]?.[i] ?? 1;
+        if (Math.abs(diag) < 1e-12) break;
+        x[i] = sum / diag;
+      }
+      let error = 0;
+      for (let i = 0; i < n; i++) {
+        error += Math.pow(x[i] - xOld[i], 2);
+      }
+      if (Math.sqrt(error) < tolerance) break;
+    }
+    const converged = iter < maxIterations;
+    this._recordHistory(`gaussSeidel: converged=${converged}, iter=${iter}`);
+    return { solution: x, iterations: iter, converged };
+  }
+
+  /**
+   * 雅可比迭代
+   * Jacobi iteration
+   */
+  public jacobiIteration(
+    A: number[][],
+    b: number[],
+    initialGuess?: number[],
+    tolerance: number = 1e-10,
+    maxIterations: number = 1000
+  ): { solution: number[]; iterations: number; converged: boolean } {
+    const n = A.length;
+    let x = initialGuess ?? new Array(n).fill(0);
+    let iter = 0;
+    for (iter = 0; iter < maxIterations; iter++) {
+      const xOld = [...x];
+      for (let i = 0; i < n; i++) {
+        let sum = b[i] ?? 0;
+        for (let j = 0; j < n; j++) {
+          if (j !== i) {
+            sum -= (A[i]?.[j] ?? 0) * xOld[j];
+          }
+        }
+        const diag = A[i]?.[i] ?? 1;
+        if (Math.abs(diag) < 1e-12) break;
+        x[i] = sum / diag;
+      }
+      let error = 0;
+      for (let i = 0; i < n; i++) {
+        error += Math.pow(x[i] - xOld[i], 2);
+      }
+      if (Math.sqrt(error) < tolerance) break;
+    }
+    const converged = iter < maxIterations;
+    this._recordHistory(`jacobiIteration: converged=${converged}, iter=${iter}`);
+    return { solution: x, iterations: iter, converged };
+  }
+
+  /**
+   * LDLT 分解
+   * LDLT decomposition
+   */
+  public ldltDecomposition(matrix: number[][]): { L: number[][]; D: number[] } {
+    const n = matrix.length;
+    const L: number[][] = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
+    );
+    const D = new Array(n).fill(0);
+    for (let j = 0; j < n; j++) {
+      let sum = 0;
+      for (let k = 0; k < j; k++) {
+        sum += L[j]![k]! * L[j]![k]! * D[k]!;
+      }
+      D[j] = matrix[j]![j]! - sum;
+      for (let i = j + 1; i < n; i++) {
+        let sum2 = 0;
+        for (let k = 0; k < j; k++) {
+          sum2 += L[i]![k]! * L[j]![k]! * D[k]!;
+        }
+        L[i]![j] = (matrix[i]![j]! - sum2) / D[j]!;
+      }
+    }
+    this._recordHistory('ldltDecomposition: complete');
+    return { L, D };
+  }
+
+  /**
+   * PLU 分解（带部分主元选择）
+   * PLU decomposition with partial pivoting
+   */
+  public pluDecomposition(matrix: number[][]): { P: number[][]; L: number[][]; U: number[][] } {
+    const n = matrix.length;
+    const A = matrix.map(r => [...r]);
+    const P: number[][] = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
+    );
+    const L: number[][] = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
+    );
+    for (let k = 0; k < n; k++) {
+      let pivotRow = k;
+      for (let i = k + 1; i < n; i++) {
+        if (Math.abs(A[i]![k]!) > Math.abs(A[pivotRow]![k]!)) pivotRow = i;
+      }
+      if (pivotRow !== k) {
+        [A[k]!, A[pivotRow]!] = [A[pivotRow]!, A[k]!];
+        [P[k]!, P[pivotRow]!] = [P[pivotRow]!, P[k]!];
+        for (let j = 0; j < k; j++) {
+          [L[k]![j]!, L[pivotRow]![j]!] = [L[pivotRow]![j]!, L[k]![j]!];
+        }
+      }
+      for (let i = k + 1; i < n; i++) {
+        const factor = A[i]![k]! / A[k]![k]!;
+        L[i]![k] = factor;
+        for (let j = k; j < n; j++) {
+          A[i]![j] = A[i]![j]! - factor * A[k]![j]!;
+        }
+      }
+    }
+    this._recordHistory('pluDecomposition: complete');
+    return { P, L, U: A };
+  }
+
+  /**
+   * 矩阵的迹性质验证
+   * Trace property verification: tr(AB) = tr(BA)
+   */
+  public tracePropertyVerification(A: number[][], B: number[][]): {
+    trAB: number;
+    trBA: number;
+    holds: boolean;
+  } {
+    const AB = this._multiply(A, B);
+    const BA = this._multiply(B, A);
+    const trAB = this.trace(AB);
+    const trBA = this.trace(BA);
+    const holds = Math.abs(trAB - trBA) < 1e-10;
+    this._recordHistory(`tracePropertyVerification: holds=${holds}`);
+    return { trAB, trBA, holds };
+  }
+
+  /**
+   * 行列式乘法性质验证
+   * Determinant multiplicative property: det(AB) = det(A)det(B)
+   */
+  public determinantMultiplicative(A: number[][], B: number[][]): {
+    detAB: number;
+    detAdetB: number;
+    holds: boolean;
+  } {
+    const AB = this._multiply(A, B);
+    const detAB = this.determinant(AB);
+    const detA = this.determinant(A);
+    const detB = this.determinant(B);
+    const detAdetB = detA * detB;
+    const holds = Math.abs(detAB - detAdetB) < 1e-8;
+    this._recordHistory(`determinantMultiplicative: holds=${holds}`);
+    return { detAB, detAdetB, holds };
+  }
+
+  /**
+   * 创建单位矩阵
+   * Create identity matrix
+   */
+  public identity(n: number): number[][] {
+    return Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
+    ) as number[][];
+  }
+
+  /**
+   * 创建零矩阵
+   * Create zero matrix
+   */
+  public zeros(rows: number, cols: number): number[][] {
+    return Array.from({ length: rows }, () => new Array(cols).fill(0));
+  }
+
+  /**
+   * 创建对角矩阵
+   * Create diagonal matrix
+   */
+  public diagonal(diagonal: number[]): number[][] {
+    const n = diagonal.length;
+    return Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => i === j ? diagonal[i] ?? 0 : 0)
+    );
+  }
+
+  /**
+   * 提取对角元素
+   * Extract diagonal elements
+   */
+  public getDiagonal(matrix: number[][]): number[] {
+    const n = Math.min(matrix.length, matrix[0]?.length ?? 0);
+    const diag: number[] = [];
+    for (let i = 0; i < n; i++) {
+      diag.push(matrix[i]![i] ?? 0);
+    }
+    return diag;
+  }
+
+  /**
+   * 矩阵的 Frobenius 内积
+   * Frobenius inner product
+   */
+  public frobeniusInnerProduct(A: number[][], B: number[][]): number {
+    let sum = 0;
+    for (let i = 0; i < A.length; i++) {
+      for (let j = 0; j < (A[0]?.length ?? 0); j++) {
+        sum += (A[i]?.[j] ?? 0) * (B[i]?.[j] ?? 0);
+      }
+    }
+    return sum;
+  }
+
+  /**
    * 转换为数据包
    * Serialize to DataPacket
    */
@@ -523,7 +1016,6 @@ export class MatrixTheory {
       }
       return [trace / 2, trace / 2];
     }
-    // QR algorithm
     let A = matrix.map(r => [...r]);
     for (let iter = 0; iter < 100; iter++) {
       const { Q, R } = this.qrDecompose(A);
@@ -539,5 +1031,12 @@ export class MatrixTheory {
     const eigenvalues: number[] = [];
     for (let i = 0; i < n; i++) eigenvalues.push(A[i]![i]!);
     return eigenvalues;
+  }
+
+  private _factorial(n: number): number {
+    if (n <= 1) return 1;
+    let r = 1;
+    for (let i = 2; i <= n; i++) r *= i;
+    return r;
   }
 }

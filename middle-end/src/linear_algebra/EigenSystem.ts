@@ -322,6 +322,366 @@ export class EigenSystem {
   }
 
   /**
+   * 逆幂迭代法求最小特征值
+   * Inverse power iteration for smallest eigenvalue
+   */
+  public inversePowerIteration(
+    matrix: number[][],
+    iterations: number = 100,
+    shift: number = 0
+  ): { eigenvalue: number; eigenvector: number[] } {
+    const n = matrix.length;
+    let v = new Array(n).fill(1 / Math.sqrt(n));
+    let eigenvalue = 0;
+    const shifted = matrix.map((row, i) =>
+      row.map((val, j) => val - (i === j ? shift : 0))
+    );
+    for (let iter = 0; iter < iterations; iter++) {
+      const w = this._solveSystem(shifted, v);
+      const norm = Math.sqrt(w.reduce((s, x) => s + x * x, 0));
+      if (norm < 1e-12) break;
+      v = w.map(x => x / norm);
+      const Av = this._matVec(matrix, v);
+      eigenvalue = Av.reduce((s, x, i) => s + x * v[i]!, 0);
+    }
+    this._recordHistory(`inversePowerIteration: λ=${eigenvalue}`);
+    return { eigenvalue, eigenvector: v };
+  }
+
+  /**
+   * Rayleigh 商迭代
+   * Rayleigh quotient iteration
+   */
+  public rayleighQuotientIteration(
+    matrix: number[][],
+    iterations: number = 50
+  ): { eigenvalue: number; eigenvector: number[] } {
+    const n = matrix.length;
+    let v = new Array(n).fill(1 / Math.sqrt(n));
+    let mu = 0;
+    for (let iter = 0; iter < iterations; iter++) {
+      const Av = this._matVec(matrix, v);
+      mu = Av.reduce((s, x, i) => s + x * v[i]!, 0);
+      const shifted = matrix.map((row, i) =>
+        row.map((val, j) => val - (i === j ? mu : 0))
+      );
+      const w = this._solveSystem(shifted, v);
+      const norm = Math.sqrt(w.reduce((s, x) => s + x * x, 0));
+      if (norm < 1e-12) break;
+      v = w.map(x => x / norm);
+    }
+    this._recordHistory(`rayleighQuotientIteration: λ=${mu}`);
+    return { eigenvalue: mu, eigenvector: v };
+  }
+
+  /**
+   * 对称矩阵的特征值分解
+   * Spectral decomposition for symmetric matrices
+   */
+  public spectralDecomposition(matrix: number[][]): {
+    eigenvalues: number[];
+    eigenvectors: number[][];
+    Q: number[][];
+    Lambda: number[][];
+  } {
+    const n = matrix.length;
+    const eigenvalues = this.findEigenvalues(matrix);
+    const eigenvectors: number[][] = [];
+    const sortedPairs = eigenvalues
+      .map((val, i) => ({ val, idx: i }))
+      .sort((a, b) => b.val - a.val);
+    for (const pair of sortedPairs) {
+      const vecs = this.findEigenvectors(matrix, pair.val);
+      if (vecs.length > 0) {
+        eigenvectors.push(vecs[0]!);
+      }
+    }
+    const Q: number[][] = [];
+    for (let i = 0; i < n; i++) {
+      const vec = eigenvectors[i] ?? new Array(n).fill(0).map((_, j) => i === j ? 1 : 0);
+      const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+      Q.push(norm > 0 ? vec.map(v => v / norm) : vec);
+    }
+    const Lambda = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      Lambda[i]![i] = eigenvalues[i] ?? 0;
+    }
+    this._recordHistory('spectralDecomposition: complete');
+    return { eigenvalues, eigenvectors, Q, Lambda };
+  }
+
+  /**
+   * 奇异值
+   * Singular values
+   */
+  public singularValues(matrix: number[][]): number[] {
+    const AtA = this._multiply(this._transpose(matrix), matrix);
+    const eigenvalues = this.findEigenvalues(AtA);
+    const singularValues = eigenvalues
+      .filter(v => v > 1e-10)
+      .map(v => Math.sqrt(v))
+      .sort((a, b) => b - a);
+    this._recordHistory(`singularValues: ${singularValues.length} values`);
+    return singularValues;
+  }
+
+  /**
+   * 矩阵的秩（通过 SVD）
+   * Rank of matrix via SVD
+   */
+  public matrixRank(matrix: number[][], tolerance: number = 1e-10): number {
+    const sv = this.singularValues(matrix);
+    const rank = sv.filter(v => v > tolerance).length;
+    this._recordHistory(`matrixRank: ${rank}`);
+    return rank;
+  }
+
+  /**
+   * 矩阵的条件数
+   * Condition number of matrix
+   */
+  public conditionNumber(matrix: number[][]): number {
+    const sv = this.singularValues(matrix);
+    if (sv.length === 0) return Infinity;
+    const max = sv[0]!;
+    const min = sv[sv.length - 1]!;
+    const result = min > 1e-12 ? max / min : Infinity;
+    this._recordHistory(`conditionNumber: ${result}`);
+    return result;
+  }
+
+  /**
+   * 伪逆（通过 SVD）
+   * Pseudo-inverse via SVD
+   */
+  public pseudoInverse(matrix: number[][]): number[][] {
+    const m = matrix.length;
+    const n = matrix[0]?.length ?? 0;
+    const { U, S, V } = this.singularValueDecomposition(matrix);
+    const SPlus: number[][] = [];
+    for (let i = 0; i < n; i++) {
+      const row: number[] = [];
+      for (let j = 0; j < m; j++) {
+        const s = S[j]?.[i] ?? 0;
+        row.push(s > 1e-10 ? 1 / s : 0);
+      }
+      SPlus.push(row);
+    }
+    const VtSPlus = this._multiply(this._transpose(V), SPlus);
+    const Ut = this._transpose(U);
+    const result = this._multiply(VtSPlus, Ut);
+    this._recordHistory('pseudoInverse: complete');
+    return result;
+  }
+
+  /**
+   * 主成分分析（PCA）
+   * Principal Component Analysis
+   */
+  public pca(data: number[][], numComponents: number): {
+    components: number[][];
+    eigenvalues: number[];
+    explainedVariance: number[];
+    projected: number[][];
+  } {
+    const n = data.length;
+    const d = data[0]?.length ?? 0;
+    const mean = new Array(d).fill(0);
+    for (const row of data) {
+      for (let j = 0; j < d; j++) {
+        mean[j] += row[j] ?? 0;
+      }
+    }
+    for (let j = 0; j < d; j++) mean[j] /= n;
+    const centered = data.map(row => row.map((v, j) => v - mean[j]!));
+    const At = this._transpose(centered);
+    const covariance = this._multiply(At, centered).map(row => row.map(v => v / (n - 1)));
+    const { eigenvalues, eigenvectors } = this.spectralDecomposition(covariance);
+    const k = Math.min(numComponents, eigenvalues.length);
+    const components = eigenvectors.slice(0, k);
+    const totalVar = eigenvalues.reduce((s, v) => s + Math.max(0, v), 0);
+    const explainedVariance = eigenvalues.slice(0, k).map(v => Math.max(0, v) / totalVar);
+    const projected = this._multiply(centered, this._transpose(components));
+    this._recordHistory(`pca: ${k} components`);
+    return { components, eigenvalues: eigenvalues.slice(0, k), explainedVariance, projected };
+  }
+
+  /**
+   * 迹与特征值关系验证
+   * Trace = sum of eigenvalues verification
+   */
+  public traceEigenvalueVerification(matrix: number[][]): {
+    trace: number;
+    sumEigenvalues: number;
+    holds: boolean;
+  } {
+    const trace = this.trace(matrix);
+    const eigenvalues = this.findEigenvalues(matrix);
+    const sum = eigenvalues.reduce((s, v) => s + v, 0);
+    const holds = Math.abs(trace - sum) < 1e-6;
+    this._recordHistory(`traceEigenvalueVerification: holds=${holds}`);
+    return { trace, sumEigenvalues: sum, holds };
+  }
+
+  /**
+   * 行列式与特征值关系验证
+   * Determinant = product of eigenvalues verification
+   */
+  public determinantEigenvalueVerification(matrix: number[][]): {
+    determinant: number;
+    productEigenvalues: number;
+    holds: boolean;
+  } {
+    const det = this.determinant(matrix);
+    const eigenvalues = this.findEigenvalues(matrix);
+    const product = eigenvalues.reduce((s, v) => s * v, 1);
+    const holds = Math.abs(det - product) < 1e-6;
+    this._recordHistory(`determinantEigenvalueVerification: holds=${holds}`);
+    return { determinant: det, productEigenvalues: product, holds };
+  }
+
+  /**
+   * Cayley-Hamilton 定理验证
+   * Cayley-Hamilton theorem verification
+   */
+  public cayleyHamiltonVerification(matrix: number[][]): {
+    error: number;
+    holds: boolean;
+  } {
+    const n = matrix.length;
+    const eigenvalues = this.findEigenvalues(matrix);
+    let charPoly: number[] = [1];
+    for (const lambda of eigenvalues) {
+      const newPoly = new Array(charPoly.length + 1).fill(0);
+      for (let i = 0; i < charPoly.length; i++) {
+        newPoly[i] += charPoly[i]!;
+        newPoly[i + 1] += -lambda * charPoly[i]!;
+      }
+      charPoly = newPoly;
+    }
+    let result = Array.from({ length: n }, () => new Array(n).fill(0));
+    let current: number[][] = Array.from({ length: n }, (_, i) =>
+      Array.from({ length: n }, (_, j) => i === j ? 1 : 0)
+    );
+    for (let k = 0; k < charPoly.length; k++) {
+      const coeff = charPoly[k] ?? 0;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          result[i]![j] += coeff * current[i]![j]!;
+        }
+      }
+      if (k < charPoly.length - 1) {
+        current = this._multiply(current, matrix);
+      }
+    }
+    let error = 0;
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        error += Math.abs(result[i]![j]!);
+      }
+    }
+    const holds = error < 1e-6;
+    this._recordHistory(`cayleyHamiltonVerification: holds=${holds}`);
+    return { error, holds };
+  }
+
+  /**
+   * Gershgorin 圆定理：估计特征值范围
+   * Gershgorin circle theorem
+   */
+  public gershgorinCircles(matrix: number[][]): {
+    centers: number[];
+    radii: number[];
+    minEigenvalue: number;
+    maxEigenvalue: number;
+  } {
+    const n = matrix.length;
+    const centers: number[] = [];
+    const radii: number[] = [];
+    for (let i = 0; i < n; i++) {
+      centers.push(matrix[i]![i] ?? 0);
+      let r = 0;
+      for (let j = 0; j < n; j++) {
+        if (i !== j) r += Math.abs(matrix[i]![j] ?? 0);
+      }
+      radii.push(r);
+    }
+    let minEig = Infinity;
+    let maxEig = -Infinity;
+    for (let i = 0; i < n; i++) {
+      minEig = Math.min(minEig, centers[i] - radii[i]);
+      maxEig = Math.max(maxEig, centers[i] + radii[i]);
+    }
+    this._recordHistory(`gershgorinCircles: [${minEig}, ${maxEig}]`);
+    return { centers, radii, minEigenvalue: minEig, maxEigenvalue: maxEig };
+  }
+
+  /**
+   * 正定判定（通过特征值）
+   * Positive definiteness check via eigenvalues
+   */
+  public isPositiveDefinite(matrix: number[][]): boolean {
+    const eigenvalues = this.findEigenvalues(matrix);
+    return eigenvalues.every(v => v > 1e-10);
+  }
+
+  /**
+   * 半正定判定
+   * Positive semi-definiteness check
+   */
+  public isPositiveSemiDefinite(matrix: number[][]): boolean {
+    const eigenvalues = this.findEigenvalues(matrix);
+    return eigenvalues.every(v => v > -1e-10);
+  }
+
+  /**
+   * 特征值的实部（稳定性分析）
+   * Real parts of eigenvalues (for stability analysis)
+   */
+  public stabilityAnalysis(matrix: number[][]): {
+    eigenvalues: number[];
+    stable: boolean;
+    marginallyStable: boolean;
+  } {
+    const eigenvalues = this.findEigenvalues(matrix);
+    const allNegative = eigenvalues.every(v => v < -1e-10);
+    const allNonPositive = eigenvalues.every(v => v <= 1e-10);
+    this._recordHistory(`stabilityAnalysis: stable=${allNegative}`);
+    return {
+      eigenvalues,
+      stable: allNegative,
+      marginallyStable: allNonPositive && !allNegative
+    };
+  }
+
+  /**
+   * 相似变换下的特征值不变性验证
+   * Eigenvalue invariance under similarity transformation
+   */
+  public similarityInvarianceVerification(
+    matrix: number[][],
+    P: number[][]
+  ): {
+    eigA: number[];
+    eigPAPinv: number[];
+    holds: boolean;
+  } {
+    const eigA = this.findEigenvalues(matrix).sort((a, b) => a - b);
+    const PInv = this._inverse(P);
+    if (!PInv) return { eigA, eigPAPinv: [], holds: false };
+    const PAPinv = this._multiply(this._multiply(P, matrix), PInv);
+    const eigPAPinv = this.findEigenvalues(PAPinv).sort((a, b) => a - b);
+    let maxDiff = 0;
+    const n = Math.min(eigA.length, eigPAPinv.length);
+    for (let i = 0; i < n; i++) {
+      maxDiff = Math.max(maxDiff, Math.abs(eigA[i] - eigPAPinv[i]));
+    }
+    const holds = maxDiff < 1e-6;
+    this._recordHistory(`similarityInvarianceVerification: holds=${holds}`);
+    return { eigA, eigPAPinv, holds };
+  }
+
+  /**
    * 转换为数据包
    * Serialize to DataPacket
    */
@@ -453,5 +813,58 @@ export class EigenSystem {
       }
     }
     return { Q, R };
+  }
+
+  private _solveSystem(A: number[][], b: number[]): number[] {
+    const n = A.length;
+    const aug = A.map((row, i) => [...row, b[i] ?? 0]);
+    for (let i = 0; i < n; i++) {
+      let pivotRow = i;
+      for (let r = i + 1; r < n; r++) {
+        if (Math.abs(aug[r]![i]!) > Math.abs(aug[pivotRow]![i]!)) pivotRow = r;
+      }
+      [aug[i]!, aug[pivotRow]!] = [aug[pivotRow]!, aug[i]!];
+      const pivot = aug[i]![i]!;
+      if (Math.abs(pivot) < 1e-12) continue;
+      for (let c = i; c <= n; c++) aug[i]![c] = aug[i]![c]! / pivot;
+      for (let r = 0; r < n; r++) {
+        if (r !== i) {
+          const factor = aug[r]![i]!;
+          for (let c = i; c <= n; c++) {
+            aug[r]![c] = aug[r]![c]! - factor * aug[i]![c]!;
+          }
+        }
+      }
+    }
+    return aug.map(row => row[n] ?? 0);
+  }
+
+  private _inverse(matrix: number[][]): number[][] | null {
+    const n = matrix.length;
+    if (n === 0 || matrix.some(r => r.length !== n)) return null;
+    const aug = matrix.map((row, i) => {
+      const id = new Array(n).fill(0);
+      id[i] = 1;
+      return [...row, ...id];
+    });
+    for (let i = 0; i < n; i++) {
+      let pivotRow = i;
+      for (let r = i + 1; r < n; r++) {
+        if (Math.abs(aug[r]![i]!) > Math.abs(aug[pivotRow]![i]!)) pivotRow = r;
+      }
+      [aug[i]!, aug[pivotRow]!] = [aug[pivotRow]!, aug[i]!];
+      const pivot = aug[i]![i]!;
+      if (Math.abs(pivot) < 1e-12) return null;
+      for (let c = 0; c < 2 * n; c++) aug[i]![c] = aug[i]![c]! / pivot;
+      for (let r = 0; r < n; r++) {
+        if (r !== i) {
+          const factor = aug[r]![i]!;
+          for (let c = 0; c < 2 * n; c++) {
+            aug[r]![c] = aug[r]![c]! - factor * aug[i]![c]!;
+          }
+        }
+      }
+    }
+    return aug.map(row => row.slice(n));
   }
 }

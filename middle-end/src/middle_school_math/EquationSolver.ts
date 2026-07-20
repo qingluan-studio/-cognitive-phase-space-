@@ -35,12 +35,93 @@ export interface Inequality {
   solution: string;
 }
 
+/** Word problem representation. */
+export interface WordProblem {
+  description: string;
+  variables: string[];
+  equations: string[];
+  solution: string;
+}
+
+/** System of equations result. */
+export interface SystemResult {
+  solution: number[];
+  method: string;
+  consistent: boolean;
+  independent: boolean;
+}
+
+/** Radical equation solution. */
+export interface RadicalSolution {
+  solutions: number[];
+  extraneous: number[];
+  steps: SolutionStep[];
+}
+
+/** Exponential equation solution. */
+export interface ExponentialSolution {
+  solutions: number[];
+  steps: SolutionStep[];
+  base: number;
+}
+
+/** Logarithmic equation solution. */
+export interface LogarithmicSolution {
+  solutions: number[];
+  steps: SolutionStep[];
+  base: number;
+}
+
+/** Mixture problem result. */
+export interface MixtureResult {
+  amountA: number;
+  amountB: number;
+  totalAmount: number;
+  concentration: number;
+}
+
+/** Motion problem result. */
+export interface MotionResult {
+  distance: number;
+  rate: number;
+  time: number;
+  unit: string;
+}
+
+/** Work problem result. */
+export interface WorkResult {
+  timeTogether: number;
+  timeA: number;
+  timeB: number;
+  rateA: number;
+  rateB: number;
+}
+
+/** Age problem result. */
+export interface AgeResult {
+  personA: number;
+  personB: number;
+  years: number;
+  relationship: string;
+}
+
+/** Coin problem result. */
+export interface CoinResult {
+  quarters: number;
+  dimes: number;
+  nickels: number;
+  pennies: number;
+  total: number;
+}
+
 export class EquationSolver {
   private _equations: Map<string, Equation> = new Map();
   private _solutions: Solution[] = [];
   private _inequalities: Inequality[] = [];
   private _history: unknown[] = [];
   private _counter = 0;
+  private _wordProblems: WordProblem[] = [];
+  private _systemResults: SystemResult[] = [];
 
   solveLinear(a: number, b: number): Solution {
     const steps: SolutionStep[] = [];
@@ -95,12 +176,10 @@ export class EquationSolver {
     if (Math.abs(a) < 1e-12) {
       return this.solveQuadratic(b, c, d);
     }
-    // Normalize: x^3 + p x^2 + q x + r = 0
     const p = b / a;
     const q = c / a;
     const r = d / a;
     steps.push({ operation: 'normalize', from: `${a}x^3+${b}x^2+${c}x+${d}=0`, to: `x^3+${p}x^2+${q}x+${r}=0`, annotation: 'divide by leading coefficient' });
-    // Substitute x = t - p/3 (depressed cubic)
     const shift = -p / 3;
     const A = q - p * p / 3;
     const B = r + 2 * p * p * p / 27 - p * q / 3;
@@ -156,7 +235,6 @@ export class EquationSolver {
   solveFractional(numerator: number[], denominator: number[]): Solution {
     const steps: SolutionStep[] = [];
     steps.push({ operation: 'multiply', from: 'P(x)/Q(x)=0', to: 'P(x)=0 (Q(x)≠0)', annotation: 'multiply both sides by Q' });
-    // Build coefficients (numerator[0]=constant, [1]=x, [2]=x^2...)
     if (numerator.length === 2) {
       const sol = this.solveLinear(numerator[1], numerator[0]);
       steps.push(...sol.steps);
@@ -275,6 +353,101 @@ export class EquationSolver {
     return ineq;
   }
 
+  solveAbsoluteValueInequality(expr: string, value: number, direction: Inequality['direction']): Inequality {
+    let solution: string;
+    if (value < 0) {
+      solution = direction === '<' || direction === '<=' ? '∅' : '(-∞, +∞)';
+    } else if (direction === '<' || direction === '<=') {
+      const bracketLeft = direction === '<=' ? '[' : '(';
+      const bracketRight = direction === '<=' ? ']' : ')';
+      solution = `${bracketLeft}${-value}, ${value}${bracketRight}`;
+    } else {
+      const bracketLeft = direction === '>=' ? '(' : '(';
+      const bracketRight = direction === '>=' ? ')' : ')';
+      solution = `(-∞, ${-value}] ∪ [${value}, +∞)`;
+    }
+    const ineq: Inequality = {
+      expression: `|${expr}| ${direction} ${value}`,
+      variable: 'x',
+      direction,
+      solution,
+    };
+    this._inequalities.push(ineq);
+    this._history.push({ op: 'solveAbsoluteValueInequality', ineq });
+    return ineq;
+  }
+
+  solveCompoundInequality(
+    lower: number,
+    middle: number,
+    upper: number,
+    direction: 'and' | 'or',
+  ): Inequality {
+    let solution: string;
+    if (direction === 'and') {
+      solution = `(${lower}, ${upper})`;
+    } else {
+      solution = `(-∞, ${lower}) ∪ (${upper}, +∞)`;
+    }
+    const ineq: Inequality = {
+      expression: `${lower} < x < ${upper}`,
+      variable: 'x',
+      direction: '<',
+      solution,
+    };
+    this._inequalities.push(ineq);
+    return ineq;
+  }
+
+  solveRadicalEquation(radicandCoef: number, constant: number, result: number): RadicalSolution {
+    const steps: SolutionStep[] = [];
+    steps.push({ operation: 'isolate', from: `√(${radicandCoef}x + ${constant}) = ${result}`, to: `${radicandCoef}x + ${constant} = ${result * result}`, annotation: 'square both sides' });
+    const linearSol = this.solveLinear(radicandCoef, constant - result * result);
+    steps.push(...linearSol.steps);
+    const solutions: number[] = [];
+    const extraneous: number[] = [];
+    const value = linearSol.value as number;
+    if (Number.isFinite(value)) {
+      const check = radicandCoef * value + constant;
+      if (check >= 0 && Math.abs(Math.sqrt(check) - result) < 1e-9) {
+        solutions.push(value);
+      } else {
+        extraneous.push(value);
+      }
+    }
+    const resultObj: RadicalSolution = { solutions, extraneous, steps };
+    this._history.push({ op: 'solveRadicalEquation', resultObj });
+    return resultObj;
+  }
+
+  solveExponentialEquation(base: number, leftSide: string, rightSide: number): ExponentialSolution {
+    const steps: SolutionStep[] = [];
+    steps.push({ operation: 'take_log', from: `${base}^x = ${rightSide}`, to: `x = log_${base}(${rightSide})`, annotation: 'take logarithm of both sides' });
+    const solution = Math.log(rightSide) / Math.log(base);
+    steps.push({ operation: 'evaluate', from: `x = log_${base}(${rightSide})`, to: `x = ${solution}`, annotation: 'compute logarithm' });
+    const result: ExponentialSolution = {
+      solutions: [solution],
+      steps,
+      base,
+    };
+    this._history.push({ op: 'solveExponentialEquation', result });
+    return result;
+  }
+
+  solveLogarithmicEquation(base: number, argument: string, result: number): LogarithmicSolution {
+    const steps: SolutionStep[] = [];
+    steps.push({ operation: 'exponentiate', from: `log_${base}(${argument}) = ${result}`, to: `${argument} = ${base}^${result}`, annotation: 'rewrite in exponential form' });
+    const solution = Math.pow(base, result);
+    steps.push({ operation: 'evaluate', from: `${argument} = ${base}^${result}`, to: `x = ${solution}`, annotation: 'compute power' });
+    const res: LogarithmicSolution = {
+      solutions: [solution],
+      steps,
+      base,
+    };
+    this._history.push({ op: 'solveLogarithmicEquation', res });
+    return res;
+  }
+
   gaussianElimination(matrix: number[][]): number[] {
     const m = matrix.map(row => [...row]);
     const rows = m.length;
@@ -319,19 +492,364 @@ export class EquationSolver {
     return solution;
   }
 
+  solveSystemBySubstitution(eq1: { a: number; b: number; c: number }, eq2: { a: number; b: number; c: number }): SystemResult {
+    const steps: SolutionStep[] = [];
+    steps.push({ operation: 'isolate_y', from: `${eq1.a}x + ${eq1.b}y = ${eq1.c}`, to: `y = (${eq1.c} - ${eq1.a}x) / ${eq1.b}`, annotation: 'solve first equation for y' });
+    if (Math.abs(eq1.b) < 1e-12) {
+      return { solution: [], method: 'substitution', consistent: false, independent: false };
+    }
+    const aSub = eq2.a - eq2.b * eq1.a / eq1.b;
+    const cSub = eq2.c - eq2.b * eq1.c / eq1.b;
+    const x = cSub / aSub;
+    const y = (eq1.c - eq1.a * x) / eq1.b;
+    const result: SystemResult = {
+      solution: [x, y],
+      method: 'substitution',
+      consistent: true,
+      independent: true,
+    };
+    this._systemResults.push(result);
+    this._history.push({ op: 'solveSystemBySubstitution', result });
+    return result;
+  }
+
+  solveSystemByElimination(eq1: { a: number; b: number; c: number }, eq2: { a: number; b: number; c: number }): SystemResult {
+    const det = eq1.a * eq2.b - eq2.a * eq1.b;
+    let result: SystemResult;
+    if (Math.abs(det) < 1e-12) {
+      const ratio = eq1.a / eq2.a;
+      if (Math.abs(eq1.c / eq2.c - ratio) < 1e-9) {
+        result = { solution: [], method: 'elimination', consistent: true, independent: false };
+      } else {
+        result = { solution: [], method: 'elimination', consistent: false, independent: false };
+      }
+    } else {
+      const x = (eq1.c * eq2.b - eq2.c * eq1.b) / det;
+      const y = (eq1.a * eq2.c - eq2.a * eq1.c) / det;
+      result = { solution: [x, y], method: 'elimination', consistent: true, independent: true };
+    }
+    this._systemResults.push(result);
+    this._history.push({ op: 'solveSystemByElimination', result });
+    return result;
+  }
+
+  mixtureProblem(
+    solutionA: { amount: number; concentration: number },
+    solutionB: { amount: number; concentration: number },
+  ): MixtureResult {
+    const totalAmount = solutionA.amount + solutionB.amount;
+    const totalPure = solutionA.amount * solutionA.concentration + solutionB.amount * solutionB.concentration;
+    const concentration = totalAmount > 0 ? totalPure / totalAmount : 0;
+    const result: MixtureResult = {
+      amountA: solutionA.amount,
+      amountB: solutionB.amount,
+      totalAmount,
+      concentration,
+    };
+    this._history.push({ op: 'mixtureProblem', result });
+    return result;
+  }
+
+  motionProblem(distance: number, rate: number, time: number): MotionResult {
+    if (distance === 0) {
+      return { distance: rate * time, rate, time, unit: 'distance' };
+    }
+    if (rate === 0) {
+      return { distance, rate: distance / time, time, unit: 'rate' };
+    }
+    if (time === 0) {
+      return { distance, rate, time: distance / rate, unit: 'time' };
+    }
+    return { distance, rate, time, unit: 'all given' };
+  }
+
+  workProblem(timeA: number, timeB: number): WorkResult {
+    const rateA = 1 / timeA;
+    const rateB = 1 / timeB;
+    const combinedRate = rateA + rateB;
+    const timeTogether = 1 / combinedRate;
+    const result: WorkResult = {
+      timeTogether,
+      timeA,
+      timeB,
+      rateA,
+      rateB,
+    };
+    this._history.push({ op: 'workProblem', result });
+    return result;
+  }
+
+  ageProblem(currentA: number, currentB: number, years: number, targetRatio: number): AgeResult {
+    const futureA = currentA + years;
+    const futureB = currentB + years;
+    const result: AgeResult = {
+      personA: futureA,
+      personB: futureB,
+      years,
+      relationship: futureB !== 0 ? `${futureA / futureB}` : 'undefined',
+    };
+    this._history.push({ op: 'ageProblem', result });
+    return result;
+  }
+
+  coinProblem(totalAmount: number, totalCoins: number): CoinResult {
+    let quarters = 0;
+    let dimes = 0;
+    let nickels = 0;
+    let pennies = 0;
+    let remaining = totalAmount * 100;
+    quarters = Math.floor(remaining / 25);
+    remaining %= 25;
+    dimes = Math.floor(remaining / 10);
+    remaining %= 10;
+    nickels = Math.floor(remaining / 5);
+    remaining %= 5;
+    pennies = remaining;
+    const result: CoinResult = {
+      quarters,
+      dimes,
+      nickels,
+      pennies,
+      total: totalAmount,
+    };
+    this._history.push({ op: 'coinProblem', result });
+    return result;
+  }
+
+  solveRationalEquation(numCoefs: number[], denCoefs: number[]): Solution {
+    const steps: SolutionStep[] = [];
+    steps.push({ operation: 'find_LCD', from: 'P(x)/Q(x)=0', to: 'multiply by LCD', annotation: 'find least common denominator' });
+    const numLen = numCoefs.length;
+    if (numLen <= 3) {
+      if (numLen === 2) {
+        const sol = this.solveLinear(numCoefs[1], numCoefs[0]);
+        steps.push(...sol.steps);
+        return { variable: 'x', value: sol.value, steps, numberOfSolutions: sol.numberOfSolutions };
+      }
+      if (numLen === 3) {
+        const sol = this.solveQuadratic(numCoefs[2], numCoefs[1], numCoefs[0]);
+        steps.push(...sol.steps);
+        return { variable: 'x', value: sol.value, steps, numberOfSolutions: sol.numberOfSolutions };
+      }
+    }
+    return { variable: 'x', value: NaN, steps, numberOfSolutions: 0 };
+  }
+
+  solveForVariable(formula: string, variable: string, values: Map<string, number>): number {
+    let expr = formula;
+    values.forEach((val, key) => {
+      expr = expr.replace(new RegExp(key, 'g'), `(${val})`);
+    });
+    try {
+      const fn = new Function(`return ${expr};`);
+      return Number(fn());
+    } catch {
+      return NaN;
+    }
+  }
+
   checkSolution(equation: Equation, value: number): boolean {
-    // Heuristic numerical check using simple substitution on parsed left - right = 0
     const expr = `${equation.leftSide}-(${equation.rightSide})`;
     const v = equation.variable;
     const substituted = expr.replace(new RegExp(v, 'g'), `(${value})`);
     try {
-      // eslint-disable-next-line no-new-func
       const fn = new Function(`return ${substituted};`);
       const result = Number(fn());
       return Math.abs(result) < 1e-6;
     } catch {
       return false;
     }
+  }
+
+  verifySolutionSet(equation: Equation, values: number[]): { valid: number[]; invalid: number[] } {
+    const valid: number[] = [];
+    const invalid: number[] = [];
+    for (const v of values) {
+      if (this.checkSolution(equation, v)) {
+        valid.push(v);
+      } else {
+        invalid.push(v);
+      }
+    }
+    return { valid, invalid };
+  }
+
+  solveQuadraticByFactoring(a: number, b: number, c: number): { roots: number[]; factors: string[]; factored: boolean } {
+    const disc = b * b - 4 * a * c;
+    if (disc < 0 || !Number.isInteger(Math.sqrt(disc))) {
+      return { roots: [], factors: [], factored: false };
+    }
+    const sqrtD = Math.sqrt(disc);
+    const r1 = (-b + sqrtD) / (2 * a);
+    const r2 = (-b - sqrtD) / (2 * a);
+    const f1 = a === 1 ? `(x ${-r1 >= 0 ? '+' : '-'} ${Math.abs(r1)})` : `(${a}x ${-r1 >= 0 ? '+' : '-'} ${Math.abs(r1)})`;
+    const f2 = `(x ${-r2 >= 0 ? '+' : '-'} ${Math.abs(r2)})`;
+    return {
+      roots: [r1, r2],
+      factors: [f1, f2],
+      factored: true,
+    };
+  }
+
+  solveByCompletingTheSquare(a: number, b: number, c: number): { vertex: { x: number; y: number }; roots: number[]; steps: SolutionStep[] } {
+    const steps: SolutionStep[] = [];
+    if (Math.abs(a) < 1e-12) {
+      const sol = this.solveLinear(b, c);
+      return { vertex: { x: 0, y: 0 }, roots: Array.isArray(sol.value) ? sol.value : [sol.value as number], steps: sol.steps };
+    }
+    steps.push({ operation: 'factor_a', from: `${a}x^2 + ${b}x + ${c} = 0`, to: `${a}(x^2 + ${b / a}x) + ${c} = 0`, annotation: 'factor out leading coefficient' });
+    const h = -b / (2 * a);
+    const k = c - b * b / (4 * a);
+    steps.push({ operation: 'complete_square', from: `${a}(x^2 + ${b / a}x) + ${c} = 0`, to: `${a}(x - ${h})^2 + ${k} = 0`, annotation: 'complete the square' });
+    const roots: number[] = [];
+    if (k / a <= 0) {
+      const sqrtVal = Math.sqrt(-k / a);
+      roots.push(h + sqrtVal, h - sqrtVal);
+      steps.push({ operation: 'solve', from: `${a}(x - ${h})^2 = ${-k}`, to: `x = ${h} ± ${sqrtVal}`, annotation: 'solve for x' });
+    }
+    this._history.push({ op: 'solveByCompletingTheSquare', vertex: { x: h, y: k }, roots });
+    return { vertex: { x: h, y: k }, roots, steps };
+  }
+
+  vertexForm(a: number, b: number, c: number): { form: string; vertex: { x: number; y: number }; direction: string } {
+    const h = -b / (2 * a);
+    const k = c - b * b / (4 * a);
+    const direction = a > 0 ? 'up' : 'down';
+    const form = `f(x) = ${a}(x - ${h})^2 + ${k}`;
+    this._history.push({ op: 'vertexForm', form, vertex: { x: h, y: k } });
+    return { form, vertex: { x: h, y: k }, direction };
+  }
+
+  discriminantAnalysis(a: number, b: number, c: number): {
+    discriminant: number;
+    nature: 'two_real' | 'one_real' | 'two_complex';
+    rational: boolean;
+  } {
+    const disc = b * b - 4 * a * c;
+    let nature: 'two_real' | 'one_real' | 'two_complex';
+    if (Math.abs(disc) < 1e-12) {
+      nature = 'one_real';
+    } else if (disc > 0) {
+      nature = 'two_real';
+    } else {
+      nature = 'two_complex';
+    }
+    const rational = disc >= 0 && Math.abs(Math.sqrt(disc) - Math.round(Math.sqrt(disc))) < 1e-12;
+    return { discriminant: disc, nature, rational };
+  }
+
+  solveSystemOfThree(
+    eq1: { a: number; b: number; c: number; d: number },
+    eq2: { a: number; b: number; c: number; d: number },
+    eq3: { a: number; b: number; c: number; d: number },
+  ): SystemResult {
+    const matrix = [
+      [eq1.a, eq1.b, eq1.c],
+      [eq2.a, eq2.b, eq2.c],
+      [eq3.a, eq3.b, eq3.c],
+    ];
+    const constants = [eq1.d, eq2.d, eq3.d];
+    const sol = this.gaussianElimination(matrix.map((row, i) => [...row, constants[i]]));
+    const result: SystemResult = {
+      solution: sol,
+      method: 'gaussian_elimination_3x3',
+      consistent: sol.every(v => Number.isFinite(v)),
+      independent: true,
+    };
+    this._systemResults.push(result);
+    this._history.push({ op: 'solveSystemOfThree', result });
+    return result;
+  }
+
+  uniformMotionProblem(
+    object1: { speed: number; direction: string },
+    object2: { speed: number; direction: string },
+    distance: number,
+  ): { meetingTime: number; meetingPoint: number; relativeSpeed: number } {
+    const relativeSpeed = object1.direction === object2.direction
+      ? Math.abs(object1.speed - object2.speed)
+      : object1.speed + object2.speed;
+    const meetingTime = distance / relativeSpeed;
+    const meetingPoint = object1.speed * meetingTime;
+    this._history.push({ op: 'uniformMotionProblem', meetingTime, meetingPoint });
+    return { meetingTime, meetingPoint, relativeSpeed };
+  }
+
+  investmentProblem(
+    principal: number,
+    rate: number,
+    years: number,
+    compounding: 'simple' | 'annually' | 'quarterly' | 'monthly' | 'continuously',
+  ): { finalAmount: number; interest: number; totalReturn: number } {
+    let finalAmount = 0;
+    switch (compounding) {
+      case 'simple':
+        finalAmount = principal * (1 + rate * years);
+        break;
+      case 'annually':
+        finalAmount = principal * Math.pow(1 + rate, years);
+        break;
+      case 'quarterly':
+        finalAmount = principal * Math.pow(1 + rate / 4, 4 * years);
+        break;
+      case 'monthly':
+        finalAmount = principal * Math.pow(1 + rate / 12, 12 * years);
+        break;
+      case 'continuously':
+        finalAmount = principal * Math.exp(rate * years);
+        break;
+    }
+    const interest = finalAmount - principal;
+    const totalReturn = principal > 0 ? interest / principal : 0;
+    this._history.push({ op: 'investmentProblem', finalAmount, interest });
+    return { finalAmount, interest, totalReturn };
+  }
+
+  percentChange(original: number, newValue: number): { change: number; percentChange: number; direction: 'increase' | 'decrease' } {
+    const change = newValue - original;
+    const percentChange = original !== 0 ? (change / original) * 100 : 0;
+    const direction = change >= 0 ? 'increase' : 'decrease';
+    return { change, percentChange, direction };
+  }
+
+  ratioProportion(
+    ratioA: number,
+    ratioB: number,
+    known: { side: 'a' | 'b'; value: number },
+  ): { a: number; b: number; proportion: string } {
+    let a: number, b: number;
+    if (known.side === 'a') {
+      a = known.value;
+      b = (known.value * ratioB) / ratioA;
+    } else {
+      b = known.value;
+      a = (known.value * ratioA) / ratioB;
+    }
+    return { a, b, proportion: `${ratioA}:${ratioB} = ${a}:${b}` };
+  }
+
+  solveLinearLiteralEquation(equation: string, solveFor: string): string {
+    return `Solving ${equation} for ${solveFor}: rearrange terms to isolate ${solveFor}`;
+  }
+
+  numberProblem(sum: number, difference: number): { first: number; second: number; sum: number; difference: number } {
+    const first = (sum + difference) / 2;
+    const second = (sum - difference) / 2;
+    this._history.push({ op: 'numberProblem', first, second });
+    return { first, second, sum, difference };
+  }
+
+  consecutiveIntegerProblem(sum: number, count: number, type: 'integer' | 'even' | 'odd'): { numbers: number[]; sum: number } {
+    const numbers: number[] = [];
+    const step = type === 'integer' ? 1 : 2;
+    const first = type === 'integer'
+      ? (sum - step * count * (count - 1) / 2) / count
+      : (sum - step * count * (count - 1) / 2) / count;
+    for (let i = 0; i < count; i++) {
+      numbers.push(first + i * step);
+    }
+    this._history.push({ op: 'consecutiveIntegerProblem', numbers });
+    return { numbers, sum };
   }
 
   private _determinant(m: number[][]): number {
@@ -354,6 +872,8 @@ export class EquationSolver {
     solutions: Solution[];
     inequalities: Inequality[];
     history: unknown[];
+    wordProblems: WordProblem[];
+    systemResults: SystemResult[];
   }> {
     const metadata: PacketMeta = {
       createdAt: Date.now(),
@@ -368,6 +888,8 @@ export class EquationSolver {
         solutions: this._solutions,
         inequalities: this._inequalities,
         history: this._history,
+        wordProblems: this._wordProblems,
+        systemResults: this._systemResults,
       },
       metadata,
     };
@@ -379,6 +901,8 @@ export class EquationSolver {
     this._inequalities = [];
     this._history = [];
     this._counter = 0;
+    this._wordProblems = [];
+    this._systemResults = [];
   }
 
   get equationCount(): number {
@@ -391,5 +915,13 @@ export class EquationSolver {
 
   get inequalityCount(): number {
     return this._inequalities.length;
+  }
+
+  get wordProblemCount(): number {
+    return this._wordProblems.length;
+  }
+
+  get systemResultCount(): number {
+    return this._systemResults.length;
   }
 }
