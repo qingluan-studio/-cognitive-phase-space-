@@ -434,7 +434,7 @@ export class QuantumGate {
     return this._measurementLog.map(m => ({ ...m }));
   }
 
-  public decomposeTo CliffordT(gate: Gate): DecompositionRecord {
+  public decomposeToCliffordT(gate: Gate): DecompositionRecord {
     const decomposed: Gate[] = [];
     if (gate.type === 'T' || gate.type === 'H' || gate.type === 'S' || gate.type === 'CNOT') {
       decomposed.push(gate);

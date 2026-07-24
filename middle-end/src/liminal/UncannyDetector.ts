@@ -194,7 +194,7 @@ export class UncannyDetector {
   }
 
   private _semanticDensity(content: string): number {
-    const words = content.match(/\b\w+\b/g) ?? [];
+    const words: string[] = content.match(/\b\w+\b/g) ?? [];
     if (words.length === 0) return 0;
     const syllableEstimate = words.reduce((sum, w) => sum + Math.max(1, w.match(/[aeiouy]/gi)?.length ?? 1), 0);
     const avgSyllables = syllableEstimate / words.length;

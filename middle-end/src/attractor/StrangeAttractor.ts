@@ -6,7 +6,7 @@ export interface StrangeAttractorData {
   dt: number;
 }
 
-export interface TrajectoryPoint {
+export interface AttractorTrajectoryPoint {
   x: number;
   y: number;
   z: number;
@@ -15,7 +15,7 @@ export interface TrajectoryPoint {
 
 export class StrangeAttractor {
   private _data: StrangeAttractorData;
-  private _trajectory: TrajectoryPoint[] = [];
+  private _trajectory: AttractorTrajectoryPoint[] = [];
   private _position: { x: number; y: number; z: number };
   private _step: number = 0;
   private _lyapunovEstimate: number = 0;
@@ -44,7 +44,7 @@ export class StrangeAttractor {
     return this._kaplanYorkeDimension;
   }
 
-  public evolve(): TrajectoryPoint {
+  public evolve(): AttractorTrajectoryPoint {
     const { x, y, z } = this._position;
     const dx = this._data.sigma * (y - x);
     const dy = x * (this._data.rho - z) - y;
@@ -53,7 +53,7 @@ export class StrangeAttractor {
     this._position.y += dy * this._data.dt;
     this._position.z += dz * this._data.dt;
     this._step++;
-    const point: TrajectoryPoint = {
+    const point: AttractorTrajectoryPoint = {
       x: this._position.x,
       y: this._position.y,
       z: this._position.z,
@@ -98,14 +98,14 @@ export class StrangeAttractor {
     this._kaplanYorkeDimension = dim;
   }
 
-  private _computeLocalExponents(points: TrajectoryPoint[]): number[] {
+  private _computeLocalExponents(points: AttractorTrajectoryPoint[]): number[] {
     const dxx = this._averageDifference(points, 'x');
     const dyy = this._averageDifference(points, 'y');
     const dzz = this._averageDifference(points, 'z');
     return [Math.log(dxx + 1e-9), Math.log(dyy + 1e-9), Math.log(dzz + 1e-9)];
   }
 
-  private _averageDifference(points: TrajectoryPoint[], axis: 'x' | 'y' | 'z'): number {
+  private _averageDifference(points: AttractorTrajectoryPoint[], axis: 'x' | 'y' | 'z'): number {
     let sum = 0;
     for (let i = 1; i < points.length; i++) {
       sum += Math.abs(points[i][axis] - points[i - 1][axis]);
@@ -113,8 +113,8 @@ export class StrangeAttractor {
     return sum / (points.length - 1);
   }
 
-  public runSteps(count: number): TrajectoryPoint[] {
-    const points: TrajectoryPoint[] = [];
+  public runSteps(count: number): AttractorTrajectoryPoint[] {
+    const points: AttractorTrajectoryPoint[] = [];
     for (let i = 0; i < count; i++) {
       points.push(this.evolve());
     }

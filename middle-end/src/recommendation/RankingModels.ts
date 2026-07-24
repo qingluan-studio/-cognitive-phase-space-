@@ -408,7 +408,7 @@ export class RankingModels {
   }
 
   learningCurve(trainSizes: number[], trainScores: number[], valScores: number[]): { converged: boolean; optimalSize: number; gap: number } {
-    const gaps = trainSizes.map((_, i) => Math.abs(trainScores[i] - valScores[i])));
+    const gaps = trainSizes.map((_, i) => Math.abs(trainScores[i] - valScores[i]));
     const minGapIdx = gaps.indexOf(Math.min(...gaps));
     const converged = gaps[minGapIdx] < 0.05;
     this._history.push({ op: 'learningCurve', converged });

@@ -346,7 +346,8 @@ export class BehavioralPsychology {
   }
 
   exposureTherapy(hierarchy: ExposureHierarchy[], sessions: number): { progress: number; habituationCurve: number[]; endSubjectiveUnits: number; masteredItems: number } {
-    const habituationCurve = Array.from({ length: sessions }, (_, i) => Number((hierarchy[0]?.subjectiveUnits ?? 50) * Math.exp(-i * 0.2)).toFixed(2))).map(Number);
+    const habituationCurve = Array.from({ length: sessions }, (_, i) => Number(((hierarchy[0]?.subjectiveUnits ?? 50) * Math.exp(-i * 0.2)).toFixed(2)));
+
     const masteredItems = Math.floor(hierarchy.length * Math.min(1, sessions * 0.1));
     const progress = Number((masteredItems / hierarchy.length).toFixed(2));
     this._history.push({ op: 'exposureTherapy', sessions, masteredItems });

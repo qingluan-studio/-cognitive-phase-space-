@@ -329,7 +329,7 @@ export class QuantumEntanglement {
     return { satisfied, residual, inequality: cAB * cAB };
   }
 
-  public entanglement-assistedCommunication(pair: EntangledPair, bits: number): { superdenseBits: number; teleportationFidelity: number } {
+  public entanglementAssistedCommunication(pair: EntangledPair, bits: number): { superdenseBits: number; teleportationFidelity: number } {
     const superdenseBits = 2;
     const teleportationFidelity = pair.fidelity;
     this._recordHistory(`entanglementAssistedCommunication(bits=${bits}) -> fidelity=${teleportationFidelity.toFixed(4)}`);

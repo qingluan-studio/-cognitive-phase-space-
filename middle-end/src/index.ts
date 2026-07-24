@@ -210,6 +210,21 @@ export * from './genesis/SpontaneousGeneration';
 export * from './genesis/PalingenesisCore';
 
 // ============================================================================
+// CEE engine modules（认知涌现引擎 T1-T6）
+// ============================================================================
+export * from './cee/engine';
+
+// ============================================================================
+// CEE app local_llm modules（梦境学习与背景学习）
+// ============================================================================
+export * from './cee/app/local_llm';
+
+// ============================================================================
+// Fusion engine video_fusion modules（视频融合、水逻辑、T6 视频评估）
+// ============================================================================
+export * from './fusion_engine/video_fusion';
+
+// ============================================================================
 // Ouroboros modules（衔尾蛇模块）
 // ============================================================================
 export * from './ouroboros/OuroborosLogger';
@@ -217,6 +232,8 @@ export * from './ouroboros/ScarDebugger';
 export * from './ouroboros/AmnesiaStack';
 export * from './ouroboros/EschatonLogger';
 export * from './ouroboros/TattooRecorder';
+export * from './ouroboros/OuroborosLoop';
+export * from './ouroboros/SymbolicCanvasEngine';
 
 // ============================================================================
 // Somnium modules（梦境模块）

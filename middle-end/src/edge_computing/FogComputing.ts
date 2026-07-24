@@ -456,7 +456,7 @@ export class FogComputing {
     return { organizations: organizations.length, sharedServices: sharedServices.length, trustFramework, federated, crossOrgLatency, revenueShare };
   }
 
-  pubic edgeAIModelServing(models: string[], nodeId: string, batchSize: number, maxLatencyMs: number): { models: number; nodeId: string; batchSize: number; maxLatencyMs: number; throughput: number; gpuUtilization: number; queueDepth: number } {
+  public edgeAIModelServing(models: string[], nodeId: string, batchSize: number, maxLatencyMs: number): { models: number; nodeId: string; batchSize: number; maxLatencyMs: number; throughput: number; gpuUtilization: number; queueDepth: number } {
     const throughput = models.length * 1000 / maxLatencyMs;
     const gpuUtilization = Math.random() * 0.8 + 0.1;
     const queueDepth = Math.floor(Math.random() * 50);
