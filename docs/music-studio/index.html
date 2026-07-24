@@ -898,21 +898,33 @@
 <script src="browserSynth.js?v=2"></script>
 
 <script>
-// 青鸾音乐生成指令拦截器
+// 青鸾音乐生成指令拦截器 - Web Worker 版
 (function() {
   let isGenerating = false;
+  let worker = null;
+  let lastBlob = null;
 
-  function addSystemMessage(text) {
+  function getWorker() {
+    if (!worker) {
+      worker = new Worker('synth.worker.js?v=2');
+    }
+    return worker;
+  }
+
+  function addSystemMessage(text, html) {
     const list = document.getElementById('chatList');
+    if (!list) return;
     const div = document.createElement('div');
     div.className = 'msg system';
-    div.innerHTML = '<div class="bubble">' + text + '</div>';
+    div.innerHTML = '<div class="bubble">' + (html || text) + '</div>';
     list.appendChild(div);
     list.scrollTop = list.scrollHeight;
+    return div;
   }
 
   function addUserMessage(text) {
     const list = document.getElementById('chatList');
+    if (!list) return;
     const div = document.createElement('div');
     div.className = 'msg user';
     div.innerHTML = '<div class="bubble">' + text + '</div>';
@@ -929,45 +941,60 @@
   async function generateAndPlay() {
     if (isGenerating) { addSystemMessage('正在生成中，请稍候...'); return; }
     isGenerating = true;
-    addSystemMessage('开始生成《梦境·青鸾3.0涌现版》...');
+    addSystemMessage('开始生成《梦境·青鸾3.0涌现版》...<br><small>Web Worker 后台计算中，UI不会卡顿</small>');
+
+    const w = getWorker();
+    let progressDiv = null;
 
     try {
       const result = await new Promise((resolve, reject) => {
-        setTimeout(() => {
-          try {
-            const r = QingLuanSynth.render((msg) => {
-              showProgress(msg);
-            });
-            resolve(r);
-          } catch (e) { reject(e); }
-        }, 100);
+        const onMsg = function(e) {
+          const d = e.data;
+          if (d.type === 'progress') {
+            showProgress(d.msg);
+          } else if (d.type === 'done') {
+            w.removeEventListener('message', onMsg);
+            resolve(d);
+          } else if (d.type === 'blob') {
+            lastBlob = d.blob;
+          } else if (d.type === 'error') {
+            w.removeEventListener('message', onMsg);
+            reject(new Error(d.msg));
+          }
+        };
+        w.addEventListener('message', onMsg);
+        w.postMessage('start');
       });
 
-      addSystemMessage('生成完成！涌现了 ' + result.noteCount + ' 个音符。');
+      addSystemMessage('生成完成！涌现了 ' + result.noteCount + ' 个音符。<br><small>采样率: ' + result.sampleRate + 'Hz | 时长: ' + result.duration + '秒</small>');
 
       // 创建播放和下载按钮
       const list = document.getElementById('chatList');
       const div = document.createElement('div');
       div.className = 'msg system';
       div.innerHTML = '<div class="bubble">' +
-        '<button onclick="window._playLast()" style="margin-right:8px;padding:6px 12px;border:none;border-radius:6px;background:#4a90d9;color:#fff;cursor:pointer;">播放</button>' +
-        '<button onclick="window._downloadLast()" style="padding:6px 12px;border:none;border-radius:6px;background:#5a9e6f;color:#fff;cursor:pointer;">下载 WAV</button>' +
+        '<button id="btn-play" style="margin-right:8px;padding:8px 14px;border:none;border-radius:8px;background:linear-gradient(90deg,#4a90d9,#3b7ac7);color:#fff;cursor:pointer;font-size:14px;">▶ 播放</button>' +
+        '<button id="btn-dl" style="padding:8px 14px;border:none;border-radius:8px;background:linear-gradient(90deg,#5a9e6f,#4a8e5f);color:#fff;cursor:pointer;font-size:14px;">⬇ 下载 WAV</button>' +
         '</div>';
       list.appendChild(div);
       list.scrollTop = list.scrollHeight;
 
-      window._lastResult = result;
-      window._playLast = function() {
-        QingLuanSynth.play(result.mL, result.mR);
+      document.getElementById('btn-play').onclick = function() {
+        if (!lastBlob) return;
+        const url = URL.createObjectURL(lastBlob);
+        const audio = new Audio(url);
+        audio.play();
         addSystemMessage('正在播放...');
+        audio.onended = function() { URL.revokeObjectURL(url); };
       };
-      window._downloadLast = function() {
-        const url = URL.createObjectURL(result.blob);
+      document.getElementById('btn-dl').onclick = function() {
+        if (!lastBlob) return;
+        const url = URL.createObjectURL(lastBlob);
         const a = document.createElement('a');
         a.href = url;
         a.download = 'qingluan_dream_' + Date.now() + '.wav';
         a.click();
-        URL.revokeObjectURL(url);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
         addSystemMessage('下载已开始');
       };
 
@@ -1017,7 +1044,7 @@
     bar.insertBefore(btn, bar.firstChild);
   }
 
-  console.log('[QingLuan] 浏览器合成引擎已加载');
+  console.log('[QingLuan] Web Worker 合成引擎已加载');
 })();
 </script>
 
