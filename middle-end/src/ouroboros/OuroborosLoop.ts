@@ -30,6 +30,7 @@ import {
   WaterLogicVeto,
   T6VideoAssessor,
 } from '../fusion_engine/video_fusion';
+import { HarmoniaLiteEngine, type HarmoniaScale } from '../multimodel/HarmoniaEngine';
 
 function _genId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -45,6 +46,8 @@ export interface OuroborosConfig {
   seedPrompt: string;             // 初始提示词
   videoDuration: number;          // 每段视频时长（秒）
   fps: number;                    // 帧率
+  enableHarmonia: boolean;        // 是否启用合鸣模型增强
+  harmoniaScale?: HarmoniaScale;  // 合鸣模型规模
   // 可注入的认知引擎（默认内部实例化）
   t1Engine?: CognitiveIsomorphismEngine;
   t2Engine?: HyperGraphCollapseEngine;
@@ -56,6 +59,7 @@ export interface OuroborosConfig {
   videoAssessor?: T6VideoAssessor;
   dreamConsolidator?: DreamConsolidator;
   learningDaemon?: BackgroundLearningDaemon;
+  harmoniaEngine?: HarmoniaLiteEngine;
 }
 
 export interface OuroborosIteration {
@@ -97,6 +101,7 @@ export class OuroborosLoop {
   private _assessor: T6VideoAssessor;
   private _dream: DreamConsolidator;
   private _daemon: BackgroundLearningDaemon;
+  private _harmonia: HarmoniaLiteEngine | null;
 
   constructor(config: Partial<OuroborosConfig> = {}) {
     this._config = {
@@ -109,6 +114,8 @@ export class OuroborosLoop {
       seedPrompt: 'a calm river flowing through a forest at dawn',
       videoDuration: 3.0,
       fps: 30,
+      enableHarmonia: false,
+      harmoniaScale: 'medium',
       ...config,
     };
 
@@ -122,6 +129,9 @@ export class OuroborosLoop {
     this._assessor = this._config.videoAssessor ?? new T6VideoAssessor();
     this._dream = this._config.dreamConsolidator ?? new DreamConsolidator();
     this._daemon = this._config.learningDaemon ?? new BackgroundLearningDaemon(this._dream);
+    this._harmonia = this._config.enableHarmonia
+      ? (this._config.harmoniaEngine ?? new HarmoniaLiteEngine({ scale: this._config.harmoniaScale }))
+      : null;
   }
 
   get config(): OuroborosConfig {
@@ -289,6 +299,12 @@ export class OuroborosLoop {
       `[T5-conditions] ${topConditions.join(', ')}`,
       `[T4-emergent] ${emergent.join('; ')}`,
     ];
+
+    if (this._harmonia) {
+      const harmoniaResponse = this._harmonia.generate(prompt, { maxNewTokens: 80 });
+      parts.push(`[harmonia] ${harmoniaResponse}`);
+    }
+
     return parts.join(' | ');
   }
 

@@ -686,3 +686,176 @@ class MiniMaxAdapter(BaseAdapter):
             "finish_reason": choice.get("finish_reason", ""),
             "raw": raw_response,
         }
+
+
+class HarmoniaAdapter(BaseAdapter):
+    """
+    Adapter for Harmonia (合鸣) local MoE model.
+    Zero-cost, runs entirely locally with numpy, no external API calls.
+    """
+
+    def __init__(
+        self,
+        ckpt_dir: Optional[str] = None,
+        scale: str = "medium",
+        timeout: float = 60.0,
+        max_retries: int = 1,
+        retry_delay: float = 0.0,
+    ) -> None:
+        super().__init__(
+            api_key="",
+            base_url="local://harmonia",
+            timeout=timeout,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+        )
+        self._ckpt_dir = ckpt_dir
+        self._scale = scale
+        self._engine: Optional[Any] = None
+
+    def _get_engine(self) -> Any:
+        if self._engine is None:
+            from fusion_engine.models.harmonia.harmonia13 import HarmoniaLiteEngine
+            self._engine = HarmoniaLiteEngine(
+                ckpt_dir=self._ckpt_dir,
+                scale=self._scale,
+            )
+        return self._engine
+
+    def _build_payload(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: Optional[int],
+        top_p: Optional[float],
+        stream: bool,
+        extra_params: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        last_user_msg = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                last_user_msg = msg.get("content", "")
+                break
+        return {
+            "prompt": last_user_msg,
+            "temperature": temperature,
+            "max_new_tokens": max_tokens or 128,
+            "top_p": top_p or 0.9,
+            "extra_params": extra_params or {},
+        }
+
+    def send_request(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        engine = self._get_engine()
+        payload = self._build_payload(model, messages, temperature, max_tokens, top_p, False, extra_params)
+
+        for attempt in range(self.max_retries):
+            try:
+                content = engine.generate(
+                    prompt=payload["prompt"],
+                    max_new_tokens=payload["max_new_tokens"],
+                    temperature=payload["temperature"],
+                )
+                raw_response = {
+                    "id": f"harmonia-{int(time.time() * 1000)}",
+                    "model": "harmonia-13",
+                    "choices": [
+                        {
+                            "message": {"role": "assistant", "content": content},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": len(payload["prompt"]),
+                        "completion_tokens": len(content),
+                        "total_tokens": len(payload["prompt"]) + len(content),
+                    },
+                }
+                return self.parse_response(raw_response)
+            except Exception as exc:
+                if attempt == self.max_retries - 1:
+                    raise AdapterError(f"Harmonia error: {exc}") from exc
+                time.sleep(self.retry_delay)
+        return {}
+
+    def stream_request(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> Iterator[str]:
+        result = self.send_request(model, messages, temperature, max_tokens, top_p, extra_params)
+        content = result.get("content", "")
+        chunk_size = max(1, len(content) // 10)
+        for i in range(0, len(content), chunk_size):
+            chunk = content[i:i + chunk_size]
+            yield json.dumps({
+                "choices": [{"delta": {"content": chunk}}],
+            })
+        yield "[DONE]"
+
+    async def asend_request(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.send_request(model, messages, temperature, max_tokens, top_p, extra_params),
+        )
+
+    async def astream_request(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        top_p: Optional[float] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> AsyncIterator[str]:
+        result = await self.asend_request(model, messages, temperature, max_tokens, top_p, extra_params)
+        content = result.get("content", "")
+        chunk_size = max(1, len(content) // 10)
+        for i in range(0, len(content), chunk_size):
+            chunk = content[i:i + chunk_size]
+            yield json.dumps({
+                "choices": [{"delta": {"content": chunk}}],
+            })
+        yield "[DONE]"
+
+    def parse_response(self, raw_response: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize Harmonia response to common schema.
+        """
+        choice = raw_response.get("choices", [{}])[0]
+        message = choice.get("message", {})
+        usage = raw_response.get("usage", {})
+        return {
+            "id": raw_response.get("id", ""),
+            "model": raw_response.get("model", ""),
+            "content": message.get("content", ""),
+            "usage": {
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0),
+            },
+            "finish_reason": choice.get("finish_reason", ""),
+            "raw": raw_response,
+        }

@@ -13,3 +13,8 @@ build/
 decisions.jsonl
 knowledge_legacy/
 .cee_storage/
+
+# 合鸣模型：只提交压缩检查点，排除未压缩文件
+fusion_engine/models/harmonia/checkpoints/*.json
+!fusion_engine/models/harmonia/checkpoints/*_meta.json
+fusion_engine/models/harmonia/__pycache__/

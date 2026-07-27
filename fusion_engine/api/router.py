@@ -244,6 +244,28 @@ class DynamicRouter:
             supports_tools=False,
             tags=["general"],
         ),
+        ModelInfo(
+            id="harmonia-13",
+            provider="harmonia",
+            task_scores={
+                TaskType.CHAT: 0.75,
+                TaskType.CODING: 0.65,
+                TaskType.REASONING: 0.60,
+                TaskType.CREATIVE: 0.80,
+                TaskType.SUMMARIZATION: 0.70,
+                TaskType.TRANSLATION: 0.60,
+                TaskType.CLASSIFICATION: 0.65,
+                TaskType.EXTRACTION: 0.65,
+                TaskType.AGENT: 0.55,
+            },
+            cost_per_1k_input=0.0,
+            cost_per_1k_output=0.0,
+            avg_latency_ms=150,
+            context_length=4096,
+            supports_streaming=True,
+            supports_tools=False,
+            tags=["free", "local", "fast", "moe"],
+        ),
     ]
 
     def __init__(
